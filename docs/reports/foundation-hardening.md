@@ -1,7 +1,7 @@
 # Foundation hardening report: integration-ready build
 
 Date: 2026-10-20
-Commits: recorded after the hardening commit
+Commit: `c7e9b87` (`build: make foundation integration-ready`)
 Machine: Intel Core i5-6400, 16 GB RAM, Intel HD Graphics 530, Windows 10 Pro
 10.0.19045, MSVC 19.44.35225.0, CMake 3.31.6, Ninja.
 
@@ -92,13 +92,21 @@ Layer check passed: 16 modules.
 
 ## CI evidence
 
-Pending the hardening push. The workflow now runs:
+Run [39405057737](https://github.com/TheCyberKiddd/CyberGraphics/actions/runs/39405057737)\non `c7e9b87` passed all jobs:
 
-- structure and dependency law;
-- formatting with `clang-format`;
-- Windows MSVC build, test, install, package consumer, and source consumer;
-- Linux clang + UBSan build/test, a non-sanitized release package build,
-  install, package consumer, and source consumer.
+| Job | Result | Time |
+|---|---|---|
+| Structure and dependency law | Passed | 5 s |
+| Formatting | Passed | 22 s |
+| Windows MSVC | Passed | 34 s |
+| Linux clang + UBSan | Passed | 28 s |
+
+The Windows job built and tested the project, installed the package, built and
+ran the installed-package consumer, then built and ran the source consumer. The
+Linux job did the same after a separate non-sanitized Release package build, so
+UBSan instrumentation did not leak into the installed library. The formatting
+job used the Ubuntu `clang-format` package (18.x) while local formatting used
+19.1.5; both accepted the tree.
 
 ## Known gaps
 
