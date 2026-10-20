@@ -14,27 +14,14 @@ constexpr u64 kPrime3 = 1609587929392839161ULL;
 constexpr u64 kPrime4 = 9650029242287828579ULL;
 constexpr u64 kPrime5 = 2870177450012600261ULL;
 
-constexpr u32 ByteSwap32(u32 value) noexcept
-{
-    return ((value & 0x000000FFu) << 24) | ((value & 0x0000FF00u) << 8) |
-           ((value & 0x00FF0000u) >> 8) | ((value & 0xFF000000u) >> 24);
-}
-
-constexpr u64 ByteSwap64(u64 value) noexcept
-{
-    return ((value & 0x00000000000000FFull) << 56) | ((value & 0x000000000000FF00ull) << 40) |
-           ((value & 0x0000000000FF0000ull) << 24) | ((value & 0x00000000FF000000ull) << 8) |
-           ((value & 0x000000FF00000000ull) >> 8) | ((value & 0x0000FF0000000000ull) >> 24) |
-           ((value & 0x00FF000000000000ull) >> 40) | ((value & 0xFF00000000000000ull) >> 56);
-}
-
 u32 Load32LE(const u8* data) noexcept
 {
     u32 value = 0;
     std::memcpy(&value, data, sizeof(value));
     if constexpr (std::endian::native == std::endian::big)
     {
-        value = ByteSwap32(value);
+        value = ((value & 0x000000FFu) << 24) | ((value & 0x0000FF00u) << 8) |
+                ((value & 0x00FF0000u) >> 8) | ((value & 0xFF000000u) >> 24);
     }
     return value;
 }
@@ -45,7 +32,10 @@ u64 Load64LE(const u8* data) noexcept
     std::memcpy(&value, data, sizeof(value));
     if constexpr (std::endian::native == std::endian::big)
     {
-        value = ByteSwap64(value);
+        value = ((value & 0x00000000000000FFull) << 56) | ((value & 0x000000000000FF00ull) << 40) |
+                ((value & 0x0000000000FF0000ull) << 24) | ((value & 0x00000000FF000000ull) << 8) |
+                ((value & 0x000000FF00000000ull) >> 8) | ((value & 0x0000FF0000000000ull) >> 24) |
+                ((value & 0x00FF000000000000ull) >> 40) | ((value & 0xFF00000000000000ull) >> 56);
     }
     return value;
 }
