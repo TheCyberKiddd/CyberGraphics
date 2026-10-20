@@ -1,7 +1,7 @@
 # Phase 1 report: repository and build foundation
 
 Date: 2026-10-20
-Commits: none yet; the working tree is uncommitted.
+Commits: `07c560f` — `chore: scaffold repository and Phase 1 foundation`
 Machine: Intel Core i5-6400, 16 GB RAM, Intel HD Graphics 530 (driver
 31.0.101.2125), Windows 10 Pro 10.0.19045, MSVC 19.44.35225.0, CMake 3.31.6,
 Ninja.
@@ -75,25 +75,38 @@ CMake nor Ninja is on the system `PATH`.
 
 ### CI
 
-The workflow defines three jobs: structure checks, Windows MSVC build/test, and
-Ubuntu 24.04 clang + UBSan build/test. The workflow has not run remotely because
-the repository has not been created or pushed.
+The repository is published at
+`https://github.com/TheCyberKiddd/CyberGraphics` (private). The workflow ran on
+the initial push and all three jobs passed:
+
+| Job | Runner | Result |
+|---|---|---|
+| Structure and dependency law | `ubuntu-24.04` | Passed |
+| Windows MSVC | `windows-2022` | Passed |
+| Linux clang + UBSan | `ubuntu-24.04` | Passed |
+
+Run: `39402715117`, conclusion `success`, 32 seconds.
+
+```powershell
+gh run list --limit 5
+gh run view 39402715117 --json status,conclusion,jobs
+```
 
 ## Known gaps
 
-1. **Remote CI is not green yet.** This is the remaining Phase 1 gate. The
-   repository is not initialized, and no remote exists.
-2. **Linux build is unverified locally.** WSL Ubuntu is installed but has no
-   CMake, clang, or Ninja, and no packages were installed without permission.
-3. **No git history.** No commit has been made, so the report cannot name a
-   commit range. The working tree is the evidence.
-4. **No clean-machine test.** The build has only run on the development machine.
-5. **`clang-format` is not installed locally.** `format.ps1` is written but has
+1. **Linux is not verified locally.** WSL Ubuntu is installed but has no CMake,
+   clang, or Ninja. The Linux CI job is green, which is the required evidence.
+2. **No clean-machine test on a second physical machine.** CI is the closest
+   substitute; a fresh Windows VM run is still worth doing before Phase 2.
+3. **`clang-format` is not installed locally.** `format.ps1` is written but has
    not been exercised. The VS 2022 installation lacks the LLVM component.
-6. **The stable ABI is a reserved directory, not a header.** This is intentional
+4. **The stable ABI is a reserved directory, not a header.** This is intentional
    until Phase 25.
-7. **Planned modules have no targets.** Also intentional; the structure check
+5. **Planned modules have no targets.** Also intentional; the structure check
    enforces it.
+6. **The repository identity is repo-local.** `user.email` is set to
+   `thecyberkiddd@gmail.com` for this repository. The global Git value remains
+   `thecyberkiddd@gmail.com@gmail.com` and was not modified.
 
 ## Sources used
 
@@ -114,12 +127,10 @@ the repository has not been created or pushed.
 
 ## Review decision requested
 
-Phase 1 is locally complete except for remote CI. Before Phase 2 starts, the
-owner should confirm:
+Phase 1 is complete: local builds pass in every preset, structure and dependency
+checks pass, and remote CI is green. Before Phase 2 starts, the owner should
+confirm:
 
-1. Initialize the git repository and push it to a private remote so CI can run.
-2. Confirm the git author email. The current global value is
-   `thecyberkiddd@gmail.com@gmail.com`; the intended value is
-   `thecyberkiddd@gmail.com`. The malformed value must not be used in commits.
-3. Confirm VS 2022 as the pinned local toolchain, matching `windows-2022` CI.
-4. Confirm that Phase 2 starts with `cyber_core` primitives and the test runner.
+1. VS 2022 is the pinned local toolchain, matching `windows-2022` CI.
+2. Phase 2 starts with `cyber_core` primitives and the project test runner.
+3. The repository stays private and standalone until the submodule decision.
