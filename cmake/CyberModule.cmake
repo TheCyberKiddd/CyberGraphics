@@ -119,6 +119,12 @@ function(cyber_add_test)
         cyber_link_dependency(${target} PRIVATE ${dep})
     endforeach()
 
+    # The project runner supplies main() and the test registry. A test target
+    # that needs a custom main can skip this by not using cyber_add_test.
+    if(TARGET cyber_test)
+        target_link_libraries(${target} PRIVATE cyber_test)
+    endif()
+
     set_target_properties(${target} PROPERTIES
         CXX_STANDARD 20
         CXX_STANDARD_REQUIRED YES

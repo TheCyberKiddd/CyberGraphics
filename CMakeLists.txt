@@ -37,6 +37,8 @@ configure_file(
 
 if(CYBER_BUILD_TESTS)
     enable_testing()
+    # The project test runner must exist before any module registers tests.
+    add_subdirectory(tools/test)
 endif()
 
 # The stable product contract. Both renderer plugins implement this interface;
