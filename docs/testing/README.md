@@ -17,9 +17,12 @@ the evidence is recorded in a phase report.
 ## Unit tests
 
 - Live with the module that owns the code.
-- Use the project test runner from `tools/test/` (Phase 2).
-- Support filtering, listing, a seed, repeat count, and a non-zero exit code on
-  failure.
+- Use the project test runner from `tools/test/`.
+- Register tests with `CG_TEST(name)` and assert with `CG_EXPECT_*`,
+  `CG_REQUIRE`, and `CG_FAIL`.
+- Run a test executable directly for `--list`, `--filter`, `--repeat`, `--seed`,
+  `--shuffle`, and `--format console|tap|junit`. CTest runs the default console
+  path and treats a non-zero exit code as a failure.
 - Every public function has a test. A bug fix gets a regression test.
 
 ## Golden images
