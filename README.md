@@ -16,8 +16,8 @@ reference module used to prove the build.
 - Build system: CMake 3.28+, C++20, Debug/Release/Shipping presets.
 - Modules: 16 defined, 1 scaffolded (`cyber_core`), 15 planned.
 - CI: Windows MSVC and Linux clang jobs, plus structure and dependency checks.
-- Phase 1: local builds and tests pass in every preset; remote CI is pending
-  the first push.
+- Phase 1: complete. Local builds and tests pass in every preset, structure and
+  dependency checks pass, and the Windows + Linux CI jobs are green.
 - Next: owner review of the Phase 1 report, then Phase 2 (`cyber_core`
   primitives and the test runner).
 
