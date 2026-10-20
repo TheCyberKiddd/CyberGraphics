@@ -1,35 +1,19 @@
 #include <cyber/core/version.h>
+#include <cyber/test/test.h>
 
-#include <cstring>
-
-int main()
+CG_TEST(version_number)
 {
-    using namespace cyber::core;
+    const cyber::core::Version version = cyber::core::VersionNumber();
+    CG_EXPECT_EQ(version.major, cyber::core::kVersionMajor);
+    CG_EXPECT_EQ(version.minor, cyber::core::kVersionMinor);
+    CG_EXPECT_EQ(version.patch, cyber::core::kVersionPatch);
+}
 
-    const Version version = VersionNumber();
-    if (version.major != kVersionMajor)
-    {
-        return 1;
-    }
-    if (version.minor != kVersionMinor)
-    {
-        return 2;
-    }
-    if (version.patch != kVersionPatch)
-    {
-        return 3;
-    }
-
-    const char* text = VersionString();
-    if (text == nullptr)
-    {
-        return 4;
-    }
-
-    if (std::strcmp(text, kVersionString) != 0)
-    {
-        return 5;
-    }
-
-    return 0;
+CG_TEST(version_string)
+{
+    const char* text = cyber::core::VersionString();
+    CG_REQUIRE(text != nullptr);
+    CG_EXPECT_STREQ(text, cyber::core::kVersionString);
+    CG_EXPECT_TRUE(cyber::core::kVersionString != nullptr);
+    CG_EXPECT_TRUE(cyber::core::kVersionString[0] != '\0');
 }

@@ -22,8 +22,15 @@ install(
 )
 
 install(
+    DIRECTORY engines/cyber_core/include/cyber/core
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cyber
+    FILES_MATCHING
+        PATTERN "*.h"
+        PATTERN "*.hpp"
+)
+
+install(
     FILES
-        engines/cyber_core/include/cyber/core/version.h
         ${CYBER_GENERATED_INCLUDE_DIR}/cyber/core/version_generated.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cyber/core
 )
