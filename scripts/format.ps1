@@ -11,10 +11,16 @@ $clangFormat = (Get-Command clang-format -ErrorAction SilentlyContinue).Source
 if (-not $clangFormat) {
     $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
     if (Test-Path $vswhere) {
-        $vsPath = & $vswhere -latest -products * -property installationPath
+        # Prefer VS 2022, matching the pinned toolchain and the CI image.
+        $vsPath = & $vswhere -latest -version '[17.0,18.0)' -products * `
+            -property installationPath
+        if (-not $vsPath) {
+            $vsPath = & $vswhere -latest -products * -property installationPath
+        }
         $candidates = @(
             (Join-Path $vsPath 'VC\Tools\Llvm\x64\bin\clang-format.exe'),
-            (Join-Path $vsPath 'VC\Tools\Llvm\bin\clang-format.exe')
+            (Join-Path $vsPath 'VC\Tools\Llvm\bin\clang-format.exe'),
+            (Join-Path $vsPath 'VC\Tools\Llvm\ARM64\bin\clang-format.exe')
         )
         foreach ($candidate in $candidates) {
             if (Test-Path $candidate) {
@@ -35,7 +41,7 @@ if (-not $clangFormat) {
 
 $files = Get-ChildItem -Path $root -Recurse -File |
     Where-Object {
-        $_.Extension -in '.h', '.hpp', '.cpp', '.cc', '.inl' -and
+        $_.Extension -in '.h', '.hpp', '.cpp', '.cc', '.cxx', '.inl' -and
         $_.FullName -notmatch '\\build\\' -and
         $_.FullName -notmatch '\\third_party\\'
     }

@@ -67,6 +67,49 @@ ctest --preset debug --output-on-failure
 
 Linux uses the `ci-linux` preset with clang and UBSan.
 
+## Using CyberGraphics from Cyber Engine
+
+CyberGraphics can be consumed as a source subdirectory or as an installed CMake
+package. Both modes expose the same targets:
+
+- `cyber::graphics_api` — the stable product contract.
+- `cyber::core` — core primitives.
+
+Source mode:
+
+```cmake
+set(CYBER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(CYBER_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
+set(CYBER_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory(third_party/CyberGraphics)
+
+target_link_libraries(cyber_engine_renderer PRIVATE
+    cyber::graphics_api
+    cyber::core
+)
+```
+
+Package mode:
+
+```powershell
+cmake --preset release
+cmake --build --preset release
+cmake --install build/release --prefix C:/SDK/CyberGraphics
+```
+
+```cmake
+find_package(CyberGraphics 0.1 CONFIG REQUIRED)
+target_link_libraries(cyber_engine_renderer PRIVATE
+    cyber::graphics_api
+    cyber::core
+)
+```
+
+The package consumer in `tests/integration/package_consumer` and the source
+consumer in `tests/integration/source_consumer` run in CI on Windows and Linux.
+The full embedding contract, build options, ABI rules, and integration
+checklist are in [docs/architecture/integration.md](docs/architecture/integration.md).
+
 ## Module law
 
 1. Dependencies point downward in `order`; never upward.
@@ -82,12 +125,14 @@ Run them locally with:
 ```powershell
 python scripts/check_structure.py
 python scripts/layer_check.py
+python scripts/check_format.py
 ```
 
 ## Documentation
 
 - [Requirements](docs/requirements.md)
 - [Architecture overview](docs/architecture/overview.md)
+- [Integration with Cyber Engine](docs/architecture/integration.md)
 - [Layer rules](docs/architecture/layers.md)
 - [Module contract](docs/architecture/module-contract.md)
 - [Math conventions](docs/math-conventions.md)

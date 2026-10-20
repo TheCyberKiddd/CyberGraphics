@@ -1,12 +1,11 @@
 #pragma once
 
+#include <cyber/core/version_generated.h>
+
 #include <cstdint>
 
-namespace cyber::core {
-
-inline constexpr std::uint32_t kVersionMajor = 0;
-inline constexpr std::uint32_t kVersionMinor = 1;
-inline constexpr std::uint32_t kVersionPatch = 0;
+namespace cyber::core
+{
 
 struct Version
 {
@@ -24,4 +23,4 @@ struct Version
 // for the lifetime of the program.
 [[nodiscard]] const char* VersionString() noexcept;
 
-} // namespace cyber::core
+}  // namespace cyber::core

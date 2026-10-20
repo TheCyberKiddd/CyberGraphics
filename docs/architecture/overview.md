@@ -101,6 +101,13 @@ No global mutable state. Contexts (`Device`, `Frame`, `Allocator`,
 - No game systems in this repository. Audio, physics, animation, networking,
   and gameplay belong to Cyber Engine's repository.
 
+## Embedding in Cyber Engine
+
+CyberGraphics can be consumed as a source subdirectory or as an installed CMake
+package. Both paths expose the same `cyber::` targets and the same stable C ABI.
+The build options, install layout, plugin lifecycle, and integration checklist
+are in [integration.md](integration.md).
+
 ## Where to go next
 
 - New to the project: read [module-contract.md](module-contract.md), then the

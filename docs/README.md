@@ -10,6 +10,7 @@ a phase actually works.
 |---|---|
 | [requirements.md](requirements.md) | Project-level functional and non-functional requirements. |
 | [architecture/overview.md](architecture/overview.md) | The module map, layers, and dependency law. |
+| [architecture/integration.md](architecture/integration.md) | How Cyber Engine consumes CyberGraphics as a submodule or package. |
 | [architecture/layers.md](architecture/layers.md) | The exact layer and order rules and how CI checks them. |
 | [architecture/module-contract.md](architecture/module-contract.md) | Template and checklist for every module. |
 | [architecture/threading.md](architecture/threading.md) | Thread ownership and frame model. |

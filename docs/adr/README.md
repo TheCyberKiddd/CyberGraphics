@@ -11,6 +11,7 @@ to it, and the consequences. Use one when a future reader would otherwise ask
 | [0000](0000-template.md) | Template | — |
 | [0001](0001-module-architecture.md) | Repository and module architecture | accepted |
 | [0002](0002-math-and-depth-conventions.md) | Math and depth conventions | accepted |
+| [0003](0003-integration-and-packaging.md) | Integration and packaging contract | accepted |
 
 Add new records as `NNNN-title.md`, starting at `0001`. Never delete an ADR;
 supersede it with a new one and update the old record's status.

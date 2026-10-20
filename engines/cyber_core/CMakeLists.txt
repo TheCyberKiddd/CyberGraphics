@@ -7,6 +7,10 @@ cyber_add_module(
         include/cyber/core/version.h
 )
 
+target_include_directories(cyber_core PUBLIC
+    $<BUILD_INTERFACE:${CYBER_GENERATED_INCLUDE_DIR}>
+)
+
 cyber_add_test(
     NAME core_version
     SOURCES

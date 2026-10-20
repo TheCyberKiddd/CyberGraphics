@@ -27,10 +27,12 @@
 
 - [ ] `python scripts/check_structure.py` passes.
 - [ ] `python scripts/layer_check.py` passes.
+- [ ] `python scripts/check_format.py` passes.
 - [ ] `cmake --build --preset debug` succeeds.
 - [ ] `ctest --preset debug --output-on-failure` passes.
 - [ ] New public headers have a module contract update.
 - [ ] A design note or ADR exists for architectural decisions.
+- [ ] Public target or header changes pass the installed package consumer.
 - [ ] `CHANGELOG.md` is updated for user-visible changes.
 
 ## Formatting
@@ -46,6 +48,22 @@ Run `.\scripts\format.ps1` before committing. The canonical style is in
 - `docs/notes/` — reading notes with sources.
 - `docs/reports/` — phase reports with evidence.
 - `docs/perf/` — measured performance results.
+
+## Repository settings
+
+The intended protection for `main` requires these checks:
+
+- `Structure and dependency law`
+- `Formatting`
+- `Windows MSVC`
+- `Linux clang + UBSan`
+
+Direct pushes to `main` are allowed only for the owner during the initial
+scaffold. After Phase 2, changes should arrive through a pull request with at
+least one review.
+
+Required checks are configured in **Settings → Branches**, not in a file. If a
+check is renamed, update the protection rule and this list together.
 
 ## License
 
