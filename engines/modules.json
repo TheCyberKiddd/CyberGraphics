@@ -14,7 +14,7 @@
       "kind": "foundation",
       "layer": 0,
       "order": 0,
-      "status": "scaffolded",
+      "status": "active",
       "purpose": "Fixed-width types, assertions, logging, Result, configuration switches, versioning, hashing, and other dependency-free primitives.",
       "public_api": "include/cyber/core/",
       "depends": [],

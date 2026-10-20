@@ -35,7 +35,10 @@ rules that a formatter cannot enforce.
 - No `using namespace` in a header.
 - No anonymous namespace in a header.
 - Keep implementation details out of public headers. If a type needs private
-  state, use the pimpl pattern or an opaque handle at the ABI boundary.
+  state, use the pimpl pattern or an opaque handle at the ABI boundary. A
+  foundation type may keep fixed-size private state in the header when avoiding
+  allocation is part of its contract (`cyber::core::Logger` does this);
+  document that reason next to the class.
 - Include order: own header first in a `.cpp`, then quoted project headers,
   then `<cyber/...>` headers, then standard and system headers. The formatter
   groups them.
@@ -54,11 +57,14 @@ rules that a formatter cannot enforce.
 
 ## Errors
 
-- Programmer error: `CG_ASSERT`.
-- Recoverable error: `Result<T, E>`.
+- Programmer error: `CG_ASSERT` / `CG_ASSERT_MSG`.
+- Recoverable error: `Result<T, E>` or `Result<void, E>` (`Status<E>`).
 - C ABI: `cg_result` plus a message callback.
-- No exceptions in runtime code.
+- No exceptions in runtime code; `Result` values and errors must be nothrow
+  move constructible.
 - Do not ignore a `Result`; annotate deliberate ignores.
+- Log through `CG_LOG` or a `cyber::core::Logger`; never printf to stdout in
+  runtime code.
 
 ## Functions
 
@@ -87,6 +93,8 @@ rules that a formatter cannot enforce.
 ## Tests
 
 - Every public function has a test.
+- Register tests with `CG_TEST(name)` and assert with `CG_EXPECT_*`,
+  `CG_REQUIRE`, and `CG_FAIL` from `tools/test`.
 - Test names describe behavior, not implementation.
 - Use a tolerance helper for floating-point comparisons; never compare floats
   with `==` unless the operation is exact by definition.

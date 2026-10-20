@@ -32,8 +32,16 @@ semantic versioning once a public API exists.
 - Formatting gate (`scripts/check_format.py`), SHA-pinned GitHub Actions, and
   Dependabot updates.
 - Integration guide, ADR 0003, and `SECURITY.md`.
+- Phase 2 `cyber_core` primitives: fixed-width types, `BuildConfig`, `Error`,
+  `Result<T, E>`, assertions, a bounded logger with sinks, and xxHash64.
+- Project test runner in `tools/test` with `CG_TEST`, `CG_EXPECT_*`,
+  `CG_REQUIRE`, listing, filtering, repeat, seed, shuffle, and console/TAP/JUnit
+  output.
+- ADR 0004, the Phase 2 design note, and the Phase 2 report.
 
 ### Notes
 
 - The public API, renderer, RHI, and tools are not implemented yet. Planned
   modules intentionally have folders and contracts but no CMake targets.
+- The project test runner is a developer tool; it is not installed and is never
+  linked into a shipping target.

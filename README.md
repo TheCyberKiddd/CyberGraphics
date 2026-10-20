@@ -6,20 +6,21 @@ external dependencies are the C++ standard library, operating system headers,
 and the graphics driver APIs hidden behind the RHI.
 
 This repository is being built phase by phase from the 44-phase CyberGraphics
-roadmap. The current milestone is the repository and build foundation; the
-module tree, contracts, and checks are in place, and `cyber_core` is the
-reference module used to prove the build.
+roadmap. The repository, build foundation, and the `cyber_core` primitives are
+in place, and every module test runs through the project's own test runner.
 
 ## Status
 
 - Structure and module contracts: scaffolded.
 - Build system: CMake 3.28+, C++20, Debug/Release/Shipping presets.
-- Modules: 16 defined, 1 scaffolded (`cyber_core`), 15 planned.
+- Modules: 16 defined, 1 active (`cyber_core`), 15 planned.
 - CI: Windows MSVC and Linux clang jobs, plus structure and dependency checks.
 - Phase 1: complete. Local builds and tests pass in every preset, structure and
   dependency checks pass, and the Windows + Linux CI jobs are green.
-- Next: owner review of the Phase 1 report, then Phase 2 (`cyber_core`
-  primitives and the test runner).
+- Phase 2: complete. `cyber_core` provides fixed-width types, build
+  configuration, `Result`, assertions, a bounded logger, xxHash64, and the
+  project test runner in `tools/test`.
+- Next: Phase 3 (`cyber_math`).
 
 See [engines/MODULES.md](engines/MODULES.md) for the module index and
 [docs/architecture/overview.md](docs/architecture/overview.md) for the design.
@@ -56,8 +57,9 @@ From a PowerShell prompt:
 ```
 
 `build.ps1` enters the Visual Studio developer environment, configures with
-`CMakePresets.json`, builds, and optionally runs CTest. To use a system-wide
-CMake and Ninja instead, put them on `PATH` and run:
+`CMakePresets.json`, builds, and optionally runs CTest. Run CTest alone with
+`.\scripts\test.ps1 -Preset debug`. To use a system-wide CMake and Ninja instead,
+put them on `PATH` and run:
 
 ```powershell
 cmake --preset debug
