@@ -1,0 +1,141 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 28,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_CXX_STANDARD": "20",
+        "CMAKE_CXX_STANDARD_REQUIRED": "ON",
+        "CMAKE_CXX_EXTENSIONS": "OFF",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CYBER_WARNINGS_AS_ERRORS": "ON"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "shipping",
+      "displayName": "Shipping",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CYBER_SHIPPING": "ON",
+        "CMAKE_INTERPROCEDURAL_OPTIMIZATION": "ON"
+      }
+    },
+    {
+      "name": "debug-asan",
+      "displayName": "Debug + AddressSanitizer",
+      "inherits": "debug",
+      "cacheVariables": {
+        "CYBER_ENABLE_ASAN": "ON"
+      }
+    },
+    {
+      "name": "ci-windows",
+      "displayName": "CI Windows (MSVC)",
+      "inherits": "debug"
+    },
+    {
+      "name": "ci-linux",
+      "displayName": "CI Linux (clang + UBSan)",
+      "inherits": "debug",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CYBER_ENABLE_UBSAN": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "shipping",
+      "configurePreset": "shipping"
+    },
+    {
+      "name": "debug-asan",
+      "configurePreset": "debug-asan"
+    },
+    {
+      "name": "ci-windows",
+      "configurePreset": "ci-windows"
+    },
+    {
+      "name": "ci-linux",
+      "configurePreset": "ci-linux"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "shipping",
+      "configurePreset": "shipping",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "debug-asan",
+      "configurePreset": "debug-asan",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "ci-windows",
+      "configurePreset": "ci-windows",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "ci-linux",
+      "configurePreset": "ci-linux",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}
