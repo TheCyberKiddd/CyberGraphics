@@ -110,8 +110,9 @@ target choice does not produce an overriding-option warning. Tests keep
 exceptions enabled because the standard library and test helpers assume them;
 tests are not shipped.
 
-Warnings are a separate interface target (`cyber::warnings`) so every target
-gets the same policy and CI can promote warnings to errors.
+Warnings are applied by `cyber_apply_warnings` so every target gets the same
+policy and CI can promote warnings to errors without leaking build flags into
+consumers or the installed package.
 
 ### The stable ABI is a location before it is a file
 

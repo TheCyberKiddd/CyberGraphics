@@ -8,6 +8,7 @@ project(CyberGraphics
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+include(CyberOptions)
 include(CompilerOptions)
 include(CompilerWarnings)
 include(Platform)
@@ -24,12 +25,25 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-enable_testing()
+# The project version is defined once, here, and generated into a public
+# header. No module hard-codes its own version string.
+set(CYBER_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/include")
+file(MAKE_DIRECTORY "${CYBER_GENERATED_INCLUDE_DIR}/cyber/core")
+configure_file(
+    cmake/version_generated.h.in
+    "${CYBER_GENERATED_INCLUDE_DIR}/cyber/core/version_generated.h"
+    @ONLY
+)
+
+if(CYBER_BUILD_TESTS)
+    enable_testing()
+endif()
 
 # The stable product contract. Both renderer plugins implement this interface;
 # it contains no implementation and depends on no module.
 add_library(cyber_graphics_api INTERFACE)
 add_library(cyber::graphics_api ALIAS cyber_graphics_api)
+set_target_properties(cyber_graphics_api PROPERTIES EXPORT_NAME graphics_api)
 target_include_directories(cyber_graphics_api INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
@@ -39,3 +53,7 @@ target_compile_features(cyber_graphics_api INTERFACE cxx_std_20)
 # Active modules. Add a subdirectory only when its phase starts. Planned
 # modules stay documented in engines/MODULES.md until then.
 add_subdirectory(engines/cyber_core)
+
+# Install and package rules are opt-out so a parent project that consumes the
+# source tree can disable them with CYBER_INSTALL=OFF.
+include(CyberPackage)

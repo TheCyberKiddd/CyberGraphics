@@ -1,19 +1,22 @@
 include_guard(GLOBAL)
 
-option(CYBER_SHIPPING "Build a shipping configuration" OFF)
-option(CYBER_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
-option(CYBER_ENABLE_ASAN "Enable AddressSanitizer" OFF)
-option(CYBER_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
-option(CYBER_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
-option(CYBER_NO_EXCEPTIONS "Disable C++ exceptions in runtime modules" ON)
-option(CYBER_NO_RTTI "Disable RTTI in runtime modules" ON)
-
 if(CYBER_SHIPPING)
     add_compile_definitions(CG_SHIPPING=1)
 elseif(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_definitions(CG_DEBUG=1)
 else()
     add_compile_definitions(CG_RELEASE=1)
+endif()
+
+# Pin the MSVC runtime explicitly. Plugins and the host must agree on /MD or
+# /MT; the default is the dynamic runtime, which is the normal choice for a
+# renderer loaded into another executable.
+if(MSVC AND NOT DEFINED CMAKE_MSVC_RUNTIME_LIBRARY)
+    if(CYBER_MSVC_STATIC_RUNTIME)
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    else()
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+    endif()
 endif()
 
 # CMake adds /EHsc to the default MSVC flags. Remove it here so each target

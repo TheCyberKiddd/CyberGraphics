@@ -1,0 +1,52 @@
+param(
+    [string]$Preset = 'debug',
+    [string]$Prefix = ''
+)
+
+$ErrorActionPreference = 'Stop'
+$root = Split-Path -Parent $PSScriptRoot
+Set-Location $root
+
+. (Join-Path $PSScriptRoot 'bootstrap.ps1') -Quiet
+
+if ($Preset -eq 'debug-asan') {
+    throw 'ASan runtime is build-local; verify a debug or release package instead.'
+}
+
+$buildDir = Join-Path $root "build/$Preset"
+if (-not (Test-Path $buildDir)) {
+    throw "Build directory not found: $buildDir. Build the preset first."
+}
+
+if (-not $Prefix) {
+    $Prefix = Join-Path $root "build/install-$Preset"
+    if (Test-Path $Prefix) {
+        Remove-Item -Recurse -Force $Prefix
+    }
+}
+$consumerDir = Join-Path $root "build/package-consumer-$Preset"
+if (Test-Path $consumerDir) {
+    Remove-Item -Recurse -Force $consumerDir
+}
+
+$buildType = if ($Preset -eq 'release' -or $Preset -eq 'shipping') { 'Release' } else { 'Debug' }
+
+& cmake --preset $Preset
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+& cmake --build --preset $Preset
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+& cmake --install $buildDir --prefix $Prefix
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+& cmake -S tests/integration/package_consumer -B $consumerDir -G Ninja `
+    "-DCMAKE_BUILD_TYPE=$buildType" "-DCMAKE_PREFIX_PATH=$Prefix"
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+& cmake --build $consumerDir
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+$executable = if ($env:OS -eq 'Windows_NT') { 'consumer.exe' } else { 'consumer' }
+& (Join-Path $consumerDir $executable)
+exit $LASTEXITCODE

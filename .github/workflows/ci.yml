@@ -18,32 +18,57 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Check structure
         run: python3 scripts/check_structure.py
       - name: Check dependency law
         run: python3 scripts/layer_check.py
+
+  format:
+    name: Formatting
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format
+      - name: Check formatting
+        run: python3 scripts/check_format.py
 
   windows:
     name: Windows MSVC
     runs-on: windows-2022
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
       - name: Configure
         run: cmake --preset ci-windows
       - name: Build
         run: cmake --build --preset ci-windows
       - name: Test
         run: ctest --preset ci-windows --output-on-failure
+      - name: Install
+        run: cmake --install build/ci-windows --prefix "$env:GITHUB_WORKSPACE/install"
+      - name: Verify installed package
+        run: |
+          cmake -S tests/integration/package_consumer -B build/consumer -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH="$env:GITHUB_WORKSPACE/install"
+          cmake --build build/consumer
+          & "$env:GITHUB_WORKSPACE/build/consumer/consumer.exe"
+      - name: Verify source consumer
+        run: |
+          cmake -S tests/integration/source_consumer -B build/source-consumer -G Ninja -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build/source-consumer
+          & "$env:GITHUB_WORKSPACE/build/source-consumer/source_consumer.exe"
 
   linux:
     name: Linux clang + UBSan
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install toolchain
         run: |
           sudo apt-get update
@@ -54,3 +79,25 @@ jobs:
         run: cmake --build --preset ci-linux
       - name: Test
         run: ctest --preset ci-linux --output-on-failure
+      - name: Configure package build
+        run: |
+          cmake -S . -B build/package-linux -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCYBER_BUILD_TESTS=OFF \
+            -DCYBER_ENABLE_UBSAN=OFF \
+            -DCYBER_WARNINGS_AS_ERRORS=ON
+      - name: Build package
+        run: cmake --build build/package-linux
+      - name: Install
+        run: cmake --install build/package-linux --prefix "$PWD/install"
+      - name: Verify installed package
+        run: |
+          cmake -S tests/integration/package_consumer -B build/consumer -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_PREFIX_PATH="$PWD/install"
+          cmake --build build/consumer
+          ./build/consumer/consumer
+      - name: Verify source consumer
+        run: |
+          cmake -S tests/integration/source_consumer -B build/source-consumer -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++
+          cmake --build build/source-consumer
+          ./build/source-consumer/source_consumer

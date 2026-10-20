@@ -23,6 +23,15 @@ semantic versioning once a public API exists.
 - Project requirements note and the Phase 1 design note, phase report, and
   ADRs 0001 (module architecture) and 0002 (math and depth conventions).
 - `cyber_core` reference module with version metadata and a CTest smoke test.
+- Install and CMake package export: `find_package(CyberGraphics CONFIG)` with
+  `cyber::core` and `cyber::graphics_api` targets.
+- `tests/integration/package_consumer` verifies the installed package on
+  Windows and Linux CI.
+- Single-source version generation from `project(VERSION)`.
+- Explicit MSVC runtime selection (`/MD` by default, `/MT` option).
+- Formatting gate (`scripts/check_format.py`), SHA-pinned GitHub Actions, and
+  Dependabot updates.
+- Integration guide, ADR 0003, and `SECURITY.md`.
 
 ### Notes
 

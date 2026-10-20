@@ -30,7 +30,7 @@ function(cyber_add_module)
     add_library(cyber::${ARG_NAME} ALIAS ${target})
 
     target_compile_features(${target} PUBLIC cxx_std_20)
-    target_link_libraries(${target} PUBLIC cyber::warnings)
+    cyber_apply_warnings(${target})
 
     target_include_directories(${target}
         PUBLIC
@@ -57,6 +57,7 @@ function(cyber_add_module)
         CXX_STANDARD_REQUIRED YES
         CXX_EXTENSIONS NO
         POSITION_INDEPENDENT_CODE ON
+        EXPORT_NAME ${ARG_NAME}
     )
 endfunction()
 
@@ -75,7 +76,14 @@ endfunction()
 #   SOURCES <files...>
 #   [DEPENDS <module-or-contract...>]
 # )
+#
+# The executable target is prefixed with cyber_test_ so it cannot collide with
+# a module target. The CTest name remains the caller-provided NAME.
 function(cyber_add_test)
+    if(NOT CYBER_BUILD_TESTS)
+        return()
+    endif()
+
     cmake_parse_arguments(ARG "" "NAME" "SOURCES;DEPENDS" ${ARGN})
 
     if(NOT ARG_NAME)
@@ -85,26 +93,38 @@ function(cyber_add_test)
         message(FATAL_ERROR "cyber_add_test(${ARG_NAME}): SOURCES is required")
     endif()
 
-    add_executable(${ARG_NAME} ${ARG_SOURCES})
-    target_link_libraries(${ARG_NAME} PRIVATE cyber::warnings)
+    get_property(known_tests GLOBAL PROPERTY CYBER_TEST_NAMES)
+    if(ARG_NAME IN_LIST known_tests)
+        message(FATAL_ERROR "cyber_add_test: duplicate test name ${ARG_NAME}")
+    endif()
+    set_property(GLOBAL APPEND PROPERTY CYBER_TEST_NAMES ${ARG_NAME})
+
+    set(target "cyber_test_${ARG_NAME}")
+    if(TARGET ${target})
+        message(FATAL_ERROR "cyber_add_test: target ${target} already exists")
+    endif()
+
+    add_executable(${target} ${ARG_SOURCES})
+    cyber_apply_warnings(${target})
 
     # Tests keep exceptions enabled so standard-library test helpers behave
     # normally; runtime modules use CYBER_RUNTIME_OPTIONS instead.
     if(MSVC)
-        target_compile_options(${ARG_NAME} PRIVATE /EHsc)
+        target_compile_options(${target} PRIVATE /EHsc)
     else()
-        target_compile_options(${ARG_NAME} PRIVATE -fexceptions)
+        target_compile_options(${target} PRIVATE -fexceptions)
     endif()
 
     foreach(dep IN LISTS ARG_DEPENDS)
-        cyber_link_dependency(${ARG_NAME} PRIVATE ${dep})
+        cyber_link_dependency(${target} PRIVATE ${dep})
     endforeach()
 
-    set_target_properties(${ARG_NAME} PROPERTIES
+    set_target_properties(${target} PROPERTIES
         CXX_STANDARD 20
         CXX_STANDARD_REQUIRED YES
         CXX_EXTENSIONS NO
+        OUTPUT_NAME ${ARG_NAME}
     )
 
-    add_test(NAME ${ARG_NAME} COMMAND ${ARG_NAME})
+    add_test(NAME ${ARG_NAME} COMMAND ${target})
 endfunction()

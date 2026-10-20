@@ -1,0 +1,14 @@
+#pragma once
+
+#include <cstdint>
+
+namespace cyber::core
+{
+
+inline constexpr std::uint32_t kVersionMajor = @PROJECT_VERSION_MAJOR@;
+inline constexpr std::uint32_t kVersionMinor = @PROJECT_VERSION_MINOR@;
+inline constexpr std::uint32_t kVersionPatch = @PROJECT_VERSION_PATCH@;
+
+inline constexpr const char* kVersionString = "@PROJECT_VERSION@";
+
+}  // namespace cyber::core

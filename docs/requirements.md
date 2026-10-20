@@ -59,6 +59,7 @@ Out of scope for this repository:
 | FR-18 | Tools (test runner, shader compiler, cooker, capture) use public module APIs and are never linked into shipping targets. | `tools/*` | 2, 16, 24, 39 |
 | FR-19 | Samples and the host app run the same scenes on the GPU and software paths and compare them. | `samples/*` | 14, 25 |
 | FR-20 | Every phase produces a runnable artifact, a test, a phase report, and any necessary ADR. | all | 1–44 |
+| FR-21 | Cyber Engine can consume CyberGraphics as a source subdirectory or an installed CMake package with identical target names. | all | 1, 25, 43 |
 
 ## 4. Non-functional requirements
 
@@ -107,10 +108,13 @@ A phase is complete only when all of the following are true:
 2. The module contract is updated if a public interface changed.
 3. The code builds in Debug and Release; Shipping where relevant.
 4. Unit tests pass, plus the phase's integration, golden, fuzz, or stress tests.
-5. `scripts/check_structure.py` and `scripts/layer_check.py` pass.
+5. `scripts/check_structure.py`, `scripts/layer_check.py`, and
+   `scripts/check_format.py` pass.
 6. Sanitizer or validation runs pass where the phase requires them.
-7. The phase report records the exact commands, machine, driver, and results.
-8. The owner has reviewed the report and approved starting the next phase.
+7. The installed package consumer builds and runs where the phase changes a
+   public target or header.
+8. The phase report records the exact commands, machine, driver, and results.
+9. The owner has reviewed the report and approved starting the next phase.
 
 A green build alone is not a complete phase. A report without evidence is not a
 complete phase.
@@ -127,6 +131,7 @@ complete phase.
 | Assets and ABI (24–25) | `cyber_assets`, products, `include/cybergraphics` | Cook determinism, plugin conformance, version negotiation. |
 | Lighting and effects (26–37) | `cyber_renderer` | Reference comparisons, white-furnace tests, performance budgets. |
 | UI, capture, tooling (38–42) | `cyber_ui`, `cyber_capture`, `tools/*` | Overlay tests, capture replay, docs generation. |
+| Integration (1, 25, 43) | all, products | Source and package consumers, ABI conformance, no build-policy leakage. |
 | Release (43–44) | all | License decision, packaging, clean-machine verification. |
 
 ## 8. Open questions
