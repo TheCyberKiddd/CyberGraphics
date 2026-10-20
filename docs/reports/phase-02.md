@@ -1,7 +1,8 @@
 # Phase 2 report: core primitives and the test runner
 
 Date: 2026-10-20
-Commits: `ea511d4..ff72526` (runner, core primitives, consumers, docs)
+Commits: `ea511d4..f32ce1d` (runner, core primitives, consumers, docs,
+portability fixes)
 Machine: Windows 10 Pro 19045, Intel Core i5-6400, 16 GB RAM, Intel HD 530,
 MSVC 19.44.35225, CMake 3.31.6, Ninja, Ninja preset builds
 
@@ -154,13 +155,29 @@ xxHash64, and logger filtering through the installed headers and the exported
 
 ### CI
 
-Remote run for `ff72526`:
+Remote run for `f32ce1d`:
 
 ```text
-gh run view 39407569403
+gh run view 39408201349
 ```
 
-Status is recorded in the CI evidence commit that follows this report.
+All four jobs pass:
+
+- Structure and dependency law.
+- Formatting (`clang-format` gate).
+- Windows MSVC: build, CTest, install, installed-package consumer, source
+  consumer.
+- Linux clang + UBSan: build, CTest, non-sanitized package build, install,
+  installed-package consumer, source consumer.
+
+The Linux job caught two portability defects that the Windows build could not:
+an unneeded internal declaration for the big-endian byte-swap helpers, and two
+signed/unsigned comparisons in the new tests. Both were fixed before the final
+run. This is the intended value of the two-compiler gate.
+
+A GitHub annotation reports that the pinned `ilammy/msvc-dev-cmd` action still
+targets Node.js 20 while the runner forces Node.js 24. The job passes; the
+action pin should be refreshed when an upstream release is available.
 
 ## Known gaps
 
