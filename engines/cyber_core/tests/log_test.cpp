@@ -178,7 +178,7 @@ CG_TEST(log_format_line)
 
     char buffer[512];
     const auto needed = cyber::core::FormatLogLine(buffer, sizeof(buffer), record);
-    CG_EXPECT_TRUE(needed > 0);
+    CG_EXPECT_TRUE(needed != cyber::core::usize{0});
     CG_EXPECT_TRUE(std::string(buffer).find("[WARN ]") != std::string::npos);
     CG_EXPECT_TRUE(std::string(buffer).find("[rhi") != std::string::npos);
     CG_EXPECT_TRUE(std::string(buffer).find("engine/rhi/device.cpp:9") != std::string::npos);
