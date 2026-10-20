@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  structure:
+    name: Structure and dependency law
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check structure
+        run: python3 scripts/check_structure.py
+      - name: Check dependency law
+        run: python3 scripts/layer_check.py
+
+  windows:
+    name: Windows MSVC
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Configure
+        run: cmake --preset ci-windows
+      - name: Build
+        run: cmake --build --preset ci-windows
+      - name: Test
+        run: ctest --preset ci-windows --output-on-failure
+
+  linux:
+    name: Linux clang + UBSan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang ninja-build
+      - name: Configure
+        run: cmake --preset ci-linux
+      - name: Build
+        run: cmake --build --preset ci-linux
+      - name: Test
+        run: ctest --preset ci-linux --output-on-failure

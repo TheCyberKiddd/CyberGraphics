@@ -1,0 +1,39 @@
+# Build and generated output
+/build/
+/out/
+/install/
+
+# CMake user state
+CMakeUserPresets.json
+compile_commands.json
+
+# IDE and editor state
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.sln.DotSettings.user
+
+# Tooling caches
+__pycache__/
+*.py[cod]
+.cache/
+.clangd/
+.ccls-cache/
+
+# Generated assets and captures
+/assets/cooked/
+/captures/
+/profiles/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini

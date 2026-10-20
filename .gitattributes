@@ -1,0 +1,21 @@
+* text=auto eol=lf
+
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.sh text eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.tga binary
+*.dds binary
+*.ktx binary
+*.ktx2 binary
+*.glb binary
+*.fbx binary
+*.bin binary
+*.exe binary
+*.dll binary
+*.lib binary
+*.pdb binary
