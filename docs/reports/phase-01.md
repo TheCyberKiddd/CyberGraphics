@@ -1,7 +1,7 @@
 # Phase 1 report: repository and build foundation
 
 Date: 2026-10-20
-Commits: `07c560f` — `chore: scaffold repository and Phase 1 foundation`
+Commits: `07c560f..c768f07` — scaffold, CI evidence, and checkout-action update
 Machine: Intel Core i5-6400, 16 GB RAM, Intel HD Graphics 530 (driver
 31.0.101.2125), Windows 10 Pro 10.0.19045, MSVC 19.44.35225.0, CMake 3.31.6,
 Ninja.
@@ -85,12 +85,18 @@ the initial push and all three jobs passed:
 | Windows MSVC | `windows-2022` | Passed |
 | Linux clang + UBSan | `ubuntu-24.04` | Passed |
 
-Run: `39402715117`, conclusion `success`, 32 seconds.
+Latest run: `39403070215`, conclusion `success`. The structure job finished in
+6 seconds; the Windows and Linux jobs finished in 29 seconds each. The checkout
+action is `actions/checkout@v7`.
 
 ```powershell
 gh run list --limit 5
-gh run view 39402715117 --json status,conclusion,jobs
+gh run view 39403070215 --json status,conclusion,jobs
 ```
+
+GitHub reports one non-failing annotation: `ilammy/msvc-dev-cmd@v1` still
+targets Node.js 20 and is currently forced onto Node.js 24. The Windows job is
+green; replace the action when upstream publishes a Node 24 release.
 
 ## Known gaps
 
@@ -107,6 +113,9 @@ gh run view 39402715117 --json status,conclusion,jobs
 6. **The repository identity is repo-local.** `user.email` is set to
    `thecyberkiddd@gmail.com` for this repository. The global Git value remains
    `thecyberkiddd@gmail.com@gmail.com` and was not modified.
+7. **One CI action is on a deprecated Node runtime.** `ilammy/msvc-dev-cmd@v1`
+   is forced onto Node.js 24 and still works. It should be replaced when an
+   updated release exists.
 
 ## Sources used
 
