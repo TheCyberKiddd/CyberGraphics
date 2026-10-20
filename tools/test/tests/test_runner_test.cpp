@@ -1,6 +1,7 @@
 #include <cyber/test/test.h>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string_view>
@@ -100,7 +101,7 @@ CG_TEST(test_runner_xml_escape)
 CG_TEST(test_runner_registry)
 {
     const std::size_t count = cyber::test::TestCount();
-    CG_EXPECT_TRUE(count > 0);
+    CG_EXPECT_TRUE(count > std::size_t{0});
     const cyber::test::TestCase* test = cyber::test::TestAt(0);
     CG_REQUIRE(test != nullptr);
     CG_EXPECT_TRUE(test->name != nullptr);

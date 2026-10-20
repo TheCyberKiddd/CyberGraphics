@@ -9,7 +9,7 @@ CG_TEST(assert_format_with_message)
     const auto needed = cyber::core::FormatAssertionMessage(
         buffer, sizeof(buffer), "value != 0", "src/example.cpp", 42, "value must be positive");
 
-    CG_EXPECT_TRUE(needed > 0);
+    CG_EXPECT_TRUE(needed != cyber::core::usize{0});
     CG_EXPECT_TRUE(std::strstr(buffer, "Assertion failed: value != 0") != nullptr);
     CG_EXPECT_TRUE(std::strstr(buffer, "src/example.cpp:42") != nullptr);
     CG_EXPECT_TRUE(std::strstr(buffer, "value must be positive") != nullptr);
@@ -21,7 +21,7 @@ CG_TEST(assert_format_without_message)
     const auto needed = cyber::core::FormatAssertionMessage(
         buffer, sizeof(buffer), "pointer != nullptr", "src/example.cpp", 7, nullptr);
 
-    CG_EXPECT_TRUE(needed > 0);
+    CG_EXPECT_TRUE(needed != cyber::core::usize{0});
     CG_EXPECT_TRUE(std::strstr(buffer, "pointer != nullptr") != nullptr);
     CG_EXPECT_TRUE(std::strstr(buffer, "src/example.cpp:7") != nullptr);
     CG_EXPECT_TRUE(std::strstr(buffer, "message:") == nullptr);
@@ -33,7 +33,7 @@ CG_TEST(assert_format_null_fields)
     const auto needed =
         cyber::core::FormatAssertionMessage(buffer, sizeof(buffer), nullptr, nullptr, 1, nullptr);
 
-    CG_EXPECT_TRUE(needed > 0);
+    CG_EXPECT_TRUE(needed != cyber::core::usize{0});
     CG_EXPECT_TRUE(std::strstr(buffer, "<unknown>") != nullptr);
 }
 
@@ -54,7 +54,7 @@ CG_TEST(assert_format_zero_capacity)
     char buffer[4] = {'a', 'b', 'c', '\0'};
     const auto needed =
         cyber::core::FormatAssertionMessage(buffer, 0, "expression", "file.cpp", 1, nullptr);
-    CG_EXPECT_EQ(needed, 0);
+    CG_EXPECT_EQ(needed, cyber::core::usize{0});
     CG_EXPECT_STREQ(buffer, "abc");
 }
 
