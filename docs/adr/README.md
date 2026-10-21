@@ -14,6 +14,7 @@ to it, and the consequences. Use one when a future reader would otherwise ask
 | [0003](0003-integration-and-packaging.md) | Integration and packaging contract | accepted |
 | [0004](0004-core-primitives-and-test-runner.md) | Core primitive contracts and the project test runner | accepted |
 | [0005](0005-math-representation-and-simd.md) | Math representation, SIMD, and fallibility | accepted |
+| [0006](0006-memory-allocation-and-handles.md) | Memory allocation, containers, and handle lifetime | accepted |
 
 Add new records as `NNNN-title.md`, starting at `0001`. Never delete an ADR;
 supersede it with a new one and update the old record's status.

@@ -5,6 +5,7 @@
 #include <cyber/core/result.h>
 #include <cyber/core/version.h>
 #include <cyber/math/math.h>
+#include <cyber/memory/memory.h>
 
 #include <cmath>
 #include <cstring>
@@ -102,6 +103,28 @@ int main()
     if (!box.Contains(Vec3::Zero()))
     {
         return 15;
+    }
+
+    using namespace cyber::memory;
+
+    HeapAllocator heap;
+    DynamicArray<int> values(heap);
+    if (!values.TryPushBack(7) || values[0] != 7)
+    {
+        return 16;
+    }
+
+    HashMap<StringView, int> lookup(heap);
+    if (!lookup.TryInsert(StringView("key"), 42) || *lookup.Find("key") != 42)
+    {
+        return 17;
+    }
+
+    SlotMap<int> slots(heap);
+    const Handle<int> handle = slots.Insert(9);
+    if (!handle.IsValid() || *slots.Get(handle) != 9)
+    {
+        return 18;
     }
 
     return 0;

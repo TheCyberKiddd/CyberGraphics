@@ -45,7 +45,11 @@ $requiredHeaders = @(
     'include/cyber/math/math.h',
     'include/cyber/math/mat4.h',
     'include/cyber/math/types.h',
-    'include/cyber/math/vec3.h'
+    'include/cyber/math/vec3.h',
+    'include/cyber/memory/memory.h',
+    'include/cyber/memory/allocator.h',
+    'include/cyber/memory/dynamic_array.h',
+    'include/cyber/memory/string_view.h'
 )
 foreach ($header in $requiredHeaders) {
     $path = Join-Path $Prefix $header

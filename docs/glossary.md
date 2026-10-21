@@ -58,8 +58,8 @@ Terms are defined once here and used consistently in code, docs, and commits.
 - **Arena / linear allocator** — bump allocation with bulk reset.
 - **Pool allocator** — fixed-size blocks allocated and freed individually.
 - **Free-list allocator** — variable-size blocks with a list of free regions.
-- **Ring allocator** — a circular buffer that overwrites only after the reader
-  has advanced.
+- **Ring allocator** - a transient circular bump allocator; the oldest bytes may
+  be reused after wraparound, so pointers do not survive a wrap.
 - **Generation handle** — an index plus a generation counter; a stale handle is
   detected when the generation no longer matches.
 - **Job** — a unit of work scheduled on the job system.

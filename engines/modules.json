@@ -65,7 +65,7 @@
       "kind": "foundation",
       "layer": 0,
       "order": 2,
-      "status": "planned",
+      "status": "active",
       "purpose": "Allocator interface, linear, stack, pool, free-list and ring allocators, tracking, containers, strings, spans, and generation-counted handles.",
       "public_api": "include/cyber/memory/",
       "depends": ["cyber_core"],

@@ -45,6 +45,15 @@ semantic versioning once a public API exists.
   scalar benchmark (`cyber_math_bench`).
 - Absolute-tolerance test assertions: `CG_EXPECT_NEAR` and `CG_REQUIRE_NEAR`.
 - ADR 0005, the Phase 3 design note, and the Phase 3 report.
+- Phase 4 `cyber_memory`: the `Allocator` interface, `HeapAllocator`, linear,
+  stack, pool, free-list, ring, frame, and tracking allocators, plus tagged leak
+  reports and allocator accounting.
+- `Span`, `StringView`, `String`, `DynamicArray`, `FixedArray`, open-addressing
+  `HashMap`, `Handle<Tag>`, and generation-checked `SlotMap<T, Tag>`.
+- Deterministic 128-block free-list stress coverage, deliberate-leak coverage,
+  and stale-handle coverage in the memory tests.
+- `cyber::memory` install/export and source/package consumer coverage.
+- ADR 0006 and the Phase 4 design note.
 
 ### Notes
 

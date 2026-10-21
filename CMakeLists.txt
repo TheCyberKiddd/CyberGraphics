@@ -56,6 +56,7 @@ target_compile_features(cyber_graphics_api INTERFACE cxx_std_20)
 # modules stay documented in engines/MODULES.md until then.
 add_subdirectory(engines/cyber_core)
 add_subdirectory(engines/cyber_math)
+add_subdirectory(engines/cyber_memory)
 
 # Install and package rules are opt-out so a parent project that consumes the
 # source tree can disable them with CYBER_INSTALL=OFF.
