@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -117,4 +118,16 @@ CG_TEST(test_runner_cstring_equals)
     CG_EXPECT_FALSE(cyber::test::CStringEquals("text", nullptr));
     CG_EXPECT_TRUE(cyber::test::CStringEquals("text", "text"));
     CG_EXPECT_FALSE(cyber::test::CStringEquals("text", "other"));
+}
+
+CG_TEST(test_runner_near_equals)
+{
+    CG_EXPECT_TRUE(cyber::test::NearEquals(1.0, 1.0, 0.0));
+    CG_EXPECT_TRUE(cyber::test::NearEquals(1.0, 1.0 + 1.0e-9, 1.0e-8));
+    CG_EXPECT_FALSE(cyber::test::NearEquals(1.0, 1.1, 1.0e-3));
+    CG_EXPECT_FALSE(cyber::test::NearEquals(1.0, 1.0, -1.0));
+    CG_EXPECT_FALSE(cyber::test::NearEquals(std::numeric_limits<double>::quiet_NaN(), 1.0, 1.0));
+    CG_EXPECT_TRUE(cyber::test::NearEquals(std::numeric_limits<double>::infinity(),
+                                           std::numeric_limits<double>::infinity(), 0.0));
+    CG_EXPECT_NEAR(2.0, 2.0001, 1.0e-3);
 }

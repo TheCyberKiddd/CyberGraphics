@@ -55,6 +55,7 @@ target_compile_features(cyber_graphics_api INTERFACE cxx_std_20)
 # Active modules. Add a subdirectory only when its phase starts. Planned
 # modules stay documented in engines/MODULES.md until then.
 add_subdirectory(engines/cyber_core)
+add_subdirectory(engines/cyber_math)
 
 # Install and package rules are opt-out so a parent project that consumes the
 # source tree can disable them with CYBER_INSTALL=OFF.

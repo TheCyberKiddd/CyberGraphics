@@ -40,6 +40,20 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & cmake --install $buildDir --prefix $Prefix
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+$requiredHeaders = @(
+    'include/cyber/core/version_generated.h',
+    'include/cyber/math/math.h',
+    'include/cyber/math/mat4.h',
+    'include/cyber/math/types.h',
+    'include/cyber/math/vec3.h'
+)
+foreach ($header in $requiredHeaders) {
+    $path = Join-Path $Prefix $header
+    if (-not (Test-Path $path)) {
+        throw "Installed package is missing $header"
+    }
+}
+
 & cmake -S tests/integration/package_consumer -B $consumerDir -G Ninja `
     "-DCMAKE_BUILD_TYPE=$buildType" "-DCMAKE_PREFIX_PATH=$Prefix"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

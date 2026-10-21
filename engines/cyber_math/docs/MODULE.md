@@ -3,7 +3,7 @@
 **Kind:** foundation
 **Layer:** 0
 **Order:** 1
-**Status:** planned
+**Status:** active
 **Owner:** @TheCyberKiddd
 
 ## Purpose
@@ -17,6 +17,25 @@ Scalar and SIMD math: vectors, matrices, quaternions, transforms, geometry, colo
 Only headers under this path are public. Everything under `src/` is private.
 Public headers must compile on their own and must not include another module's
 private headers.
+
+The module exposes:
+
+- `constants.h`, `types.h`, `simd.h` — scalar helpers, namespace aliases, and
+  the compile-time SIMD backend query;
+- `vec2.h`, `vec3.h`, `vec4.h` — scalar and SSE2 vector arithmetic;
+- `mat3.h`, `mat4.h` — column-major matrices and inverse/view/projection
+  constructors;
+- `quat.h`, `transform.h` — unit quaternion rotation and TRS authoring;
+- `aabb.h`, `plane.h`, `ray.h`, `sphere.h`, `frustum.h` — CPU geometry;
+- `color.h`, `half.h` — linear/sRGB color and binary16 storage;
+- `math.h` — umbrella include.
+
+Matrix access is `m[column][row]`. Matrix composition is right-to-left:
+`(A * B) * v == A * (B * v)`.
+
+`Transform` is an authoring record (`p' = T + R * (S * p)`), not a closed
+algebra under non-uniform scale. Compose `ToMatrix()` values for hierarchies and
+use `Transform::TryInverse(Mat4&)` for the exact inverse.
 
 ## Dependencies
 
@@ -41,7 +60,11 @@ Dependencies are one-way. A module may depend only on modules with a lower
 
 ## Tests
 
-Unit tests for every operation with tolerance helpers, plus a SIMD-versus-scalar benchmark.
+Unit tests for every operation with tolerance helpers, plus a SIMD-versus-scalar benchmark:
+
+- `math_vec`, `math_mat`, `math_projection`, `math_quat`, `math_transform`;
+- `math_geometry`, `math_color`, `math_half`, `math_public_headers`;
+- `cyber_math_bench` for `Vec4` add throughput on the development machine.
 
 ## Budgets
 
@@ -49,4 +72,4 @@ No heap allocation. Record SIMD-versus-scalar results on the target machine.
 
 ## Roadmap
 
-Phases 3.
+Phase 3.

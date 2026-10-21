@@ -13,7 +13,7 @@ set(CYBER_INSTALL_CMAKEDIR
 )
 
 install(
-    TARGETS cyber_graphics_api cyber_core
+    TARGETS cyber_graphics_api cyber_core cyber_math
     EXPORT CyberGraphicsTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -23,6 +23,14 @@ install(
 
 install(
     DIRECTORY engines/cyber_core/include/cyber/core
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cyber
+    FILES_MATCHING
+        PATTERN "*.h"
+        PATTERN "*.hpp"
+)
+
+install(
+    DIRECTORY engines/cyber_math/include/cyber/math
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cyber
     FILES_MATCHING
         PATTERN "*.h"

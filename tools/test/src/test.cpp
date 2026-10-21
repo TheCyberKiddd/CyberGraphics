@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <charconv>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <exception>
 #include <iomanip>
@@ -350,6 +351,19 @@ std::string XmlEscape(std::string_view text)
 std::uint64_t Seed() noexcept
 {
     return g_seed;
+}
+
+bool NearEquals(double actual, double expected, double tolerance) noexcept
+{
+    if (tolerance < 0.0)
+    {
+        return false;
+    }
+    if (actual == expected)
+    {
+        return true;
+    }
+    return std::abs(actual - expected) <= tolerance;
 }
 
 ParsedOptions ParseOptions(std::span<const std::string_view> arguments)

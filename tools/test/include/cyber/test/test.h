@@ -59,6 +59,7 @@ void RegisterTest(const char* name, const char* file, int line, TestFunction fun
 [[nodiscard]] bool MatchesFilter(std::string_view name, std::string_view filter) noexcept;
 [[nodiscard]] std::string XmlEscape(std::string_view text);
 [[nodiscard]] std::uint64_t Seed() noexcept;
+[[nodiscard]] bool NearEquals(double actual, double expected, double tolerance) noexcept;
 
 void Expect(bool condition, std::string_view expression, const char* file, int line);
 void Fail(std::string_view message, const char* file, int line);
@@ -115,6 +116,16 @@ inline bool CStringEquals(const char* lhs, const char* rhs) noexcept
     ::cyber::test::Expect(::cyber::test::CStringEquals((actual), (expected)),                      \
                           #actual " == " #expected, __FILE__, __LINE__)
 
+#define CG_EXPECT_NEAR(actual, expected, tolerance)                                                \
+    do                                                                                             \
+    {                                                                                              \
+        const double cgActual = static_cast<double>(actual);                                       \
+        const double cgExpected = static_cast<double>(expected);                                   \
+        const double cgTolerance = static_cast<double>(tolerance);                                 \
+        ::cyber::test::Expect(::cyber::test::NearEquals(cgActual, cgExpected, cgTolerance),        \
+                              #actual " ~= " #expected, __FILE__, __LINE__);                       \
+    } while (false)
+
 #define CG_FAIL(message) ::cyber::test::Fail((message), __FILE__, __LINE__)
 
 #define CG_REQUIRE(expression)                                                                     \
@@ -123,6 +134,19 @@ inline bool CStringEquals(const char* lhs, const char* rhs) noexcept
         if (!static_cast<bool>(expression))                                                        \
         {                                                                                          \
             ::cyber::test::Require(false, #expression, __FILE__, __LINE__);                        \
+            return;                                                                                \
+        }                                                                                          \
+    } while (false)
+
+#define CG_REQUIRE_NEAR(actual, expected, tolerance)                                               \
+    do                                                                                             \
+    {                                                                                              \
+        const double cgActual = static_cast<double>(actual);                                       \
+        const double cgExpected = static_cast<double>(expected);                                   \
+        const double cgTolerance = static_cast<double>(tolerance);                                 \
+        if (!::cyber::test::NearEquals(cgActual, cgExpected, cgTolerance))                         \
+        {                                                                                          \
+            ::cyber::test::Require(false, #actual " ~= " #expected, __FILE__, __LINE__);           \
             return;                                                                                \
         }                                                                                          \
     } while (false)

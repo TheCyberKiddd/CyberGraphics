@@ -6,21 +6,26 @@ external dependencies are the C++ standard library, operating system headers,
 and the graphics driver APIs hidden behind the RHI.
 
 This repository is being built phase by phase from the 44-phase CyberGraphics
-roadmap. The repository, build foundation, and the `cyber_core` primitives are
-in place, and every module test runs through the project's own test runner.
+roadmap. The repository, build foundation, `cyber_core` primitives, and
+`cyber_math` foundation are in place, and every module test runs through the
+project's own test runner.
 
 ## Status
 
 - Structure and module contracts: scaffolded.
 - Build system: CMake 3.28+, C++20, Debug/Release/Shipping presets.
-- Modules: 16 defined, 1 active (`cyber_core`), 15 planned.
+- Modules: 16 defined, 2 active (`cyber_core`, `cyber_math`), 14 planned.
 - CI: Windows MSVC and Linux clang jobs, plus structure and dependency checks.
 - Phase 1: complete. Local builds and tests pass in every preset, structure and
   dependency checks pass, and the Windows + Linux CI jobs are green.
 - Phase 2: complete. `cyber_core` provides fixed-width types, build
   configuration, `Result`, assertions, a bounded logger, xxHash64, and the
   project test runner in `tools/test`.
-- Next: Phase 3 (`cyber_math`).
+- Phase 3: implementation complete. `cyber_math` provides vectors, matrices,
+  quaternions, TRS authoring, reverse-Z view/projection matrices, geometry,
+  linear/sRGB color, binary16 storage, and an SSE2 `Vec4` path. Local tests and
+  the package consumer pass; final CI evidence is recorded in the phase report.
+- Next: Phase 4 (`cyber_memory`) after owner review.
 
 See [engines/MODULES.md](engines/MODULES.md) for the module index and
 [docs/architecture/overview.md](docs/architecture/overview.md) for the design.
@@ -76,6 +81,8 @@ package. Both modes expose the same targets:
 
 - `cyber::graphics_api` — the stable product contract.
 - `cyber::core` — core primitives.
+- `cyber::math` — vectors, matrices, quaternions, projections, geometry, color,
+  and half floats.
 
 Source mode:
 
@@ -88,6 +95,7 @@ add_subdirectory(third_party/CyberGraphics)
 target_link_libraries(cyber_engine_renderer PRIVATE
     cyber::graphics_api
     cyber::core
+    cyber::math
 )
 ```
 
@@ -104,6 +112,7 @@ find_package(CyberGraphics 0.1 CONFIG REQUIRED)
 target_link_libraries(cyber_engine_renderer PRIVATE
     cyber::graphics_api
     cyber::core
+    cyber::math
 )
 ```
 
@@ -132,6 +141,9 @@ python scripts/check_format.py
 
 ## Documentation
 
+- [Roadmap index](docs/ROADMAP.md)
+- [CyberGraphics roadmap](docs/graphics/CYBERGRAPHICS_ROADMAP.md)
+- [Build guide](docs/graphics/CYBERGRAPHICS_BUILD_GUIDE.md)
 - [Requirements](docs/requirements.md)
 - [Architecture overview](docs/architecture/overview.md)
 - [Integration with Cyber Engine](docs/architecture/integration.md)

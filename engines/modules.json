@@ -40,7 +40,7 @@
       "kind": "foundation",
       "layer": 0,
       "order": 1,
-      "status": "planned",
+      "status": "active",
       "purpose": "Scalar and SIMD math: vectors, matrices, quaternions, transforms, geometry, color, half floats.",
       "public_api": "include/cyber/math/",
       "depends": ["cyber_core"],
