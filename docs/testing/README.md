@@ -20,6 +20,10 @@ the evidence is recorded in a phase report.
 - Use the project test runner from `tools/test/`.
 - Register tests with `CG_TEST(name)` and assert with `CG_EXPECT_*`,
   `CG_REQUIRE`, and `CG_FAIL`.
+- Use `CG_EXPECT_NEAR(actual, expected, tolerance)` or
+  `CG_REQUIRE_NEAR(...)` for floating-point results. Tolerance is absolute and
+  NaN never compares near; do not use exact equality unless the operation is
+  exact by definition.
 - Run a test executable directly for `--list`, `--filter`, `--repeat`, `--seed`,
   `--shuffle`, and `--format console|tap|junit`. CTest runs the default console
   path and treats a non-zero exit code as a failure.

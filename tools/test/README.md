@@ -21,8 +21,10 @@ Available helpers:
 
 - `CG_TEST(name)` registers one function with file and line.
 - `CG_EXPECT_TRUE`, `CG_EXPECT_FALSE`, `CG_EXPECT_EQ`, `CG_EXPECT_NE`,
-  `CG_EXPECT_STREQ` record a failure and continue.
+  `CG_EXPECT_STREQ`, `CG_EXPECT_NEAR` record a failure and continue.
 - `CG_REQUIRE(expression)` records a failure and returns from the test.
+- `CG_REQUIRE_NEAR(actual, expected, tolerance)` is the returning form for
+  floating-point checks.
 - `CG_FAIL(message)` records an unconditional failure.
 
 ## Command line

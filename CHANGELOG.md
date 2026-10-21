@@ -38,6 +38,13 @@ semantic versioning once a public API exists.
   `CG_REQUIRE`, listing, filtering, repeat, seed, shuffle, and console/TAP/JUnit
   output.
 - ADR 0004, the Phase 2 design note, and the Phase 2 report.
+- Phase 3 `cyber_math`: vectors, column-major matrices, quaternions, TRS
+  authoring, right-handed reverse-Z view/projection matrices, AABB/plane/ray/
+  sphere/frustum geometry, linear/sRGB color, and IEEE binary16 storage.
+- Compile-time SSE2 `Vec4` fast path with a scalar fallback and SIMD-versus-
+  scalar benchmark (`cyber_math_bench`).
+- Absolute-tolerance test assertions: `CG_EXPECT_NEAR` and `CG_REQUIRE_NEAR`.
+- ADR 0005, the Phase 3 design note, and the Phase 3 report.
 
 ### Notes
 
@@ -45,3 +52,6 @@ semantic versioning once a public API exists.
   modules intentionally have folders and contracts but no CMake targets.
 - The project test runner is a developer tool; it is not installed and is never
   linked into a shipping target.
+- `Transform` is an authoring record. Non-uniform TRS is not closed under
+  composition, so hierarchies compose `ToMatrix()` values and invert through
+  `TryInverse(Mat4&)`.

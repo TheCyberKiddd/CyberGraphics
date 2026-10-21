@@ -139,6 +139,15 @@ Near maps to 1, far maps to 0.
   spherical linear interpolation (slerp) when constant angular velocity matters.
   Choose one per use case and document it.
 
+## Euler angles
+
+- Authoring order is **YXZ**: yaw around `Y`, pitch around `X`, roll around `Z`.
+- `FromEuler(yaw, pitch, roll)` builds `q = qY * qX * qZ`, so roll is applied
+  first, then pitch, then yaw. This matches the public `Quat` header.
+- Euler extraction is deliberately not part of the math API. Callers that need
+  a different order compose axis-angle quaternions explicitly.
+- Euler angles are radians, like every other angle in runtime code.
+
 ## Geometry primitives
 
 - **AABB:** inclusive min/max. Empty boxes are represented explicitly, not by
@@ -170,7 +179,10 @@ Near maps to 1, far maps to 0.
 ## SIMD alignment
 
 - `Vec4` and `Mat4` are 16-byte aligned.
-- `Vec3` is 16-byte aligned in SIMD form; the scalar form is packed.
+- `Vec3` is 16-byte aligned in SIMD form; the scalar form is packed. The public
+  `Vec3` is the packed form and SIMD kernels load it at the call site.
+- The first fast path is SSE2, selected at compile time with a scalar fallback.
+  There is no runtime dispatch until a second backend justifies it.
 - Do not reinterpret a `float*` as a SIMD type. Use the provided load/store
   functions and respect alignment.
 - The scalar fallback and SIMD paths must agree within the tolerance documented

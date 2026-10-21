@@ -39,6 +39,7 @@ add_subdirectory(third_party/CyberGraphics)
 target_link_libraries(cyber_engine_renderer PRIVATE
     cyber::graphics_api
     cyber::core
+    cyber::math
 )
 ```
 
@@ -59,15 +60,18 @@ find_package(CyberGraphics 0.1 CONFIG REQUIRED)
 target_link_libraries(cyber_engine_renderer PRIVATE
     cyber::graphics_api
     cyber::core
+    cyber::math
 )
 ```
 
 The install tree contains:
 
 ```text
-include/cyber/core/...          module headers
+include/cyber/core/...          core module headers
+include/cyber/math/...          math module headers
 include/cybergraphics/          stable C ABI (empty until Phase 25)
 lib/cyber_core.lib              static module library
+lib/cyber_math.lib              static module library
 lib/cmake/CyberGraphics/...     package config and exported targets
 share/CyberGraphics/...         LICENSE and notices
 ```
@@ -82,7 +86,8 @@ Linux, so neither path can silently break.
 |---|---|---|
 | `cyber::graphics_api` | `cyber::graphics_api` | The stable product contract. |
 | `cyber::core` | `cyber::core` | Core primitives. |
-| `cyber::math`, `cyber::rhi`, ... | same | Added when their phases start. |
+| `cyber::math` | `cyber::math` | Vectors, matrices, projections, geometry. |
+| `cyber::rhi`, ... | same | Added when their phases start. |
 
 Build-internal warning policy and test targets are not exported.
 
@@ -195,6 +200,8 @@ Before Cyber Engine depends on a CyberGraphics build:
 
 - Source and package consumption: implemented; both consumer projects run in CI.
 - Core module: `cyber_core` with version metadata.
+- Math module: `cyber_math` with vectors, matrices, projections, geometry,
+  color, and half floats.
 - Stable C ABI: reserved, not yet implemented.
 - GPU plugin: planned, Phase 14 onward.
 - Software renderer plugin: planned, Phase 6 onward.
