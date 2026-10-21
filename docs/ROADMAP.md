@@ -9,14 +9,14 @@ documents are binding:
   per-phase work packages, reading list, tasks, tips, and report template.
 
 Work phases in this order. Do not tick a phase until its done-when line is
-proved with committed evidence. Phase 3 is implementation-complete but remains
-unchecked until its final report and CI evidence are recorded.
+proved with committed evidence. Phase 3 is complete; its report and CI evidence
+are recorded.
 
 ## Part 1: Foundation (phases 1-5)
 
 - [x] **Phase 1 — Repository and build system** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-1-repository-and-build-system) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-1-repository-and-build-system)
 - [x] **Phase 2 — Core utilities** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-2-core-utilities) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-2-core-utilities)
-- [ ] **Phase 3 — Math library** — implementation complete; final report and CI evidence pending · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-3-math-library) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-3-math-library)
+- [x] **Phase 3 — Math library** — complete; report and CI evidence recorded · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-3-math-library) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-3-math-library)
 - [ ] **Phase 4 — Memory and containers** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-4-memory-and-containers) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-4-memory-and-containers)
 - [ ] **Phase 5 — Platform layer and job system** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-5-platform-layer-and-job-system) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-5-platform-layer-and-job-system)
 
@@ -84,5 +84,5 @@ unchecked until its final report and CI evidence are recorded.
 
 - Phase 1: complete.
 - Phase 2: complete.
-- Phase 3: implementation complete; final report and CI evidence pending.
-- Next after Phase 3 is signed off: Phase 4, `cyber_memory`.
+- Phase 3: complete. Report and CI evidence recorded.
+- Next: Phase 4, `cyber_memory`, after owner review.

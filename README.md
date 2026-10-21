@@ -21,10 +21,10 @@ project's own test runner.
 - Phase 2: complete. `cyber_core` provides fixed-width types, build
   configuration, `Result`, assertions, a bounded logger, xxHash64, and the
   project test runner in `tools/test`.
-- Phase 3: implementation complete. `cyber_math` provides vectors, matrices,
-  quaternions, TRS authoring, reverse-Z view/projection matrices, geometry,
-  linear/sRGB color, binary16 storage, and an SSE2 `Vec4` path. Local tests and
-  the package consumer pass; final CI evidence is recorded in the phase report.
+- Phase 3: complete. `cyber_math` provides vectors, matrices, quaternions, TRS
+  authoring, reverse-Z view/projection matrices, geometry, linear/sRGB color,
+  binary16 storage, and an SSE2 `Vec4` path. All 17 tests pass in every preset,
+  both consumers pass, and the Windows + Linux CI jobs are green.
 - Next: Phase 4 (`cyber_memory`) after owner review.
 
 See [engines/MODULES.md](engines/MODULES.md) for the module index and
