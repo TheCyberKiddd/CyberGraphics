@@ -53,7 +53,9 @@ semantic versioning once a public API exists.
 - Deterministic 128-block free-list stress coverage, deliberate-leak coverage,
   and stale-handle coverage in the memory tests.
 - `cyber::memory` install/export and source/package consumer coverage.
-- ADR 0006 and the Phase 4 design note.
+- ADR 0006, the Phase 4 design note, and the Phase 4 report.
+- UBSan builds exclude the `vptr` check because runtime code and tests share
+  RTTI-disabled settings; test targets keep exceptions enabled.
 
 ### Notes
 
