@@ -1,8 +1,9 @@
 # Phase 3 report: math library
 
 Date: 2026-10-21
-Commits: `016e6c7..aee087b` (math implementation, tests, package integration,
-and documentation; `14ead49` adds the agent rulebook and roadmap index)
+Commits: `016e6c7..f98d602` (math implementation, tests, package integration,
+documentation, and the phase report; `14ead49` adds the agent rulebook and
+roadmap index)
 Machine: Windows 10 Pro 19045, Intel Core i5-6400, 16 GB RAM, Intel HD 530,
 MSVC 19.44.35225, CMake 3.31.6, Ninja preset builds
 
@@ -138,9 +139,19 @@ package, and the source consumer exercises the same code through
 
 ### CI
 
-The GitHub Actions run is recorded in the commit checks for `aee087b`:
-Windows MSVC, Linux clang + UBSan, structure/dependency law, and formatting.
-Final run evidence is appended after the push that includes this report.
+GitHub Actions run [39580848319](https://github.com/TheCyberKiddd/CyberGraphics/actions/runs/39580848319)
+passed for `f98d602`:
+
+| Job | Result |
+|---|---|
+| Structure and dependency law | pass |
+| Formatting | pass |
+| Windows MSVC (configure, build, test, install, consumers) | pass |
+| Linux clang + UBSan (configure, build, test, package, consumers) | pass |
+
+The run completed all four jobs successfully. The only annotation was the
+upstream `ilammy/msvc-dev-cmd` Node 20 deprecation notice; it does not affect
+the build or tests.
 
 ## Known gaps
 
