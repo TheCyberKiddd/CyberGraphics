@@ -43,7 +43,8 @@ the evidence is recorded in a phase report.
 ## Sanitizers
 
 - Windows MSVC: AddressSanitizer.
-- Linux clang: UndefinedBehaviorSanitizer and ThreadSanitizer.
+- Linux clang: UndefinedBehaviorSanitizer and ThreadSanitizer. UBSan excludes
+  its `vptr` check because runtime code is built with RTTI disabled.
 - Sanitizer runs are separate presets, not the default developer build.
 - A sanitizer failure is a bug, not a warning.
 
