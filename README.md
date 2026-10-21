@@ -6,15 +6,16 @@ external dependencies are the C++ standard library, operating system headers,
 and the graphics driver APIs hidden behind the RHI.
 
 This repository is being built phase by phase from the 44-phase CyberGraphics
-roadmap. The repository, build foundation, `cyber_core` primitives, and
-`cyber_math` foundation are in place, and every module test runs through the
-project's own test runner.
+roadmap. The repository, build foundation, `cyber_core` primitives,
+`cyber_math`, and `cyber_memory` foundations are in place, and every module test
+runs through the project's own test runner.
 
 ## Status
 
 - Structure and module contracts: scaffolded.
 - Build system: CMake 3.28+, C++20, Debug/Release/Shipping presets.
-- Modules: 16 defined, 2 active (`cyber_core`, `cyber_math`), 14 planned.
+- Modules: 16 defined, 3 active (`cyber_core`, `cyber_math`, `cyber_memory`),
+  13 planned.
 - CI: Windows MSVC and Linux clang jobs, plus structure and dependency checks.
 - Phase 1: complete. Local builds and tests pass in every preset, structure and
   dependency checks pass, and the Windows + Linux CI jobs are green.
@@ -25,7 +26,10 @@ project's own test runner.
   authoring, reverse-Z view/projection matrices, geometry, linear/sRGB color,
   binary16 storage, and an SSE2 `Vec4` path. All 17 tests pass in every preset,
   both consumers pass, and the Windows + Linux CI jobs are green.
-- Next: Phase 4 (`cyber_memory`) after owner review.
+- Phase 4: implementation and local evidence complete. `cyber_memory` provides
+  the allocator family, tagged leak reports, containers, strings, spans, and
+  generation-checked handles. CI evidence is pending the first push.
+- Next: Phase 5 (`cyber_platform` and `cyber_jobs`) after owner review.
 
 See [engines/MODULES.md](engines/MODULES.md) for the module index and
 [docs/architecture/overview.md](docs/architecture/overview.md) for the design.
@@ -81,8 +85,9 @@ package. Both modes expose the same targets:
 
 - `cyber::graphics_api` — the stable product contract.
 - `cyber::core` — core primitives.
-- `cyber::math` — vectors, matrices, quaternions, projections, geometry, color,
+- `cyber::math` - vectors, matrices, quaternions, projections, geometry, color,
   and half floats.
+- `cyber::memory` - allocators, containers, strings, and generation handles.
 
 Source mode:
 
@@ -96,6 +101,7 @@ target_link_libraries(cyber_engine_renderer PRIVATE
     cyber::graphics_api
     cyber::core
     cyber::math
+    cyber::memory
 )
 ```
 
@@ -113,6 +119,7 @@ target_link_libraries(cyber_engine_renderer PRIVATE
     cyber::graphics_api
     cyber::core
     cyber::math
+    cyber::memory
 )
 ```
 

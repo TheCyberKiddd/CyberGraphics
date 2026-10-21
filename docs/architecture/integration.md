@@ -40,6 +40,7 @@ target_link_libraries(cyber_engine_renderer PRIVATE
     cyber::graphics_api
     cyber::core
     cyber::math
+    cyber::memory
 )
 ```
 
@@ -61,6 +62,7 @@ target_link_libraries(cyber_engine_renderer PRIVATE
     cyber::graphics_api
     cyber::core
     cyber::math
+    cyber::memory
 )
 ```
 
@@ -69,9 +71,11 @@ The install tree contains:
 ```text
 include/cyber/core/...          core module headers
 include/cyber/math/...          math module headers
+include/cyber/memory/...        allocator and container headers
 include/cybergraphics/          stable C ABI (empty until Phase 25)
 lib/cyber_core.lib              static module library
 lib/cyber_math.lib              static module library
+lib/cyber_memory.lib            static module library
 lib/cmake/CyberGraphics/...     package config and exported targets
 share/CyberGraphics/...         LICENSE and notices
 ```
@@ -87,6 +91,7 @@ Linux, so neither path can silently break.
 | `cyber::graphics_api` | `cyber::graphics_api` | The stable product contract. |
 | `cyber::core` | `cyber::core` | Core primitives. |
 | `cyber::math` | `cyber::math` | Vectors, matrices, projections, geometry. |
+| `cyber::memory` | `cyber::memory` | Allocators, containers, strings, and generation handles. |
 | `cyber::rhi`, ... | same | Added when their phases start. |
 
 Build-internal warning policy and test targets are not exported.

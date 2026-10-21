@@ -20,7 +20,7 @@ deliberate, so the architecture is visible from the start.
 |---|---:|---:|---|---|---|---|
 | [`cyber_core`](cyber_core/) | 0 | 0 | foundation | active | — | 2 |
 | [`cyber_math`](cyber_math/) | 0 | 1 | foundation | active | cyber_core | 3 |
-| [`cyber_memory`](cyber_memory/) | 0 | 2 | foundation | planned | cyber_core | 4 |
+| [`cyber_memory`](cyber_memory/) | 0 | 2 | foundation | active | cyber_core | 4 |
 | [`cyber_platform`](cyber_platform/) | 1 | 10 | platform | planned | cyber_core | 5 |
 | [`cyber_perf`](cyber_perf/) | 1 | 11 | service | planned | cyber_core<br>cyber_platform | 5, 15, 36 |
 | [`cyber_jobs`](cyber_jobs/) | 1 | 12 | service | planned | cyber_core<br>cyber_memory<br>cyber_platform<br>cyber_perf | 5 |
