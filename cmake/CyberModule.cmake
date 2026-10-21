@@ -108,11 +108,18 @@ function(cyber_add_test)
     cyber_apply_warnings(${target})
 
     # Tests keep exceptions enabled so standard-library test helpers behave
-    # normally; runtime modules use CYBER_RUNTIME_OPTIONS instead.
+    # normally, but they match the runtime's RTTI setting so polymorphic module
+    # types have a consistent ABI.
     if(MSVC)
         target_compile_options(${target} PRIVATE /EHsc)
+        if(CYBER_NO_RTTI)
+            target_compile_options(${target} PRIVATE /GR-)
+        endif()
     else()
         target_compile_options(${target} PRIVATE -fexceptions)
+        if(CYBER_NO_RTTI)
+            target_compile_options(${target} PRIVATE -fno-rtti)
+        endif()
     endif()
 
     foreach(dep IN LISTS ARG_DEPENDS)
