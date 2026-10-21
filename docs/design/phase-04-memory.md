@@ -163,7 +163,8 @@ Clear and remove bump every retired generation. Generation wrap skips zero.
 - linear alignment, exhaustion, reset, ownership;
 - stack marks and out-of-order rejection;
 - pool allocate/exhaust/free/reuse/reset;
-- free-list small and large allocations, coalescing, alignment, reset, and a\n  deterministic 128-block randomized allocate/free stress run;
+- free-list small and large allocations, coalescing, alignment, reset, and a
+  deterministic 128-block randomized allocate/free stress run;
 - ring wrap and live-data refusal;
 - frame reset;
 - tracking tags, deallocation, deliberate leak report.

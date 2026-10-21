@@ -26,9 +26,10 @@ runs through the project's own test runner.
   authoring, reverse-Z view/projection matrices, geometry, linear/sRGB color,
   binary16 storage, and an SSE2 `Vec4` path. All 17 tests pass in every preset,
   both consumers pass, and the Windows + Linux CI jobs are green.
-- Phase 4: implementation and local evidence complete. `cyber_memory` provides
-  the allocator family, tagged leak reports, containers, strings, spans, and
-  generation-checked handles. CI evidence is pending the first push.
+- Phase 4: complete. `cyber_memory` provides the allocator family, tagged leak
+  reports, containers, strings, spans, and generation-checked handles. All 20
+  tests pass in every local preset, both consumers pass, and the Windows + Linux
+  CI jobs are green.
 - Next: Phase 5 (`cyber_platform` and `cyber_jobs`) after owner review.
 
 See [engines/MODULES.md](engines/MODULES.md) for the module index and
