@@ -8,6 +8,7 @@ a phase actually works.
 
 | Document | Purpose |
 |---|---|
+| [ROADMAP.md](ROADMAP.md) | Master checklist for all 44 phases, linked to the two binding plans. |
 | [requirements.md](requirements.md) | Project-level functional and non-functional requirements. |
 | [architecture/overview.md](architecture/overview.md) | The module map, layers, and dependency law. |
 | [architecture/integration.md](architecture/integration.md) | How Cyber Engine consumes CyberGraphics as a submodule or package. |
@@ -24,6 +25,7 @@ a phase actually works.
 
 | Directory | Contents |
 |---|---|
+| [graphics/](graphics/) | The binding CyberGraphics roadmap and per-phase build guide. |
 | [design/](design/) | One design note per roadmap phase, written before code. |
 | [adr/](adr/) | Architecture decision records. |
 | [notes/](notes/) | Reading notes and sources for each phase. |
