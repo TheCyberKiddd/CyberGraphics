@@ -20,7 +20,9 @@ if(CYBER_ENABLE_UBSAN)
     if(MSVC)
         message(FATAL_ERROR "MSVC does not support UndefinedBehaviorSanitizer; use clang on Linux.")
     endif()
-    add_compile_options(-fsanitize=undefined -fno-omit-frame-pointer)
+    # The vptr check needs RTTI type information, but runtime code is built
+    # with -fno-rtti. Keep the rest of UBSan enabled.
+    add_compile_options(-fsanitize=undefined -fno-sanitize=vptr -fno-omit-frame-pointer)
     add_link_options(-fsanitize=undefined)
 endif()
 
