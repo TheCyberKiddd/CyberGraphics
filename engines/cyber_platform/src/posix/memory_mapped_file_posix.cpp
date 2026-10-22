@@ -97,7 +97,7 @@ core::Result<MemoryMappedFile, core::Error> MemoryMappedFile::Open(const char* u
             core::Error{code, "failed to open file for memory mapping"});
     }
 
-    struct stat status{};
+    struct stat status = {};
     if (fstat(descriptor, &status) != 0 || status.st_size < 0 ||
         static_cast<u64>(status.st_size) > static_cast<u64>(std::numeric_limits<usize>::max()))
     {

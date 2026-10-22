@@ -8,7 +8,7 @@ namespace cyber::platform
 
 u64 Clock::NowNanoseconds() noexcept
 {
-    struct timespec time{};
+    struct timespec time = {};
     if (clock_gettime(CLOCK_MONOTONIC, &time) != 0)
     {
         return 0;
