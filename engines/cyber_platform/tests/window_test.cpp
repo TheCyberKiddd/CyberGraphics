@@ -47,14 +47,52 @@ CG_TEST(platform_window_create_and_close)
     CG_EXPECT_TRUE(window.Height() > 0);
     CG_EXPECT_TRUE(window.DpiScale() > 0.0f);
     CG_EXPECT_TRUE(window.NativeHandle() != nullptr);
-    CG_EXPECT_TRUE(static_cast<bool>(window.SetFullscreen(false)));
     CG_EXPECT_FALSE(window.IsFullscreen());
 
     window.SetTitle("renamed");
     window.Resize(400, 300);
     window.PollEvents();
-    CG_EXPECT_TRUE(window.Width() > 0);
-    CG_EXPECT_TRUE(window.Height() > 0);
+
+    bool sawResize = false;
+    WindowEvent event{};
+    while (window.PollEvent(event))
+    {
+        if (event.type == WindowEventType::Resize && event.width > 0 && event.height > 0)
+        {
+            sawResize = true;
+        }
+    }
+    CG_EXPECT_TRUE(sawResize);
+
+    auto enteredFullscreen = window.SetFullscreen(true);
+    CG_REQUIRE(static_cast<bool>(enteredFullscreen));
+    CG_EXPECT_TRUE(window.IsFullscreen());
+    window.PollEvents();
+
+    bool sawFullscreenOn = false;
+    while (window.PollEvent(event))
+    {
+        if (event.type == WindowEventType::FullscreenChanged && event.fullscreen)
+        {
+            sawFullscreenOn = true;
+        }
+    }
+    CG_EXPECT_TRUE(sawFullscreenOn);
+
+    auto leftFullscreen = window.SetFullscreen(false);
+    CG_REQUIRE(static_cast<bool>(leftFullscreen));
+    CG_EXPECT_FALSE(window.IsFullscreen());
+    window.PollEvents();
+
+    bool sawFullscreenOff = false;
+    while (window.PollEvent(event))
+    {
+        if (event.type == WindowEventType::FullscreenChanged && !event.fullscreen)
+        {
+            sawFullscreenOff = true;
+        }
+    }
+    CG_EXPECT_TRUE(sawFullscreenOff);
 
     Window moved = std::move(window);
     CG_EXPECT_FALSE(window.IsOpen());
@@ -65,7 +103,6 @@ CG_TEST(platform_window_create_and_close)
     CG_EXPECT_FALSE(moved.IsOpen());
 
     bool sawClose = false;
-    WindowEvent event{};
     while (moved.PollEvent(event))
     {
         if (event.type == WindowEventType::Close)
