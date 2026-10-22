@@ -7,15 +7,15 @@ and the graphics driver APIs hidden behind the RHI.
 
 This repository is being built phase by phase from the 44-phase CyberGraphics
 roadmap. The repository, build foundation, `cyber_core` primitives,
-`cyber_math`, and `cyber_memory` foundations are in place, and every module test
-runs through the project's own test runner.
+`cyber_math`, `cyber_memory`, and the `cyber_platform`/`cyber_jobs` services are
+in place, and every module test runs through the project's own test runner.
 
 ## Status
 
 - Structure and module contracts: scaffolded.
 - Build system: CMake 3.28+, C++20, Debug/Release/Shipping presets.
-- Modules: 16 defined, 3 active (`cyber_core`, `cyber_math`, `cyber_memory`),
-  13 planned.
+- Modules: 16 defined, 6 active (`cyber_core`, `cyber_math`, `cyber_memory`,
+  `cyber_platform`, `cyber_perf`, `cyber_jobs`), 10 planned.
 - CI: Windows MSVC and Linux clang jobs, plus structure and dependency checks.
 - Phase 1: complete. Local builds and tests pass in every preset, structure and
   dependency checks pass, and the Windows + Linux CI jobs are green.
@@ -30,7 +30,15 @@ runs through the project's own test runner.
   reports, containers, strings, spans, and generation-checked handles. All 20
   tests pass in every local preset, both consumers pass, and the Windows + Linux
   CI jobs are green.
-- Next: Phase 5 (`cyber_platform` and `cyber_jobs`) after owner review.
+- Phase 5: complete. `cyber_platform` provides renderer-agnostic windows,
+  input, native clocks, UTF-8 file I/O, memory mapping, a polling file watcher,
+  native threads, synchronization wrappers, and dynamic-library loading.
+  `cyber_perf` provides the profiler seam, and `cyber_jobs` provides the fixed
+  worker pool, work stealing, dependency counters, handles, `ParallelFor`, and
+  deterministic shutdown. All 31 tests pass in every local preset, both
+  consumers pass, the visible-window sample runs, and the Windows + Linux CI
+  jobs are green.
+- Next: Phase 6 (framebuffer and present).
 
 See [engines/MODULES.md](engines/MODULES.md) for the module index and
 [docs/architecture/overview.md](docs/architecture/overview.md) for the design.

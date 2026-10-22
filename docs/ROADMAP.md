@@ -9,7 +9,7 @@ documents are binding:
   per-phase work packages, reading list, tasks, tips, and report template.
 
 Work phases in this order. Do not tick a phase until its done-when line is
-proved with committed evidence. Phase 4 is complete; its report and CI evidence
+proved with committed evidence. Phase 5 is complete; its report and CI evidence
 are recorded.
 
 ## Part 1: Foundation (phases 1-5)
@@ -18,7 +18,7 @@ are recorded.
 - [x] **Phase 2 — Core utilities** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-2-core-utilities) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-2-core-utilities)
 - [x] **Phase 3 — Math library** — complete; report and CI evidence recorded · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-3-math-library) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-3-math-library)
 - [x] **Phase 4 — Memory and containers** — complete; report and CI evidence recorded · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-4-memory-and-containers) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-4-memory-and-containers)
-- [ ] **Phase 5 — Platform layer and job system** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-5-platform-layer-and-job-system) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-5-platform-layer-and-job-system)
+- [x] **Phase 5 — Platform layer and job system** — complete; report and CI evidence recorded — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-5-platform-layer-and-job-system) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-5-platform-layer-and-job-system)
 
 ## Part 2: CPU software renderer (phases 6-9)
 
@@ -86,4 +86,5 @@ are recorded.
 - Phase 2: complete.
 - Phase 3: complete. Report and CI evidence recorded.
 - Phase 4: complete. Report and CI evidence recorded.
-- Next: Phase 5, `cyber_platform` and `cyber_jobs`, after owner review.
+- Phase 5: complete. Report and CI evidence recorded.
+- Next: Phase 6, framebuffer and present.
