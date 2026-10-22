@@ -69,6 +69,8 @@ semantic versioning once a public API exists.
   `Wait`, `WaitIdle`, `ParallelFor`, profiler scope markers, and deterministic
   shutdown.
 - `samples/00_window` proves the platform layer runs without a renderer.
+- `cyber_jobs_bench` measures 10,000 jobs at 1, 2, 4, and hardware worker
+  counts and reports wall time, speedup, and throughput.
 - `cyber::platform`, `cyber::perf`, and `cyber::jobs` install/export and are
   exercised by the source and package consumers.
 - ADR 0007, the Phase 5 design note, and the Phase 5 report.
