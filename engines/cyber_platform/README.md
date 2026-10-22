@@ -1,8 +1,9 @@
 # cyber_platform
 
-**Status:** planned · **Layer:** 1 · **Kind:** platform
+**Status:** active · **Layer:** 1 · **Kind:** platform
 
-Hardware and OS control: window, display, input, time, files, threads, and DLL loading.
+Renderer-agnostic OS services: window, input, time, files, memory mapping,
+thread wrappers, and dynamic-library loading.
 
 The binding contract for this module lives in [docs/MODULE.md](docs/MODULE.md).
 Read it before adding code or changing a public header.
@@ -10,12 +11,19 @@ Read it before adding code or changing a public header.
 ## Layout
 
 - `include/cyber/platform/` — public headers, self-contained.
-- `src/` — private implementation.
+- `src/` — private implementation; Win32 under `src/win32/`, null window under
+  `src/null/`.
 - `tests/` — unit tests owned by this module.
 
-The folder exists from day one so the architecture is navigable. A CMake
-target is added only when the module's phase starts.
+The folder existed before its phase started so the architecture stayed
+navigable. The `cyber_platform` target became active in Phase 5.
+
+## Boundary
+
+This module never includes `cyber_rhi` or a renderer. The window is the OS
+surface; the RHI and renderer decide what to present on it. Cyber Engine can
+consume this target through the installed CMake package or as a submodule.
 
 ## Roadmap
 
-Phases 5.
+Phase 5.

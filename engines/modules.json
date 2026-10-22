@@ -89,23 +89,25 @@
       "kind": "platform",
       "layer": 1,
       "order": 10,
-      "status": "planned",
-      "purpose": "Hardware and OS control: window, display, input, time, files, threads, and DLL loading.",
+      "status": "active",
+      "purpose": "Renderer-agnostic OS services: window, input, time, files, memory mapping, thread wrappers, and dynamic-library loading.",
       "public_api": "include/cyber/platform/",
-      "depends": ["cyber_core"],
+      "depends": ["cyber_core", "cyber_memory"],
       "forbidden": ["cyber_rhi", "cyber_renderer", "cyber_graphics"],
       "invariants": [
         "No renderer or RHI includes.",
         "Win32 code is isolated under src/win32/.",
-        "Platform state is explicit; no hidden mutable globals."
+        "Unsupported platforms provide a null window backend.",
+        "Platform state is explicit; no hidden mutable globals.",
+        "File buffers and watcher state use explicit allocators."
       ],
       "non_goals": [
         "Job scheduling (cyber_jobs).",
-        "GPU device creation (cyber_rhi).",
-        "Audio and gamepad policy."
+        "GPU device creation or present (cyber_rhi, cyber_software_renderer).",
+        "Audio, gamepads, clipboard, and drag-and-drop policy."
       ],
-      "tests": "Window and event smoke test, timer accuracy, file I/O, thread wrappers, and DLL loading.",
-      "budgets": "Input latency and timer resolution recorded on the target machine.",
+      "tests": "Window/event smoke test, timer and fixed-step tests, file I/O and memory mapping, file watcher, thread wrappers, and dynamic-library loading.",
+      "budgets": "Input latency and timer resolution recorded on the target machine. Window events are fixed-capacity; no per-frame heap allocation in the input path.",
       "roadmap": [5]
     },
     {
@@ -114,21 +116,22 @@
       "kind": "service",
       "layer": 1,
       "order": 11,
-      "status": "planned",
-      "purpose": "Performance instrumentation: CPU and GPU markers, counters, frame statistics, budgets, and export.",
+      "status": "active",
+      "purpose": "Performance instrumentation seam: CPU and GPU markers, counters, frame statistics, budgets, and export.",
       "public_api": "include/cyber/perf/",
       "depends": ["cyber_core", "cyber_platform"],
       "forbidden": ["cyber_rhi", "cyber_renderer", "cyber_graphics"],
       "invariants": [
         "Instrumentation is opt-in and near-zero cost when disabled.",
         "No allocation on the marker hot path.",
-        "Thread-safe from game, render, and worker threads."
+        "Implementations are thread-safe when used from worker threads."
       ],
       "non_goals": [
         "RHI timestamp query implementation (cyber_rhi consumes and produces data).",
-        "Profiler visualization (cyber_ui)."
+        "Profiler visualization (cyber_ui).",
+        "Frame capture and export in the Phase 5 seam."
       ],
-      "tests": "Marker nesting, counter aggregation, export format, and disabled-path cost.",
+      "tests": "Null profiler behavior, balanced marker scopes from the job system, and counter delivery.",
       "budgets": "Disabled marker cost below 1 ns; enabled path allocation-free.",
       "roadmap": [5, 15, 36]
     },
@@ -138,21 +141,23 @@
       "kind": "service",
       "layer": 1,
       "order": 12,
-      "status": "planned",
-      "purpose": "Job system: thread pool, work-stealing queues, dependency counters, and parallel-for.",
+      "status": "active",
+      "purpose": "Job system: fixed worker pool, work-stealing queues, dependency counters, handles, and parallel-for.",
       "public_api": "include/cyber/jobs/",
       "depends": ["cyber_core", "cyber_memory", "cyber_platform", "cyber_perf"],
       "forbidden": ["cyber_rhi", "cyber_renderer", "cyber_graphics"],
       "invariants": [
         "A job never waits on work that cannot make progress.",
-        "Shutdown is deterministic.",
+        "Every submitted job has explicit dependency and completion rules.",
+        "Shutdown is deterministic and joins every worker.",
         "Oversubscription is tested explicitly."
       ],
       "non_goals": [
-        "Fibers in the first pass.",
-        "GPU scheduling."
+        "Fibers and job cancellation in the first pass.",
+        "GPU scheduling.",
+        "Nested ParallelFor from a worker in the first pass."
       ],
-      "tests": "10,000 jobs, dependency graphs, oversubscription, shutdown stress, and TSan on Linux.",
+      "tests": "10,000 jobs at 1, 2, 4, and hardware workers; dependency chains; ParallelFor coverage; oversubscription; repeated shutdown; profiler scope balance; TSan on Linux.",
       "budgets": "10,000 jobs scale across all cores; record scaling at 1, 2, 4, and N workers.",
       "roadmap": [5]
     },

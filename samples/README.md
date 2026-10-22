@@ -5,6 +5,7 @@ the relevant phase exists. A sample that is not tested will break.
 
 | Folder | Purpose | Phase |
 |---|---|---|
+| `00_window/` | Visible platform window with resize, DPI, and fullscreen events. | 5 |
 | `01_triangle/` | First RHI triangle. | 14 |
 | `02_cube/` | Textured, rotating cube through the RHI. | 14 |
 | `03_materials/` | Material definitions and instances. | 18 |

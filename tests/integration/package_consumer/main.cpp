@@ -4,12 +4,32 @@
 #include <cyber/core/log.h>
 #include <cyber/core/result.h>
 #include <cyber/core/version.h>
+#include <cyber/jobs/jobs.h>
 #include <cyber/math/math.h>
 #include <cyber/memory/memory.h>
+#include <cyber/perf/perf.h>
+#include <cyber/platform/platform.h>
 
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <string_view>
+#include <utility>
+
+namespace
+{
+
+struct ConsumerCounter
+{
+    std::atomic<unsigned> value{0};
+};
+
+void ConsumerIncrement(void* userData) noexcept
+{
+    static_cast<ConsumerCounter*>(userData)->value.fetch_add(1, std::memory_order_relaxed);
+}
+
+}  // namespace
 
 int main()
 {
@@ -125,6 +145,56 @@ int main()
     if (!handle.IsValid() || *slots.Get(handle) != 9)
     {
         return 18;
+    }
+
+    using namespace cyber::platform;
+
+    if (Clock::NowSeconds() <= 0.0)
+    {
+        return 19;
+    }
+
+    FrameTimer timer;
+    if (timer.Tick() != 0.0 || timer.FrameCount() != 1)
+    {
+        return 20;
+    }
+
+    cyber::perf::Profiler& profiler = cyber::perf::NullProfilerInstance();
+    profiler.BeginScope("consumer");
+    profiler.EndScope();
+    profiler.Counter("consumer", 1.0);
+
+    using namespace cyber::jobs;
+
+    JobSystem::Desc desc{};
+    desc.workerCount = 1;
+    auto created = JobSystem::Create(desc, heap);
+    if (!created)
+    {
+        return 21;
+    }
+    JobSystem jobs = std::move(created.Value());
+
+    ConsumerCounter counter;
+    JobDesc job{};
+    job.name = "consumer";
+    job.function = &ConsumerIncrement;
+    job.userData = &counter;
+    if (!jobs.SubmitDetached(job))
+    {
+        return 22;
+    }
+    jobs.WaitIdle();
+    if (counter.value.load() != 1)
+    {
+        return 23;
+    }
+
+    jobs.Shutdown();
+    if (jobs.IsRunning())
+    {
+        return 24;
     }
 
     return 0;
