@@ -17,6 +17,7 @@ target_link_libraries(source_consumer PRIVATE
     cyber::platform
     cyber::perf
     cyber::jobs
+    cyber::software_renderer
     cyber::graphics_api
 )
 target_compile_features(source_consumer PRIVATE cxx_std_20)

@@ -2,6 +2,7 @@ set(CYBER_PLATFORM_SOURCES
     src/file_watcher.cpp
     src/filesystem.cpp
     src/input.cpp
+    src/present.cpp
     src/thread.cpp
     src/time.cpp
     src/window.cpp
@@ -12,12 +13,14 @@ if(WIN32)
         src/win32/executable_path_win32.cpp
         src/win32/library_win32.cpp
         src/win32/memory_mapped_file_win32.cpp
+        src/win32/present_win32.cpp
         src/win32/thread_win32.cpp
         src/win32/time_win32.cpp
         src/win32/window_win32.cpp
     )
 else()
     list(APPEND CYBER_PLATFORM_SOURCES
+        src/null/present_null.cpp
         src/null/window_null.cpp
         src/posix/executable_path_posix.cpp
         src/posix/library_posix.cpp
@@ -32,6 +35,7 @@ set(CYBER_PLATFORM_HEADERS
     include/cyber/platform/input.h
     include/cyber/platform/library.h
     include/cyber/platform/platform.h
+    include/cyber/platform/present.h
     include/cyber/platform/thread.h
     include/cyber/platform/time.h
     include/cyber/platform/types.h
@@ -68,6 +72,12 @@ cyber_add_test(
 cyber_add_test(
     NAME platform_window
     SOURCES tests/window_test.cpp
+    DEPENDS platform memory
+)
+
+cyber_add_test(
+    NAME platform_present
+    SOURCES tests/present_test.cpp
     DEPENDS platform memory
 )
 

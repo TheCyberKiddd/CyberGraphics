@@ -2,8 +2,8 @@
 
 **Status:** active · **Layer:** 1 · **Kind:** platform
 
-Renderer-agnostic OS services: window, input, time, files, memory mapping,
-thread wrappers, and dynamic-library loading.
+Renderer-agnostic OS services: window, input, time and sleeps, CPU present
+blit, files, memory mapping, thread wrappers, and dynamic-library loading.
 
 The binding contract for this module lives in [docs/MODULE.md](docs/MODULE.md).
 Read it before adding code or changing a public header.
@@ -21,9 +21,12 @@ navigable. The `cyber_platform` target became active in Phase 5.
 ## Boundary
 
 This module never includes `cyber_rhi` or a renderer. The window is the OS
-surface; the RHI and renderer decide what to present on it. Cyber Engine can
-consume this target through the installed CMake package or as a submodule.
+surface; the RHI and renderer decide what to present on it. Phase 6 adds a
+CPU-only `Presenter` that blits caller-owned sRGB RGBA8 bytes into a window;
+it does not know about framebuffers or linear color. Cyber Engine can consume
+this target through the installed CMake package or as a submodule.
 
 ## Roadmap
 
-Phase 5.
+Phase 5 (windows, input, time, files, threads, libraries) and Phase 6
+(`Presenter`, sleep primitives).

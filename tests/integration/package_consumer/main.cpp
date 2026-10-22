@@ -9,6 +9,7 @@
 #include <cyber/memory/memory.h>
 #include <cyber/perf/perf.h>
 #include <cyber/platform/platform.h>
+#include <cyber/software/software.h>
 
 #include <atomic>
 #include <cmath>
@@ -195,6 +196,47 @@ int main()
     if (jobs.IsRunning())
     {
         return 24;
+    }
+
+    {
+        using namespace cyber::software;
+
+        FramebufferDesc framebufferDesc{};
+        framebufferDesc.width = 2;
+        framebufferDesc.height = 2;
+        auto createdFramebuffer = Framebuffer::Create(framebufferDesc, heap);
+        if (!createdFramebuffer)
+        {
+            return 25;
+        }
+        Framebuffer framebuffer = std::move(createdFramebuffer.Value());
+        framebuffer.Clear(cyber::math::Color{0.5f, 0.5f, 0.5f, 1.0f});
+
+        u8 packed[16] = {};
+        if (!PackPresentPixels(framebuffer, Span<u8>(packed, sizeof(packed))))
+        {
+            return 26;
+        }
+        if (packed[0] != 188 || packed[3] != 255)
+        {
+            return 27;
+        }
+
+        auto encoded = EncodeImage(framebuffer, ImageWriteDesc{}, heap);
+        if (!encoded || encoded.Value().Size() != 23)
+        {
+            return 28;
+        }
+
+        FramePacer pacer(60);
+        if (pacer.TargetFramesPerSecond() != 60)
+        {
+            return 29;
+        }
+        if (!IsGlyphSupported('A') || MeasureText("AB").width != 11)
+        {
+            return 30;
+        }
     }
 
     return 0;

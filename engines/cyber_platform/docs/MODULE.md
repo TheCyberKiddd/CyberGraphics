@@ -8,9 +8,10 @@
 
 ## Purpose
 
-Renderer-agnostic OS services: window creation, input, timing, file I/O, memory
-mapping, file watching, native threads, and dynamic-library loading. `cyber_rhi`
-and the renderer consume this module; this module never consumes them.
+Renderer-agnostic OS services: window creation, input, timing and sleeping,
+CPU present blitting, file I/O, memory mapping, file watching, native threads,
+and dynamic-library loading. `cyber_rhi` and the renderer consume this module;
+this module never consumes them.
 
 ## Public API
 
@@ -18,7 +19,8 @@ and the renderer consume this module; this module never consumes them.
 
 | Header | Contents |
 |---|---|
-| `time.h` | `Clock`, `FrameTimer`, `FixedTimestep`. |
+| `time.h` | `Clock`, `FrameTimer`, `FixedTimestep`, `SleepUntilSeconds`, `SleepSeconds`. |
+| `present.h` | `PresentFormat`, `PresentSource`, `Presenter`. |
 | `input.h` | `Key`, `MouseButton`, `InputState`. |
 | `window.h` | `WindowDesc`, `WindowEvent`, `WindowEventType`, `Window`, `IsWindowSystemSupported`. |
 | `filesystem.h` | `ReadFile`, `WriteFile`, `FileSize`, `Exists`, `IsDirectory`, `CreateDirectories`, `CurrentDirectory`, `ExecutableDirectory`, `MemoryMappedFile`, `FileWatcher`. |
@@ -35,7 +37,10 @@ module's private headers. `NativeHandle()` returns an opaque `void*`.
 - All functions are non-throwing. Recoverable failures return `Result<T, Error>`
   or `Status<Error>`; programmer errors use assertions.
 - `Window::Create` and `Thread::Start` report failure as values.
-- `Window` and `MemoryMappedFile` are move-only and own their native resources.
+- `Window`, `MemoryMappedFile`, and `Presenter` are move-only and own their
+  native resources. A `Presenter` must not outlive its window.
+- `PresentSource::pixels` is a non-owning read-only view; the presenter copies
+  it and never takes ownership.
 - File reads return allocator-backed `DynamicArray<Byte>`; writes accept
   `Span<const Byte>`.
 - `FileWatcher` uses its constructor allocator for watched paths and change
@@ -64,11 +69,18 @@ Dependencies are one-way. A module may depend only on modules with a lower
 - Engine work never detaches a thread.
 - Every runtime-owned buffer uses an explicit allocator.
 - Paths are UTF-8. Invalid or missing paths return a stable `ErrorCode`.
+- Present does no color conversion: producers hand over sRGB RGBA8 bytes. The
+  Win32 backend swizzles to BGRA into one reused allocator-backed scratch
+  buffer; steady-state presents do not allocate.
+- Sleeping is per-call and allocation-free. Windows uses a high-resolution
+  waitable timer; POSIX uses `nanosleep`. No process-global timer state and no
+  `<chrono>` in runtime code.
 
 ## Non-goals
 
 - Job scheduling (`cyber_jobs`).
-- GPU device creation, swapchains, or present (`cyber_rhi`, Phase 6+).
+- GPU device creation, swapchains, vsync, and GPU present (`cyber_rhi`). The
+  Phase 6 `Presenter` is a CPU blit for the software renderer only.
 - Audio, gamepads, clipboard, drag-and-drop, and monitor topology policy.
 - OS directory-change notifications in the first pass.
 - A non-null window backend on Linux.
@@ -76,7 +88,10 @@ Dependencies are one-way. A module may depend only on modules with a lower
 
 ## Tests
 
-`platform_time`: monotonic clock, frame timer, fixed timestep.
+`platform_time`: monotonic clock, frame timer, fixed timestep, and sleeps that
+do not return early.
+`platform_present`: invalid/default presenter, invisible-window create, present,
+resize, present after close, and invalid source rejection.
 `platform_filesystem`: read/write, size, paths, directories, missing files,
 empty files, memory mapping, and polling file watching.
 `platform_thread`: start/join, naming, IDs, mutex contention, condition variables,
@@ -88,8 +103,10 @@ create, resize, fullscreen toggle, DPI, and event delivery.
 keyboard, mouse, wheel, and focus-loss transitions from real window messages.
 `platform_public_headers`: every public header compiles together.
 
-The `00_window` sample is the visible manual check. CI runs the automated
-suite on Windows and compiles the full API on Ubuntu with the null backend.
+The `00_window` sample is the visible manual check for windows; the
+`01_gradient` sample covers software present, pacing, and the overlay. CI runs
+the automated suite on Windows and compiles the full API on Ubuntu with the null
+backend.
 
 ## Budgets
 
@@ -104,4 +121,5 @@ suite on Windows and compiles the full API on Ubuntu with the null backend.
 
 ## Roadmap
 
-Phase 5.
+Phase 5 (windows, input, time, files, threads, libraries) and Phase 6
+(`Presenter`, sleep primitives).

@@ -90,7 +90,7 @@
       "layer": 1,
       "order": 10,
       "status": "active",
-      "purpose": "Renderer-agnostic OS services: window, input, time, files, memory mapping, thread wrappers, and dynamic-library loading.",
+      "purpose": "Renderer-agnostic OS services: window, input, time, files, memory mapping, thread wrappers, dynamic-library loading, and a caller-owned pixel present blit.",
       "public_api": "include/cyber/platform/",
       "depends": ["cyber_core", "cyber_memory"],
       "forbidden": ["cyber_rhi", "cyber_renderer", "cyber_graphics"],
@@ -417,23 +417,22 @@
       "kind": "product",
       "layer": 4,
       "order": 41,
-      "status": "planned",
+      "status": "active",
       "purpose": "CPU reference renderer: framebuffer, rasterization, depth, textures, shaders, golden images, and the second plugin.",
       "public_api": "include/cyber/software/",
       "depends": [
         "cyber_core",
         "cyber_math",
         "cyber_memory",
-        "cyber_jobs",
-        "cyber_assets",
-        "cyber_scene",
-        "cybergraphics_api"
+        "cyber_platform",
+        "cyber_jobs"
       ],
       "forbidden": ["cyber_rhi", "cyber_renderer", "cyber_graphics"],
       "invariants": [
         "No RHI dependency; pure CPU.",
         "Deterministic output for golden images.",
-        "Implements the same stable API as the GPU renderer."
+        "Color is stored linear; the renderer converts to sRGB only when pixels leave it.",
+        "Implements the stable API in include/cybergraphics/ when Phase 25 lands."
       ],
       "non_goals": [
         "Performance parity with the GPU.",

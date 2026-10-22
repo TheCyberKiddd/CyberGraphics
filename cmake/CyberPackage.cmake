@@ -21,6 +21,7 @@ install(
         cyber_platform
         cyber_perf
         cyber_jobs
+        cyber_software_renderer
     EXPORT CyberGraphicsTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -70,6 +71,14 @@ install(
 
 install(
     DIRECTORY engines/cyber_jobs/include/cyber/jobs
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cyber
+    FILES_MATCHING
+        PATTERN "*.h"
+        PATTERN "*.hpp"
+)
+
+install(
+    DIRECTORY engines/cyber_software_renderer/include/cyber/software
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cyber
     FILES_MATCHING
         PATTERN "*.h"

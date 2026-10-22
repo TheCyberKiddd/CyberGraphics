@@ -72,4 +72,14 @@ private:
     u32 m_maxSteps = 8;
 };
 
+// Suspends the calling thread until the monotonic clock reaches
+// deadlineSeconds (the NowSeconds epoch). Returns once the deadline has passed;
+// the OS may overshoot by a scheduling quantum. A deadline in the past returns
+// immediately. Non-throwing and allocation-free.
+void SleepUntilSeconds(f64 deadlineSeconds) noexcept;
+
+// Suspends the calling thread for at least seconds. Non-positive or non-finite
+// durations return immediately.
+void SleepSeconds(f64 seconds) noexcept;
+
 }  // namespace cyber::platform
