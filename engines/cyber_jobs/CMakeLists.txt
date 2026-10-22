@@ -26,3 +26,15 @@ cyber_add_test(
     SOURCES tests/public_headers_test.cpp
     DEPENDS jobs
 )
+
+if(CYBER_BUILD_TESTS)
+    add_executable(cyber_jobs_bench benchmarks/job_scaling_bench.cpp)
+    target_link_libraries(cyber_jobs_bench PRIVATE cyber_jobs)
+    target_compile_features(cyber_jobs_bench PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(cyber_jobs_bench PRIVATE /EHsc /GR)
+    else()
+        target_compile_options(cyber_jobs_bench PRIVATE -fexceptions -frtti)
+    endif()
+    cyber_apply_warnings(cyber_jobs_bench)
+endif()
