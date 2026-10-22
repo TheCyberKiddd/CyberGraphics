@@ -21,9 +21,9 @@ deliberate, so the architecture is visible from the start.
 | [`cyber_core`](cyber_core/) | 0 | 0 | foundation | active | — | 2 |
 | [`cyber_math`](cyber_math/) | 0 | 1 | foundation | active | cyber_core | 3 |
 | [`cyber_memory`](cyber_memory/) | 0 | 2 | foundation | active | cyber_core | 4 |
-| [`cyber_platform`](cyber_platform/) | 1 | 10 | platform | planned | cyber_core | 5 |
-| [`cyber_perf`](cyber_perf/) | 1 | 11 | service | planned | cyber_core<br>cyber_platform | 5, 15, 36 |
-| [`cyber_jobs`](cyber_jobs/) | 1 | 12 | service | planned | cyber_core<br>cyber_memory<br>cyber_platform<br>cyber_perf | 5 |
+| [`cyber_platform`](cyber_platform/) | 1 | 10 | platform | active | cyber_core<br>cyber_memory | 5 |
+| [`cyber_perf`](cyber_perf/) | 1 | 11 | service | active | cyber_core<br>cyber_platform | 5, 15, 36 |
+| [`cyber_jobs`](cyber_jobs/) | 1 | 12 | service | active | cyber_core<br>cyber_memory<br>cyber_platform<br>cyber_perf | 5 |
 | [`cyber_stability`](cyber_stability/) | 1 | 13 | service | planned | cyber_core<br>cyber_memory<br>cyber_platform<br>cyber_perf | 2, 15, 40 |
 | [`cyber_rhi`](cyber_rhi/) | 2 | 20 | graphics | planned | cyber_core<br>cyber_math<br>cyber_memory<br>cyber_platform<br>cyber_jobs<br>cyber_perf<br>cyber_stability | 10, 11, 12, 13, 14, 15, 34, 35 |
 | [`cyber_shaders`](cyber_shaders/) | 2 | 21 | graphics | planned | cyber_core<br>cyber_math<br>cyber_memory<br>cyber_platform<br>cyber_jobs | 16, 17 |

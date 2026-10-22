@@ -57,6 +57,13 @@ target_compile_features(cyber_graphics_api INTERFACE cxx_std_20)
 add_subdirectory(engines/cyber_core)
 add_subdirectory(engines/cyber_math)
 add_subdirectory(engines/cyber_memory)
+add_subdirectory(engines/cyber_platform)
+add_subdirectory(engines/cyber_perf)
+add_subdirectory(engines/cyber_jobs)
+
+if(CYBER_BUILD_SAMPLES)
+    add_subdirectory(samples)
+endif()
 
 # Install and package rules are opt-out so a parent project that consumes the
 # source tree can disable them with CYBER_INSTALL=OFF.

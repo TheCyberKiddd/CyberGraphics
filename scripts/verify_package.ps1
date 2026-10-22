@@ -49,7 +49,14 @@ $requiredHeaders = @(
     'include/cyber/memory/memory.h',
     'include/cyber/memory/allocator.h',
     'include/cyber/memory/dynamic_array.h',
-    'include/cyber/memory/string_view.h'
+    'include/cyber/memory/string_view.h',
+    'include/cyber/platform/platform.h',
+    'include/cyber/platform/window.h',
+    'include/cyber/platform/thread.h',
+    'include/cyber/perf/perf.h',
+    'include/cyber/perf/profiler.h',
+    'include/cyber/jobs/jobs.h',
+    'include/cyber/jobs/job_system.h'
 )
 foreach ($header in $requiredHeaders) {
     $path = Join-Path $Prefix $header

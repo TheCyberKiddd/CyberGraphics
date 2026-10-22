@@ -56,6 +56,24 @@ semantic versioning once a public API exists.
 - ADR 0006, the Phase 4 design note, and the Phase 4 report.
 - UBSan builds exclude the `vptr` check because runtime code and tests share
   RTTI-disabled settings; test targets keep exceptions enabled.
+- Phase 5 `cyber_platform`: renderer-agnostic windows, fixed-size event queues,
+  keyboard/mouse input, native high-resolution clocks, frame timer,
+  fixed-timestep helper, UTF-8 file I/O, read-only memory mapping, path helpers,
+  polling file watching, native threads, synchronization wrappers, thread
+  naming, and dynamic-library loading. Win32 lives under `src/win32/`; other
+  platforms get a null window backend.
+- Phase 5 `cyber_perf`: non-allocating `Profiler` interface, `NullProfiler`, and
+  a process-lifetime null instance.
+- Phase 5 `cyber_jobs`: fixed worker pool, bounded per-worker work-stealing
+  deques, dependency counters, generation-checked handles, `SubmitDetached`,
+  `Wait`, `WaitIdle`, `ParallelFor`, profiler scope markers, and deterministic
+  shutdown.
+- `samples/00_window` proves the platform layer runs without a renderer.
+- `cyber::platform`, `cyber::perf`, and `cyber::jobs` install/export and are
+  exercised by the source and package consumers.
+- ADR 0007, the Phase 5 design note, and the Phase 5 report.
+- MSVC builds define `_HAS_EXCEPTIONS=0` for every target so standard-library
+  exception ABIs agree under shipping LTO; tests keep `/EHsc` unwinding.
 
 ### Notes
 

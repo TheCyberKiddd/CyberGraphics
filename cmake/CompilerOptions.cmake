@@ -30,6 +30,11 @@ set(CYBER_RUNTIME_OPTIONS "")
 if(MSVC)
     if(CYBER_NO_EXCEPTIONS)
         list(APPEND CYBER_RUNTIME_OPTIONS /EHs-c-)
+        # Tell the MSVC standard library that exception paths are disabled. This
+        # must apply to every target, including tests and tools: mixing the two
+        # settings gives std::system_error different vtable layouts, which
+        # shipping LTO reports as C4743 and refuses to link.
+        add_compile_definitions(_HAS_EXCEPTIONS=0)
     else()
         list(APPEND CYBER_RUNTIME_OPTIONS /EHsc)
     endif()
