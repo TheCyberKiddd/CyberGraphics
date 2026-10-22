@@ -33,7 +33,7 @@ deliberate, so the architecture is visible from the start.
 | [`cyber_ui`](cyber_ui/) | 3 | 31 | graphics | planned | cyber_core<br>cyber_math<br>cyber_memory<br>cyber_perf<br>cybergraphics_api | 38 |
 | [`cyber_capture`](cyber_capture/) | 3 | 32 | service | planned | cyber_core<br>cyber_memory<br>cyber_platform<br>cyber_rhi | 39 |
 | [`cyber_graphics`](cyber_graphics/) | 4 | 40 | product | planned | cyber_core<br>cyber_math<br>cyber_memory<br>cyber_platform<br>cyber_jobs<br>cyber_perf<br>cyber_stability<br>cyber_rhi<br>cyber_shaders<br>cyber_assets<br>cyber_scene<br>cyber_renderer<br>cybergraphics_api | 14, 15, 25 |
-| [`cyber_software_renderer`](cyber_software_renderer/) | 4 | 41 | product | planned | cyber_core<br>cyber_math<br>cyber_memory<br>cyber_jobs<br>cyber_assets<br>cyber_scene<br>cybergraphics_api | 6, 7, 8, 9, 25 |
+| [`cyber_software_renderer`](cyber_software_renderer/) | 4 | 41 | product | active | cyber_core<br>cyber_math<br>cyber_memory<br>cyber_platform<br>cyber_jobs | 6, 7, 8, 9, 25 |
 
 ## Contracts
 

@@ -61,3 +61,27 @@ CG_TEST(platform_fixed_timestep_accumulates)
     timestep.Reset();
     CG_EXPECT_EQ(timestep.Accumulator(), 0.0);
 }
+
+CG_TEST(platform_sleep_respects_deadline)
+{
+    const f64 start = Clock::NowSeconds();
+    SleepUntilSeconds(start + 0.005);
+    const f64 elapsed = Clock::NowSeconds() - start;
+    CG_EXPECT_TRUE(elapsed >= 0.004);
+    CG_EXPECT_TRUE(elapsed < 2.0);
+
+    // A deadline in the past returns without sleeping.
+    const f64 pastStart = Clock::NowSeconds();
+    SleepUntilSeconds(pastStart - 1.0);
+    CG_EXPECT_TRUE(Clock::NowSeconds() - pastStart < 0.2);
+
+    // SleepSeconds is a relative form of the same primitive.
+    const f64 relativeStart = Clock::NowSeconds();
+    SleepSeconds(0.002);
+    CG_EXPECT_TRUE(Clock::NowSeconds() - relativeStart >= 0.0015);
+
+    const f64 noOpStart = Clock::NowSeconds();
+    SleepSeconds(-1.0);
+    SleepSeconds(0.0);
+    CG_EXPECT_TRUE(Clock::NowSeconds() - noOpStart < 0.2);
+}
