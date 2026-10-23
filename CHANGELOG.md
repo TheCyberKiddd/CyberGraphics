@@ -76,6 +76,24 @@ semantic versioning once a public API exists.
 - ADR 0007, the Phase 5 design note, and the Phase 5 report.
 - MSVC builds define `_HAS_EXCEPTIONS=0` for every target so standard-library
   exception ABIs agree under shipping LTO; tests keep `/EHsc` unwinding.
+- Phase 6 `cyber_software_renderer`: linear `RGBA8Unorm`/`RGBA32F` framebuffer
+  with clipped fills, pixel access, blits, and format conversion; sRGB present
+  packing through a 16 KiB lookup table (within one 8-bit code of
+  `EncodeSrgb8`); deterministic PPM and TGA export; a 5x7 bitmap font; and a
+  60 Hz `FramePacer` with catch-up clamping, frame statistics, and a bounded
+  1.5 ms spin that cancels OS timer rounding.
+- Phase 6 `cyber_platform`: allocation-free `Presenter` seam over caller-owned
+  RGBA8 bytes with a Win32 `StretchDIBits` backend (BGRA swizzle,
+  allocator-backed scratch, fixed-point nearest sampling), plus
+  `SleepUntilSeconds`/`SleepSeconds` built on a per-call high-resolution
+  waitable timer on Windows and `nanosleep` on POSIX.
+- `samples/01_gradient` shows an animated linear gradient at 60 Hz with a
+  frame-time overlay, `F2`/`F11`/`Escape` controls, a `--frames` smoke run that
+  prints the per-frame cost breakdown, and a `--capture` mode that proves two
+  images of the same frame are byte-identical.
+- `cyber_software_renderer` installs/exports and is exercised by the source and
+  package consumers.
+- ADR 0008, the Phase 6 design note, and the Phase 6 report.
 
 ### Notes
 
