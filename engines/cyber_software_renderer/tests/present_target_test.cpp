@@ -76,6 +76,47 @@ CG_TEST(software_present_packs_unorm_zero_and_one)
     CG_EXPECT_EQ(destination[7], u8{255});
 }
 
+CG_TEST(software_present_srgb_accuracy)
+{
+    // The present path quantizes linear RGB to 1/16384 before the sRGB lookup.
+    // Every packed byte must stay within one 8-bit code of EncodeSrgb8.
+    constexpr i32 kSamples = 4097;
+    HeapAllocator heap;
+
+    FramebufferDesc desc{};
+    desc.width = kSamples;
+    desc.height = 1;
+    desc.format = PixelFormat::RGBA32F;
+    auto created = Framebuffer::Create(desc, heap);
+    CG_REQUIRE(static_cast<bool>(created));
+    Framebuffer source = std::move(created.Value());
+
+    const f32 step = 1.0f / static_cast<f32>(kSamples - 1);
+    for (i32 x = 0; x < kSamples; ++x)
+    {
+        const f32 linear = static_cast<f32>(x) * step;
+        source.SetPixel(x, 0, Color{linear, linear, linear, 1.0f});
+    }
+
+    u8 destination[static_cast<usize>(kSamples) * 4] = {};
+    CG_REQUIRE(
+        static_cast<bool>(PackPresentPixels(source, View(destination, sizeof(destination)))));
+    for (i32 x = 0; x < kSamples; ++x)
+    {
+        const f32 linear = static_cast<f32>(x) * step;
+        const i32 expected = static_cast<i32>(EncodeSrgb8(linear));
+        for (usize channel = 0; channel < 3; ++channel)
+        {
+            const i32 packed = static_cast<i32>(destination[static_cast<usize>(x) * 4 + channel]);
+            CG_EXPECT_TRUE(packed >= expected - 1 && packed <= expected + 1);
+        }
+    }
+
+    // Values on the table grid are exact.
+    CG_EXPECT_EQ(destination[0], u8{0});
+    CG_EXPECT_EQ(destination[(kSamples / 4) * 4], EncodeSrgb8(0.25f));
+}
+
 CG_TEST(software_present_stride_and_determinism)
 {
     HeapAllocator heap;

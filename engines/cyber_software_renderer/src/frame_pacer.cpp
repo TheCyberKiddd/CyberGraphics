@@ -11,6 +11,12 @@ namespace
 // roughly 30 frames, which is readable without hiding a frame spike for long.
 constexpr f64 kSmoothingWeight = 0.1;
 
+// Windows rounds a timer sleep up to its scheduling quantum (about 1 ms), so a
+// sleep that ends exactly on the deadline lands late and the frame rate drifts
+// below the target. Wait sleeps to just before the deadline and spins out the
+// final fraction against the steady clock.
+constexpr f64 kSpinMarginSeconds = 0.0015;
+
 f64 SanitizeNow(f64 nowSeconds) noexcept
 {
     if (!(nowSeconds >= 0.0))
@@ -116,9 +122,14 @@ f64 FramePacer::Wait() noexcept
 {
     f64 now = platform::Clock::NowSeconds();
     const f64 remaining = SecondsUntilNextFrame(now);
-    if (remaining > 0.0)
+    if (remaining > kSpinMarginSeconds)
     {
-        platform::SleepUntilSeconds(now + remaining);
+        platform::SleepUntilSeconds(now + remaining - kSpinMarginSeconds);
+        now = platform::Clock::NowSeconds();
+    }
+    // A late frame has no remaining time and returns without spinning.
+    while (now < m_nextDeadlineSeconds)
+    {
         now = platform::Clock::NowSeconds();
     }
     EndFrame(now);

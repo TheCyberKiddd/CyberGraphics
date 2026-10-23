@@ -123,9 +123,14 @@ rectangle setup.
 - the stride is at least `width * 4`;
 - the source framebuffer is valid.
 
-The result is deterministic: the same framebuffer always produces the same
-bytes. The sample allocates one destination buffer at startup and reuses it,
-resizing only when the framebuffer size changes.
+A per-pixel `pow` costs about 140 ms for a 1280x720 frame, so packing builds a
+16 KiB stack table once per call: 16384 samples of `EncodeSrgb8` over the linear
+range plus a 256-entry table for `RGBA8Unorm` sources. Linear RGB is quantized to
+1/16384 before the lookup, which keeps every byte within one 8-bit code of
+`EncodeSrgb8`; alpha still uses `QuantizeUnorm8`. The table is a local, so there
+is no global state and no allocation, and the same framebuffer always produces
+the same bytes. A unit test sweeps 4097 linear values against `EncodeSrgb8` and
+asserts the one-code bound.
 
 ### Platform presenter
 
@@ -161,14 +166,19 @@ display server.
   more than `maxCatchUpFrames` periods late, the deadline resynchronizes to
   `now + period` instead of accumulating a backlog; a stalled debugger must not
   cause a burst of immediate frames.
-- `Wait()` sleeps until the deadline and then calls `EndFrame`.
+- `Wait()` sleeps to within 1.5 ms of the deadline and spins the rest against the
+  steady clock, then calls `EndFrame`. A pure sleep rounds up to the OS timer
+  quantum (about 1 ms on Windows), which pulls a 60 Hz loop down to roughly 59
+  and makes the measured frame time drift above the target.
 - Statistics: instantaneous frame time, an exponential moving average used by
   the overlay, and a frame counter.
 
 Pacing uses `platform::SleepUntilSeconds`. Windows uses a high-resolution
 waitable timer created per sleep call (`CREATE_WAITABLE_TIMER_HIGH_RESOLUTION`);
 POSIX uses `nanosleep` with a remaining-time loop. There is no process-global
-timer handle, no `<chrono>`, and no `timeBeginPeriod` side effect.
+timer handle, no `<chrono>`, and no `timeBeginPeriod` side effect. The spin is
+bounded by the pacer's margin, so a frame that is already late returns
+immediately instead of spinning.
 
 The sample targets 60 Hz. The actual smoothness is bounded by the display's
 refresh and by the OS scheduler; vsync arrives with the swapchain phase.

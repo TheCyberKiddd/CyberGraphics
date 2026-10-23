@@ -125,6 +125,12 @@ public:
         }
 
         const u8* sourcePixels = reinterpret_cast<const u8*>(source.pixels.Data());
+        // Fixed-point column stepping avoids a 64-bit division per pixel. When
+        // the client and source widths match, the step is exactly one pixel.
+        const u64 columnStep =
+            clientWidth == source.width
+                ? (1ull << 32)
+                : (static_cast<u64>(source.width) << 32) / static_cast<u64>(clientWidth);
         for (i32 y = 0; y < clientHeight; ++y)
         {
             const u64 sourceY = static_cast<u64>(y) * static_cast<u64>(source.height) /
@@ -132,17 +138,17 @@ public:
             const u8* sourceRow = sourcePixels + static_cast<usize>(sourceY) * stride;
             u8* destination =
                 m_scratch + static_cast<usize>(y) * static_cast<usize>(clientWidth) * 4;
+            u64 column = 0;
             for (i32 x = 0; x < clientWidth; ++x)
             {
-                const u64 sourceX = static_cast<u64>(x) * static_cast<u64>(source.width) /
-                                    static_cast<u64>(clientWidth);
-                const u8* pixel = sourceRow + static_cast<usize>(sourceX) * 4;
+                const u8* pixel = sourceRow + static_cast<usize>(column >> 32) * 4;
                 // DIB 32-bit pixels are BGRA; alpha is unused by BI_RGB.
                 destination[0] = pixel[2];
                 destination[1] = pixel[1];
                 destination[2] = pixel[0];
                 destination[3] = 255;
                 destination += 4;
+                column += columnStep;
             }
         }
 
