@@ -9,7 +9,7 @@ documents are binding:
   per-phase work packages, reading list, tasks, tips, and report template.
 
 Work phases in this order. Do not tick a phase until its done-when line is
-proved with committed evidence. Phase 5 is complete; its report and CI evidence
+proved with committed evidence. Phase 6 is complete; its report and CI evidence
 are recorded.
 
 ## Part 1: Foundation (phases 1-5)
@@ -22,7 +22,7 @@ are recorded.
 
 ## Part 2: CPU software renderer (phases 6-9)
 
-- [ ] **Phase 6 — Framebuffer and present** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-6-framebuffer-and-present) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-6-framebuffer-and-present)
+- [x] **Phase 6 — Framebuffer and present** — complete; report and CI evidence recorded · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-6-framebuffer-and-present) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-6-framebuffer-and-present)
 - [ ] **Phase 7 — Triangle rasterization** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-7-triangle-rasterization) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-7-triangle-rasterization)
 - [ ] **Phase 8 — Depth, clipping, and perspective** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-8-depth-clipping-and-perspective) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-8-depth-clipping-and-perspective)
 - [ ] **Phase 9 — Textures, CPU shaders, and test scenes** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-9-textures-cpu-shaders-and-test-scenes) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-9-textures-cpu-shaders-and-test-scenes)
@@ -87,4 +87,5 @@ are recorded.
 - Phase 3: complete. Report and CI evidence recorded.
 - Phase 4: complete. Report and CI evidence recorded.
 - Phase 5: complete. Report and CI evidence recorded.
-- Next: Phase 6, framebuffer and present.
+- Phase 6: complete. Report and CI evidence recorded.
+- Next: Phase 7, triangle rasterization.

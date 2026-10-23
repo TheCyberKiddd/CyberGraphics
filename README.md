@@ -14,8 +14,9 @@ in place, and every module test runs through the project's own test runner.
 
 - Structure and module contracts: scaffolded.
 - Build system: CMake 3.28+, C++20, Debug/Release/Shipping presets.
-- Modules: 16 defined, 6 active (`cyber_core`, `cyber_math`, `cyber_memory`,
-  `cyber_platform`, `cyber_perf`, `cyber_jobs`), 10 planned.
+- Modules: 16 defined, 7 active (`cyber_core`, `cyber_math`, `cyber_memory`,
+  `cyber_platform`, `cyber_perf`, `cyber_jobs`, `cyber_software_renderer`), 9
+  planned.
 - CI: Windows MSVC and Linux clang jobs, plus structure and dependency checks.
 - Phase 1: complete. Local builds and tests pass in every preset, structure and
   dependency checks pass, and the Windows + Linux CI jobs are green.
@@ -38,7 +39,14 @@ in place, and every module test runs through the project's own test runner.
   deterministic shutdown. All 31 tests pass in every local preset, both
   consumers pass, the visible-window sample runs, and the Windows + Linux CI
   jobs are green.
-- Next: Phase 6 (framebuffer and present).
+- Phase 6: complete. `cyber_software_renderer` provides linear `RGBA8Unorm`
+  and `RGBA32F` framebuffers, clipped fills, blits and conversion, sRGB present
+  packing, deterministic PPM/TGA export, bitmap overlay text, and a 60 Hz frame
+  pacer. `cyber_platform` gains the `Presenter` seam and high-resolution sleeps.
+  The gradient sample runs at 60.0 FPS and its two fixed-frame captures are
+  byte-identical. All 39 tests pass in every local preset, both consumers pass,
+  and the Windows + Linux CI jobs are green.
+- Next: Phase 7 (triangle rasterization).
 
 See [engines/MODULES.md](engines/MODULES.md) for the module index and
 [docs/architecture/overview.md](docs/architecture/overview.md) for the design.
