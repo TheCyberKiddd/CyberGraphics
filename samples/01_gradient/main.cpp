@@ -16,6 +16,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <utility>
 
@@ -35,11 +36,13 @@ constexpr usize kCapturePathBytes = 512;
 struct Options
 {
     const char* capturePath = nullptr;
+    u32 frames = 0;
 };
 
 void PrintUsage()
 {
-    std::printf("usage: cyber_sample_gradient [--capture <path.ppm|path.tga>]\n");
+    std::printf(
+        "usage: cyber_sample_gradient [--capture <path.ppm|path.tga>] [--frames <count>]\n");
     std::printf("  Escape closes, F11 toggles fullscreen, F2 toggles the overlay\n");
 }
 
@@ -54,6 +57,21 @@ bool ParseOptions(int argc, char** argv, Options& options)
                 return false;
             }
             options.capturePath = argv[++index];
+        }
+        else if (std::strcmp(argv[index], "--frames") == 0)
+        {
+            if (index + 1 >= argc)
+            {
+                return false;
+            }
+            const char* text = argv[++index];
+            char* end = nullptr;
+            const unsigned long count = std::strtoul(text, &end, 10);
+            if (end == text || *end != '\0' || count == 0 || count > 1000000)
+            {
+                return false;
+            }
+            options.frames = static_cast<u32>(count);
         }
         else if (std::strcmp(argv[index], "--help") == 0)
         {
@@ -92,19 +110,34 @@ void RenderScene(Framebuffer& target, f32 seconds, bool drawOverlay, f32 frameMi
     const i32 checkerShift = static_cast<i32>(seconds * 4.0f);
     const f32 widthDenominator = static_cast<f32>(width > 1 ? width - 1 : 1);
     const f32 heightDenominator = static_cast<f32>(height > 1 ? height - 1 : 1);
+    const f32 pulse = 0.5f + 0.5f * std::sin(seconds * 2.0f);
+    const f32 blueBase = 0.35f + 0.3f * pulse;
+    const f32 columnStep = 1.0f / widthDenominator;
 
     for (i32 y = 0; y < height; ++y)
     {
         const f32 v = static_cast<f32>(y) / heightDenominator;
+        // RGBA32F storage is four binary32 channels per pixel, so this hot loop
+        // writes rows directly instead of paying a bounds-checked SetPixel call
+        // for every pixel.
+        f32* pixel = reinterpret_cast<f32*>(target.Row(y));
+        f32 u = 0.0f;
+        i32 cellParity = (y / kCheckerSize + checkerShift) & 1;
+        i32 cellColumn = 0;
         for (i32 x = 0; x < width; ++x)
         {
-            const f32 u = static_cast<f32>(x) / widthDenominator;
-            const bool dark = (((x / kCheckerSize) + (y / kCheckerSize) + checkerShift) & 1) != 0;
-            const f32 checker = dark ? 0.18f : 0.82f;
-            const f32 pulse = 0.5f + 0.5f * std::sin(seconds * 2.0f);
-            target.SetPixel(x, y,
-                            Color{checker * u, checker * v,
-                                  checker * (0.35f + 0.3f * pulse + 0.2f * (u + v)), 1.0f});
+            const f32 checker = cellParity != 0 ? 0.18f : 0.82f;
+            pixel[0] = checker * u;
+            pixel[1] = checker * v;
+            pixel[2] = checker * (blueBase + 0.2f * (u + v));
+            pixel[3] = 1.0f;
+            pixel += 4;
+            u += columnStep;
+            if (++cellColumn == kCheckerSize)
+            {
+                cellColumn = 0;
+                cellParity ^= 1;
+            }
         }
     }
 
@@ -204,7 +237,7 @@ int RunCapture(const char* path, Allocator& allocator)
     return identical ? 0 : 1;
 }
 
-int RunWindow(Allocator& allocator)
+int RunWindow(const Options& options, Allocator& allocator)
 {
     if (!IsWindowSystemSupported())
     {
@@ -259,12 +292,21 @@ int RunWindow(Allocator& allocator)
     bool overlay = true;
     bool running = true;
     f32 animationSeconds = 0.0f;
+    u64 presentedFrames = 0;
+    f64 renderSeconds = 0.0;
+    f64 packSeconds = 0.0;
+    f64 presentSeconds = 0.0;
+    f64 waitSeconds = 0.0;
+    f64 pollSeconds = 0.0;
 
     while (running && window.IsOpen())
     {
+        const f64 waitStart = Clock::NowSeconds();
         const f64 frameDelta = pacer.Wait();
+        waitSeconds += Clock::NowSeconds() - waitStart;
         animationSeconds += static_cast<f32>(frameDelta > 0.1 ? 0.1 : frameDelta);
 
+        const f64 pollStart = Clock::NowSeconds();
         window.BeginFrame();
         window.PollEvents();
 
@@ -321,10 +363,14 @@ int RunWindow(Allocator& allocator)
         {
             break;
         }
+        pollSeconds += Clock::NowSeconds() - pollStart;
 
+        const f64 renderStart = Clock::NowSeconds();
         RenderScene(framebuffer, animationSeconds, overlay,
                     static_cast<f32>(pacer.SmoothedFrameSeconds() * 1000.0),
                     static_cast<f32>(pacer.SmoothedFramesPerSecond()));
+        const f64 packStart = Clock::NowSeconds();
+        renderSeconds += packStart - renderStart;
 
         auto packed =
             PackPresentPixels(framebuffer, Span<u8>(reinterpret_cast<u8*>(presentPixels.Data()),
@@ -335,6 +381,8 @@ int RunWindow(Allocator& allocator)
                         cyber::core::ErrorCodeName(packed.Error().code));
             return 1;
         }
+        const f64 presentStart = Clock::NowSeconds();
+        packSeconds += presentStart - packStart;
 
         PresentSource source{};
         source.pixels = Span<const Byte>(presentPixels.Data(), presentPixels.Size());
@@ -343,6 +391,7 @@ int RunWindow(Allocator& allocator)
         source.format = PresentFormat::RGBA8Unorm;
 
         auto presented = presenter.Present(source);
+        presentSeconds += Clock::NowSeconds() - presentStart;
         if (!presented)
         {
             // A window closed mid-frame is not an error for the sample.
@@ -353,11 +402,26 @@ int RunWindow(Allocator& allocator)
             std::printf("present failed: %s\n", cyber::core::ErrorCodeName(presented.Error().code));
             return 1;
         }
+
+        ++presentedFrames;
+        if (options.frames != 0 && presentedFrames >= options.frames)
+        {
+            running = false;
+        }
     }
 
     std::printf("gradient sample closed after %llu frames, smoothed %.2f ms (%.1f FPS)\n",
                 static_cast<unsigned long long>(pacer.FrameCount()),
                 pacer.SmoothedFrameSeconds() * 1000.0, pacer.SmoothedFramesPerSecond());
+    if (presentedFrames > 0)
+    {
+        const f64 frames = static_cast<f64>(presentedFrames);
+        std::printf("average frame: render %.2f ms, pack %.2f ms, present %.2f ms, "
+                    "pacing %.2f ms, events %.2f ms\n",
+                    renderSeconds * 1000.0 / frames, packSeconds * 1000.0 / frames,
+                    presentSeconds * 1000.0 / frames, waitSeconds * 1000.0 / frames,
+                    pollSeconds * 1000.0 / frames);
+    }
     return 0;
 }
 
@@ -377,5 +441,5 @@ int main(int argc, char** argv)
     {
         return RunCapture(options.capturePath, heap);
     }
-    return RunWindow(heap);
+    return RunWindow(options, heap);
 }
