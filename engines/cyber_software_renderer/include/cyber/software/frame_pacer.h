@@ -49,6 +49,8 @@ public:
 
     // Sleeps until the next deadline, ends the frame, and returns the wall time
     // since the previous Wait (or since construction/Reset for the first frame).
+    // Sleeps to within 1.5 ms of the deadline and spins out the remainder, so
+    // OS timer granularity cannot push the frame rate below the target.
     [[nodiscard]] f64 Wait() noexcept;
 
     // Wall time recorded by the last EndFrame.

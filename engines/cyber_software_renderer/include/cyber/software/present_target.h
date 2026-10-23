@@ -18,9 +18,12 @@ using cyber::core::usize;
 [[nodiscard]] usize PresentByteSize(i32 width, i32 height) noexcept;
 
 // Converts a linear framebuffer into sRGB-encoded RGBA8 bytes with alpha
-// quantized linearly. destination receives height rows; a strideBytes value of 0
-// selects width * 4. Rows are written top-down and bytes outside the image are
-// never touched.
+// quantized linearly. Linear RGB is quantized to 1/16384 steps before the sRGB
+// lookup table, which keeps every encoded byte within one code of EncodeSrgb8
+// without evaluating a pow per pixel. destination receives height rows; a
+// strideBytes value of 0 selects width * 4. Rows are written top-down and bytes
+// outside the image are never touched. The result is deterministic and the
+// conversion allocates nothing.
 //
 // Fails with InvalidArgument when the source is invalid, the stride is smaller
 // than width * 4, or destination cannot hold every row.
