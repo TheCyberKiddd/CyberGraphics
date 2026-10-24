@@ -3,6 +3,7 @@
 #include <cyber/software/framebuffer.h>
 #include <cyber/software/image_io.h>
 #include <cyber/software/present_target.h>
+#include <cyber/software/raster.h>
 #include <cyber/software/software.h>
 #include <cyber/test/test.h>
 
@@ -32,6 +33,12 @@ CG_TEST(software_public_headers)
 
     FramePacer pacer;
     CG_EXPECT_EQ(pacer.TargetFramesPerSecond(), cyber::core::u32{60});
+
+    RasterizerDesc rasterDesc{};
+    CG_EXPECT_EQ(rasterDesc.tileSize, i32{64});
+    CG_EXPECT_TRUE(rasterDesc.useJobs);
+    RasterStats rasterStats{};
+    CG_EXPECT_EQ(rasterStats.pixels, u64{0});
 
     CG_EXPECT_EQ(PresentByteSize(3, 2), usize{24});
     CG_EXPECT_TRUE(MeasureText("A").width == kGlyphWidth);

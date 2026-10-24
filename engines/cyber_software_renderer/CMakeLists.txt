@@ -4,6 +4,7 @@ set(CYBER_SOFTWARE_SOURCES
     src/framebuffer.cpp
     src/image_io.cpp
     src/present_target.cpp
+    src/raster.cpp
 )
 
 set(CYBER_SOFTWARE_HEADERS
@@ -12,6 +13,7 @@ set(CYBER_SOFTWARE_HEADERS
     include/cyber/software/framebuffer.h
     include/cyber/software/image_io.h
     include/cyber/software/present_target.h
+    include/cyber/software/raster.h
     include/cyber/software/software.h
 )
 
@@ -63,4 +65,16 @@ cyber_add_test(
     NAME software_public_headers
     SOURCES tests/public_headers_test.cpp
     DEPENDS software_renderer
+)
+
+cyber_add_test(
+    NAME software_raster
+    SOURCES tests/raster_test.cpp
+    DEPENDS software_renderer memory
+)
+
+cyber_add_test(
+    NAME software_raster_coverage
+    SOURCES tests/raster_coverage_test.cpp
+    DEPENDS software_renderer memory jobs
 )

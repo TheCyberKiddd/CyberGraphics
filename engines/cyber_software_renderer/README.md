@@ -33,6 +33,31 @@ auto created = cyber::software::Framebuffer::Create(desc, heap);
 created.Value().Clear(cyber::math::Color{0.1f, 0.2f, 0.3f});
 ```
 
+## Phase 7: triangle rasterization
+
+- `DrawLine` clips a segment to the framebuffer and walks it with integer
+  Bresenham.
+- `FillTriangle` fills one triangle with the exact top-left rule and linear
+  barycentric color.
+- `RasterizeTriangles` bins triangles into screen tiles, runs one job per tile,
+  and produces bytes independent of worker count and tile size.
+- Positions snap to 24.8 fixed point. Shared vertices must be supplied with the
+  same value; the coverage test builds its mesh that way.
+
+```cpp
+const cyber::software::RasterVertex a{cyber::math::Vec2{10.0f, 10.0f},
+                                      cyber::math::Color{1.0f, 0.2f, 0.2f, 1.0f}};
+const cyber::software::RasterVertex b{cyber::math::Vec2{90.0f, 10.0f},
+                                      cyber::math::Color{0.2f, 1.0f, 0.2f, 1.0f}};
+const cyber::software::RasterVertex c{cyber::math::Vec2{10.0f, 90.0f},
+                                      cyber::math::Color{0.2f, 0.2f, 1.0f, 1.0f}};
+const cyber::software::RasterTriangle triangle{a, b, c};
+cyber::software::RasterStats stats{};
+auto status = cyber::software::RasterizeTriangles(
+    framebuffer, cyber::memory::Span<const cyber::software::RasterTriangle>(&triangle, 1),
+    &jobs, heap, {}, &stats);
+```
+
 ## Roadmap
 
 Phases 6, 7, 8, 9, 25.

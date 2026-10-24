@@ -17,6 +17,7 @@ to it, and the consequences. Use one when a future reader would otherwise ask
 | [0006](0006-memory-allocation-and-handles.md) | Memory allocation, containers, and handle lifetime | accepted |
 | [0007](0007-platform-and-job-scheduling.md) | Platform boundary and job scheduling | accepted |
 | [0008](0008-framebuffer-and-present.md) | Framebuffer ownership and the present boundary | accepted |
+| [0009](0009-rasterization-conventions.md) | Rasterization conventions | accepted |
 
 Add new records as `NNNN-title.md`, starting at `0001`. Never delete an ADR;
 supersede it with a new one and update the old record's status.

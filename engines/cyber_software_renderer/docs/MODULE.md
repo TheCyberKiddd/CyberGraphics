@@ -9,9 +9,10 @@
 ## Purpose
 
 CPU reference renderer: framebuffer, rasterization, depth, textures, shaders,
-golden images, and the second plugin. In Phase 6 it owns the linear framebuffer,
-the sRGB present conversion, image export, frame pacing, and the bitmap-font
-overlay. Later phases add rasterization, depth, textures, and CPU shaders.
+golden images, and the second plugin. In Phase 7 it owns the linear framebuffer,
+sRGB present conversion, image export, frame pacing, the bitmap-font overlay,
+line drawing, and the tile-parallel edge-function triangle rasterizer. Later
+phases add depth, textures, and CPU shaders.
 
 ## Public API
 
@@ -24,6 +25,7 @@ overlay. Later phases add rasterization, depth, textures, and CPU shaders.
 | `image_io.h` | `ImageFormat`, `ImageWriteDesc`, `EncodeImage`, `WriteImage`. |
 | `debug_text.h` | 5x7 glyph metrics, `TextMetrics`, `MeasureText`, `DrawText`. |
 | `frame_pacer.h` | `FramePacer`. |
+| `raster.h` | `RasterVertex`, `RasterTriangle`, `RasterizerDesc`, `RasterStats`, `DrawLine`, `FillTriangle`, `RasterizeTriangles`. |
 | `software.h` | Umbrella include. |
 
 Only headers under this path are public. Everything under `src/` is private.
@@ -42,7 +44,12 @@ another module's private headers.
   writes are ignored. Rectangle operations clip.
 - `EncodeImage` returns an allocator-backed `DynamicArray<Byte>`; `WriteImage`
   writes through `cyber_platform` and owns nothing.
-- `DrawText` and `FramePacer` are allocation-free.
+- `DrawText`, `DrawLine`, `FillTriangle`, and `FramePacer` are allocation-free.
+- `RasterizeTriangles` allocates temporary prepared-triangle and tile-bin arrays
+  from the caller's allocator and releases them before returning. Workers do not
+  touch the allocator. Invalid targets and null spans return
+  `ErrorCode::InvalidArgument`; a triangle or bin count beyond 32 bits returns
+  `ErrorCode::Overflow`; allocation failure returns `ErrorCode::Internal`.
 
 ## Dependencies
 
@@ -63,6 +70,9 @@ Phases 9 and 25 need them. They have no targets yet and are not declared early.
   `EncodeImage`, never in framebuffer storage.
 - Deterministic output for golden images: no timestamps, no random seeds, no
   locale-dependent formatting, and no address-dependent behavior.
+- Rasterization snaps vertices to 24.8 fixed point, uses integer edge functions
+  with the top-left rule, and bins triangles into screen tiles. Worker count and
+  tile size never change the image bytes.
 - Every runtime buffer uses an explicit allocator.
 - Row access is stride-aware; padding bytes are never written by pixel
   operations.
@@ -87,19 +97,30 @@ encoding, deterministic in-memory encoding, file round-trip, and error paths.
 `software_text`: metrics, glyph coverage, scaling, clipping, and blank glyphs.
 `software_frame_pacer`: deadline planning, fixed-grid advance, stall resync, and
 statistics.
+`software_raster`: all-octant, reversed, degenerate, non-finite, and clipped
+lines; the top-left fill rule on shared edges and vertices; winding and color
+interpolation; invalid geometry and guard-band rejection; statistics; and
+RGBA8 quantization.
+`software_raster_coverage`: a 10,000-triangle jittered mesh covers 640x360
+exactly once; single-threaded and job-system outputs are byte-identical across
+tile sizes 16/64/128 and one/four workers.
 `software_screenshot`: fixed scene encoded twice is byte-identical; PPM and TGA
 files read back equal.
 `software_public_headers`: every public header compiles together.
 
-The visible check is `cyber_sample_gradient`; its `--capture` mode writes and
-compares two screenshots of a fixed frame.
+The visible check is `cyber_sample_raster`; its `--capture` mode writes and
+compares two screenshots of a fixed animated mesh. The Phase 6
+`cyber_sample_gradient` remains the framebuffer/present sample.
 
 ## Budgets
 
 - Present packing and image export are O(width * height) with one pass and no
   per-pixel virtual calls.
+- Rasterization is O(pixels covered + triangle-tile references) with integer
+  edge stepping in the inner loop and no per-pixel division.
 - Steady-state frame loops do not allocate: the sample reuses one present buffer
-  and resizes it only on a size change.
+  and resizes it only on a size change. `RasterizeTriangles` allocations are
+  caller-owned scratch and bounded by triangle and tile counts.
 - Framebuffer memory is `stride * height` bytes; `RGBA32F` costs 16 bytes per
   pixel.
 - Golden-image suite runtime budget: small test resolutions, no large assets.

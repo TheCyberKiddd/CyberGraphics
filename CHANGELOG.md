@@ -94,6 +94,19 @@ semantic versioning once a public API exists.
 - `cyber_software_renderer` installs/exports and is exercised by the source and
   package consumers.
 - ADR 0008, the Phase 6 design note, and the Phase 6 report.
+- Phase 7 `cyber_software_renderer`: clipped all-octant Bresenham lines;
+  fixed-point edge-function triangle fill with winding normalization, the
+  clockwise top-left rule, and unbiased barycentric vertex colors; tile binning
+  with one `cyber_jobs` job per tile, producing bytes independent of worker
+  count and tile size; guard-band, degenerate, and non-finite rejection; and
+  `RasterStats` with per-tile pixel-write counts.
+- A 10,000-triangle jittered mesh covers 640x360 exactly once, with serial and
+  parallel output byte-identical across tile sizes 16/64/128 and one/four
+  workers.
+- `samples/02_raster` shows the animated triangle mosaic at 60 Hz with a
+  frame-time overlay, a `--frames` smoke run, and a `--capture` mode that proves
+  two images of the same frame are byte-identical.
+- ADR 0009, the Phase 7 design note, and the Phase 7 report.
 
 ### Notes
 
