@@ -3,3 +3,4 @@
 
 add_subdirectory(00_window)
 add_subdirectory(01_gradient)
+add_subdirectory(02_raster)

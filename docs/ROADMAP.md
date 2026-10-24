@@ -23,7 +23,7 @@ are recorded.
 ## Part 2: CPU software renderer (phases 6-9)
 
 - [x] **Phase 6 — Framebuffer and present** — complete; report and CI evidence recorded · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-6-framebuffer-and-present) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-6-framebuffer-and-present)
-- [ ] **Phase 7 — Triangle rasterization** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-7-triangle-rasterization) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-7-triangle-rasterization)
+- [ ] **Phase 7 — Triangle rasterization** — implementation, sample, tests, and local evidence complete; CI pending · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-7-triangle-rasterization) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-7-triangle-rasterization)
 - [ ] **Phase 8 — Depth, clipping, and perspective** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-8-depth-clipping-and-perspective) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-8-depth-clipping-and-perspective)
 - [ ] **Phase 9 — Textures, CPU shaders, and test scenes** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-9-textures-cpu-shaders-and-test-scenes) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-9-textures-cpu-shaders-and-test-scenes)
 
@@ -88,4 +88,7 @@ are recorded.
 - Phase 4: complete. Report and CI evidence recorded.
 - Phase 5: complete. Report and CI evidence recorded.
 - Phase 6: complete. Report and CI evidence recorded.
-- Next: Phase 7, triangle rasterization.
+- Phase 7: implementation, sample, tests, package consumers, and local evidence
+  complete; CI evidence pending. Report in
+  [reports/phase-07.md](reports/phase-07.md).
+- Next: Phase 8, depth, clipping, and perspective.

@@ -9,6 +9,7 @@
 #include <cyber/memory/memory.h>
 #include <cyber/perf/perf.h>
 #include <cyber/platform/platform.h>
+#include <cyber/software/raster.h>
 #include <cyber/software/software.h>
 
 #include <atomic>
@@ -226,6 +227,18 @@ int main()
         if (!encoded || encoded.Value().Size() != 23)
         {
             return 28;
+        }
+
+        RasterTriangle triangle{};
+        triangle.v0 = RasterVertex{Vec2{-1.0f, -1.0f}, Color{1.0f, 0.0f, 0.0f, 1.0f}};
+        triangle.v1 = RasterVertex{Vec2{5.0f, -1.0f}, Color{1.0f, 0.0f, 0.0f, 1.0f}};
+        triangle.v2 = RasterVertex{Vec2{-1.0f, 5.0f}, Color{1.0f, 0.0f, 0.0f, 1.0f}};
+        RasterStats rasterStats{};
+        if (!RasterizeTriangles(framebuffer, Span<const RasterTriangle>(&triangle, 1), nullptr,
+                                heap, {}, &rasterStats) ||
+            rasterStats.pixels != 4)
+        {
+            return 31;
         }
 
         FramePacer pacer(60);

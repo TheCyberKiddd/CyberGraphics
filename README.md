@@ -46,7 +46,15 @@ in place, and every module test runs through the project's own test runner.
   The gradient sample runs at 60.0 FPS and its two fixed-frame captures are
   byte-identical. All 39 tests pass in every local preset, both consumers pass,
   and the Windows + Linux CI jobs are green.
-- Next: Phase 7 (triangle rasterization).
+- Phase 7: complete. `cyber_software_renderer` adds clipped Bresenham lines,
+  fixed-point edge-function triangle fill with the top-left rule and barycentric
+  vertex color, and tile-parallel rasterization through `cyber_jobs`. A
+  10,000-triangle mesh covers 640x360 exactly once, and serial and parallel
+  output are byte-identical across tile sizes and worker counts. The raster
+  sample holds 60.0 FPS in release and its two fixed-frame captures are
+  byte-identical. All 41 local tests pass in every preset and both package
+  consumers pass.
+- Next: Phase 8 (depth, clipping, and perspective).
 
 See [engines/MODULES.md](engines/MODULES.md) for the module index and
 [docs/architecture/overview.md](docs/architecture/overview.md) for the design.

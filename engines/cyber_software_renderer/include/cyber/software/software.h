@@ -7,3 +7,4 @@
 #include <cyber/software/framebuffer.h>
 #include <cyber/software/image_io.h>
 #include <cyber/software/present_target.h>
+#include <cyber/software/raster.h>
