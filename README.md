@@ -60,10 +60,8 @@ in place, and every module test runs through the project's own test runner.
   fly cameras, and `samples/03_depth`. The cube sample holds 60.0 FPS at
   1280x720 in release and both fixed-frame captures are byte-identical; the
   Phase 7 capture hash is unchanged. All 44 tests pass in every local preset,
-  both package consumers pass, and the structure, layer, and format gates pass.
-  CI evidence is pending the push.
-- Next: Phase 8 CI evidence, then Phase 9 (textures, CPU shaders, and test
-  scenes).
+  both package consumers pass, and the Windows + Linux CI jobs are green.
+- Next: Phase 9 (textures, CPU shaders, and test scenes).
 
 See [engines/MODULES.md](engines/MODULES.md) for the module index and
 [docs/architecture/overview.md](docs/architecture/overview.md) for the design.
