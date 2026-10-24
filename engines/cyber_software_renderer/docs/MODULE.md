@@ -9,10 +9,12 @@
 ## Purpose
 
 CPU reference renderer: framebuffer, rasterization, depth, textures, shaders,
-golden images, and the second plugin. In Phase 7 it owns the linear framebuffer,
+golden images, and the second plugin. In Phase 8 it owns the linear framebuffer,
 sRGB present conversion, image export, frame pacing, the bitmap-font overlay,
-line drawing, and the tile-parallel edge-function triangle rasterizer. Later
-phases add depth, textures, and CPU shaders.
+line drawing, the tile-parallel edge-function triangle rasterizer, the
+reverse-Z depth buffer, the clipped and culled vertex pipeline, the orbit and
+fly cameras, and perspective-correct interpolation. Phase 9 adds textures and
+CPU shaders.
 
 ## Public API
 
@@ -25,7 +27,10 @@ phases add depth, textures, and CPU shaders.
 | `image_io.h` | `ImageFormat`, `ImageWriteDesc`, `EncodeImage`, `WriteImage`. |
 | `debug_text.h` | 5x7 glyph metrics, `TextMetrics`, `MeasureText`, `DrawText`. |
 | `frame_pacer.h` | `FramePacer`. |
-| `raster.h` | `RasterVertex`, `RasterTriangle`, `RasterizerDesc`, `RasterStats`, `DrawLine`, `FillTriangle`, `RasterizeTriangles`. |
+| `raster.h` | `RasterVertex`, `RasterTriangle`, `RasterizerDesc`, `RasterStats`, `DrawLine`, `FillTriangle`, `RasterizeTriangles`, `DepthRasterVertex`, `DepthRasterTriangle`, `RasterizeDepthTestedTriangles`. |
+| `depth_buffer.h` | `DepthBufferDesc`, `DepthBuffer`. |
+| `camera.h` | `Camera`, `CameraForward`, `CameraRight`, `CameraUp`, `CameraView`, `CameraProjection`, `FlyCamera`, `FlyCameraInput`, `UpdateFlyCamera`, `OrbitCamera`, `OrbitCameraInput`, `UpdateOrbitCamera`, `OrbitCameraPosition`, `OrbitCameraView`, `OrbitCameraProjection`. |
+| `pipeline.h` | `Vertex`, `Viewport`, `CullMode`, `FrontFace`, `PipelineDesc`, `PipelineStats`, `ClipVertex`, `ClipPolygon`, `ClipTriangleNearPlane`, `DrawTriangles`. |
 | `software.h` | Umbrella include. |
 
 Only headers under this path are public. Everything under `src/` is private.
@@ -45,11 +50,22 @@ another module's private headers.
 - `EncodeImage` returns an allocator-backed `DynamicArray<Byte>`; `WriteImage`
   writes through `cyber_platform` and owns nothing.
 - `DrawText`, `DrawLine`, `FillTriangle`, and `FramePacer` are allocation-free.
-- `RasterizeTriangles` allocates temporary prepared-triangle and tile-bin arrays
-  from the caller's allocator and releases them before returning. Workers do not
-  touch the allocator. Invalid targets and null spans return
-  `ErrorCode::InvalidArgument`; a triangle or bin count beyond 32 bits returns
-  `ErrorCode::Overflow`; allocation failure returns `ErrorCode::Internal`.
+- `RasterizeTriangles` and `RasterizeDepthTestedTriangles` allocate temporary
+  prepared-triangle and tile-bin arrays from the caller's allocator and release
+  them before returning. Workers do not touch the allocator. Invalid targets and
+  null spans return `ErrorCode::InvalidArgument`; a triangle or bin count beyond
+  32 bits returns `ErrorCode::Overflow`; allocation failure returns
+  `ErrorCode::Internal`.
+- `DepthBuffer` is move-only and owns allocator-backed storage. `Create` is the
+  only operation that allocates. Depth is a float reverse-Z value: 1 at the near
+  plane, 0 at the far plane, cleared to 0, and tested greater-or-equal.
+- `DrawTriangles` allocates nothing; it clips into a fixed-capacity local
+  polygon and hands the result to the depth-tested rasterizer with the caller's
+  allocator. It validates the color target, the depth target dimensions, the
+  viewport, and the vertex count, and returns `ErrorCode::InvalidArgument` for
+  a mismatch.
+- `ClipTriangleNearPlane` is allocation-free and returns a value.
+- The camera values and controllers are allocation-free plain data.
 
 ## Dependencies
 
@@ -73,6 +89,16 @@ Phases 9 and 25 need them. They have no targets yet and are not declared early.
 - Rasterization snaps vertices to 24.8 fixed point, uses integer edge functions
   with the top-left rule, and bins triangles into screen tiles. Worker count and
   tile size never change the image bytes.
+- Clip space is `-w..w` in x and y and `0..w` in z. Only the near plane `z = w`
+  is clipped; the far plane is rejected by the reverse-Z test, and the side
+  planes use a `+/-16384`-pixel guard band that drops and counts the triangle.
+- Depth is perspective-correct NDC depth: interpolated barycentrically, tested
+  greater-or-equal, and written only when the test passes. Colors use
+  `attribute / w` and `1 / w`; the Phase 7 affine functions keep their original
+  arithmetic and output.
+- The viewport maps NDC to screen with a y flip; positive screen-space signed
+  area is clockwise, and `FrontFace::Clockwise` is the default front face for
+  right-handed geometry. Culling happens after clipping and before binning.
 - Every runtime buffer uses an explicit allocator.
 - Row access is stride-aware; padding bytes are never written by pixel
   operations.
@@ -106,18 +132,32 @@ exactly once; single-threaded and job-system outputs are byte-identical across
 tile sizes 16/64/128 and one/four workers.
 `software_screenshot`: fixed scene encoded twice is byte-identical; PPM and TGA
 files read back equal.
+`software_depth_buffer`: descriptor validation, stride padding, reverse-Z
+clear, greater-or-equal test/write, out-of-range safety, and moves.
+`software_camera`: camera basis and view/projection mapping, fly movement,
+frame-rate independence, pitch and distance clamps, and orbit zoom.
+`software_pipeline`: viewport transform and y flip, near-plane clipping output,
+behind-camera rejection, winding and culling, depth ordering, perspective-correct
+color, clipped-cube determinism, and invalid-input handling.
+`software_depth_cube`: the fixed cube renders with hidden faces rejected, and
+serial, parallel, and tile-size variants produce identical color and depth
+bytes.
 `software_public_headers`: every public header compiles together.
 
-The visible check is `cyber_sample_raster`; its `--capture` mode writes and
-compares two screenshots of a fixed animated mesh. The Phase 6
-`cyber_sample_gradient` remains the framebuffer/present sample.
+The visible checks are `cyber_sample_raster` and `cyber_sample_depth`. Both
+`--capture` modes write and compare two screenshots of a fixed frame. The Phase
+6 `cyber_sample_gradient` remains the framebuffer/present sample.
 
 ## Budgets
 
 - Present packing and image export are O(width * height) with one pass and no
   per-pixel virtual calls.
 - Rasterization is O(pixels covered + triangle-tile references) with integer
-  edge stepping in the inner loop and no per-pixel division.
+  edge stepping in the inner loop. The Phase 7 path has no per-pixel division;
+  the depth-tested path has exactly one for perspective-correct color.
+- The vertex pipeline transforms one matrix-vector per vertex and clips at most
+  one triangle into two before binning. Per-pixel work is coverage, one depth
+  compare, and the interpolation divide.
 - Steady-state frame loops do not allocate: the sample reuses one present buffer
   and resizes it only on a size change. `RasterizeTriangles` allocations are
   caller-owned scratch and bounded by triangle and tile counts.
