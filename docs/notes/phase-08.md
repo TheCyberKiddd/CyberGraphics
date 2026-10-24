@@ -14,11 +14,13 @@ Date: 2026-10-24
   far plane is `z = 0`, and the depth test with a cleared-to-zero reverse-Z
   buffer already rejects anything beyond it, so the Phase 8 clipper handles the
   near plane and relies on a guard band for the side planes.
-- Farbrausch/Giesen's "triangle rasterization" series and Microsoft's
-  "Rasterization Rules" agree that coverage is decided in screen space after the
-  viewport transform. Culling therefore uses the signed screen-space area: with
-  a y-down screen, a counter-clockwise triangle in a y-up clip space becomes
-  clockwise, so clockwise is the default front face for right-handed geometry.
+- Microsoft's "Rasterization Rules" and Giesen's pipeline series agree that
+  coverage is decided in screen space after the viewport transform, so culling
+  uses the signed screen-space area. With a y-down screen, positive area is
+  clockwise and negative is counter-clockwise. A right-handed, counter-clockwise
+  object-space front face stays counter-clockwise in the projected image, so
+  `FrontFace::CounterClockwise` is the default, matching D3D12's
+  `FrontCounterClockwise = TRUE` for right-handed scenes.
 - Perspective-correct interpolation comes from the fact that `1/w` is affine in
   screen space. Attributes divided by w are affine too; interpolating
   `attribute / w` and `1 / w` with the same barycentric weights and dividing at
