@@ -1,8 +1,8 @@
 # Phase 8 report: depth, clipping, and perspective
 
 Date: 2026-10-24
-Commits: `3500c23` (pipeline, cameras, tests, consumers) and `e94b60e`
-(depth sample)
+Commits: `3a68506` (pipeline, cameras, tests, consumers) and `bd9b271`
+(depth sample), plus the formatter-only follow-up after them
 Machine: Windows 10 Pro 19045, Intel Core i5-6400 (4 cores, 4 threads), 16 GB
 RAM, Intel HD 530, MSVC 19.44.35229 (Visual Studio 2022 Build Tools), CMake
 3.31.6, Ninja preset builds, clang-format 23.1.3 for the local format gate
