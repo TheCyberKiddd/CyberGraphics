@@ -107,6 +107,20 @@ semantic versioning once a public API exists.
   frame-time overlay, a `--frames` smoke run, and a `--capture` mode that proves
   two images of the same frame are byte-identical.
 - ADR 0009, the Phase 7 design note, and the Phase 7 report.
+- Phase 8 `cyber_software_renderer`: `DepthBuffer` (float reverse-Z, clear 0,
+  greater-or-equal test), `ClipTriangleNearPlane` and homogeneous near-plane
+  clipping, `DrawTriangles` (model/view/projection, viewport y flip, back-face
+  culling, +/-16384-pixel guard band), perspective-correct color through
+  `1 / w`, `pixelsRejected` depth statistics, and the `Camera`, `FlyCamera`, and
+  `OrbitCamera` values and controllers.
+- Full-frame clears now fill rows by doubling a pixel pattern, and the depth
+  clear uses `memset` for the all-zero reverse-Z far value; the Phase 7 capture
+  hash is unchanged.
+- `samples/03_depth` renders a depth-tested rotating cube over a perspective
+  checkerboard floor with orbit/fly cameras, holds 60.0 FPS at 1280x720 in
+  release, and captures byte-identical fixed frames including an inside-the-cube
+  near-clipping pose.
+- ADR 0010, the Phase 8 design note, and the Phase 8 report.
 
 ### Notes
 

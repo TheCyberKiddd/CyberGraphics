@@ -146,11 +146,14 @@ volume and the depth range are 0..1.
 
 The signed screen-space area is
 `(b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)`. Positive area is
-clockwise on screen. `FrontFace::Clockwise` (the default) is therefore the front
-face for right-handed geometry whose object-space triangles wind
-counter-clockwise when seen from outside. `CullMode::Back` rejects
-non-front-facing triangles, `CullMode::Front` rejects front-facing ones, and
-`CullMode::None` keeps both. Zero area is always rejected as degenerate.
+clockwise on screen and negative is counter-clockwise. Right-handed object
+geometry winds counter-clockwise when seen from outside, and the projection
+does not mirror it, so its front faces stay counter-clockwise on screen:
+`FrontFace::CounterClockwise` is the default, matching D3D12's
+`FrontCounterClockwise = TRUE` for a right-handed scene. `CullMode::Back`
+rejects non-front-facing triangles, `CullMode::Front` rejects front-facing
+ones, and `CullMode::None` keeps both. Zero area is always rejected as
+degenerate.
 
 Culling happens after clipping, so a clipped quad can contribute two triangles
 with the same classification as the original geometry. It happens before the

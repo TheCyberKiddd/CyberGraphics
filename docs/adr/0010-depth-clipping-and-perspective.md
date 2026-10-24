@@ -37,9 +37,10 @@ edge functions, tile ownership. This record covers only what Phase 8 adds.
    unbiased barycentric weights and divides once per covered pixel. The Phase 7
    affine path is kept byte-identical and does not use the divide.
 5. **Winding is classified after the viewport y flip.** Positive screen-space
-   signed area is clockwise. `FrontFace::Clockwise` is the default front face for
-   right-handed object geometry, and culling happens after clipping and before
-   binning. Zero area is always rejected.
+   signed area is clockwise and negative is counter-clockwise.
+   `FrontFace::CounterClockwise` is the default front face for right-handed
+   object geometry, matching D3D12's `FrontCounterClockwise = TRUE`, and culling
+   happens after clipping and before binning. Zero area is always rejected.
 6. **The viewport transform flips y and leaves depth in 0..1.**
    `screen.y = viewport.y + (0.5 - 0.5 * ndc.y) * height`. There is one viewport
    per draw; scissor rectangles are not part of Phase 8.

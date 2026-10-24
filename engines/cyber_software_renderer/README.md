@@ -58,6 +58,44 @@ auto status = cyber::software::RasterizeTriangles(
     &jobs, heap, {}, &stats);
 ```
 
+## Phase 8: depth, clipping, and perspective
+
+- `DepthBuffer` is a float reverse-Z target: cleared to 0, greater-or-equal
+  test, near plane at 1.
+- `DrawTriangles` runs the vertex pipeline: `projection * view * model`, a
+  homogeneous near-plane clip, the perspective divide, the viewport y flip,
+  back-face culling, and the +/-16384-pixel guard band.
+- Color is perspective-correct (`attribute / w` and `1 / w`); depth interpolates
+  linearly because NDC depth is affine in screen space.
+- `Camera` plus `FlyCamera` and `OrbitCamera` controllers take plain float
+  deltas, so they are testable without a window and the sample owns the input
+  mapping.
+- `ClipTriangleNearPlane` is public so the clipper can be tested directly; it
+  returns 3 or 4 vertices in input order.
+
+```cpp
+cyber::software::Camera camera;
+camera.position = cyber::math::Vec3{0.0f, 1.0f, 5.0f};
+camera.pitchRadians = -0.15f;
+
+cyber::software::PipelineDesc desc{};
+desc.viewport.width = 1280.0f;
+desc.viewport.height = 720.0f;
+desc.view = cyber::software::CameraView(camera);
+desc.projection = cyber::software::CameraProjection(camera, 1280.0f / 720.0f);
+desc.cullMode = cyber::software::CullMode::Back;
+
+color.Clear(cyber::math::Color{0.05f, 0.07f, 0.10f});
+depth.Clear(0.0f);
+const auto status = cyber::software::DrawTriangles(
+    desc, cyber::memory::Span<const cyber::software::Vertex>(vertices), color, depth,
+    &jobs, heap, &stats);
+```
+
+`samples/03_depth` renders the rotating cube and the perspective floor; its
+`--inside` capture places the camera at the cube centre so the near clipper is
+visible in the reference image.
+
 ## Roadmap
 
 Phases 6, 7, 8, 9, 25.
