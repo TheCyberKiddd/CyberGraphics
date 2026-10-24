@@ -16,6 +16,11 @@ class JobSystem;
 
 namespace cyber::software
 {
+class DepthBuffer;
+}
+
+namespace cyber::software
+{
 using cyber::core::f32;
 using cyber::core::i32;
 using cyber::core::u64;
@@ -37,6 +42,33 @@ struct RasterTriangle
     RasterVertex v0;
     RasterVertex v1;
     RasterVertex v2;
+};
+
+// A screen-space vertex for the depth-tested path. Coverage and color use the
+// same conventions as RasterVertex; the extra fields drive visibility and
+// perspective correction:
+//
+// - `depth` is the reverse-Z NDC depth: 1 at the near plane, 0 at the far
+//   plane. It is interpolated linearly because NDC depth is affine in screen
+//   space. A value below 0 lies beyond the far plane and loses against a
+//   buffer cleared to 0.
+// - `inverseW` is 1 / clip.w. Attributes are interpolated as
+//   (sum b_i * attribute_i * inverseW_i) / (sum b_i * inverseW_i). The value
+//   must be finite and greater than zero; a non-positive value skips the
+//   triangle.
+struct DepthRasterVertex
+{
+    math::Vec2 position;
+    math::Color color;
+    f32 depth = 0.0f;
+    f32 inverseW = 1.0f;
+};
+
+struct DepthRasterTriangle
+{
+    DepthRasterVertex v0;
+    DepthRasterVertex v1;
+    DepthRasterVertex v2;
 };
 
 struct RasterizerDesc
@@ -61,6 +93,9 @@ struct RasterStats
     // Number of pixel writes across all triangles. A watertight mesh that
     // covers the framebuffer has pixels == width * height.
     u64 pixels = 0;
+    // Covered samples that failed the depth test. Always 0 for the
+    // non-depth-tested entry points.
+    u64 pixelsRejected = 0;
 };
 
 // Draws one clipped, one-pixel-wide line in linear color. Coordinates are
@@ -98,5 +133,27 @@ void FillTriangle(Framebuffer& target, const RasterTriangle& triangle) noexcept;
 RasterizeTriangles(Framebuffer& target, memory::Span<const RasterTriangle> triangles,
                    jobs::JobSystem* jobSystem, memory::Allocator& allocator,
                    const RasterizerDesc& desc = {}, RasterStats* stats = nullptr) noexcept;
+
+// Rasterizes depth-tested triangles with perspective-correct color.
+//
+// Coverage is identical to RasterizeTriangles: the same fixed-point snapping,
+// top-left rule, tile binning, and deterministic output. A covered sample then
+// compares its interpolated depth with `depth` using greater-or-equal, writes
+// the depth on success, and interpolates color through 1 / w. A sample that
+// fails the test leaves both targets untouched and counts in
+// RasterStats::pixelsRejected.
+//
+// `depth` must be valid and have the color target's dimensions. Both targets
+// are written; the caller clears them before the draw. The allocator is used
+// only for temporary arrays and is not accessed by workers.
+//
+// Returns InvalidArgument for an invalid target, a dimension mismatch, or a
+// null triangle pointer with a non-zero count, Overflow when the triangle or
+// bin count exceeds 32 bits, and Internal when a temporary allocation fails.
+// `stats` is optional and is zeroed on entry.
+[[nodiscard]] core::Status<core::Error> RasterizeDepthTestedTriangles(
+    Framebuffer& target, DepthBuffer& depth, memory::Span<const DepthRasterTriangle> triangles,
+    jobs::JobSystem* jobSystem, memory::Allocator& allocator, const RasterizerDesc& desc = {},
+    RasterStats* stats = nullptr) noexcept;
 
 }  // namespace cyber::software

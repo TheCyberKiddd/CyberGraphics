@@ -64,7 +64,10 @@ $requiredHeaders = @(
     'include/cyber/software/image_io.h',
     'include/cyber/software/debug_text.h',
     'include/cyber/software/frame_pacer.h',
-    'include/cyber/software/raster.h'
+    'include/cyber/software/raster.h',
+    'include/cyber/software/depth_buffer.h',
+    'include/cyber/software/camera.h',
+    'include/cyber/software/pipeline.h'
 )
 foreach ($header in $requiredHeaders) {
     $path = Join-Path $Prefix $header

@@ -1,17 +1,23 @@
 set(CYBER_SOFTWARE_SOURCES
+    src/camera.cpp
     src/debug_text.cpp
+    src/depth_buffer.cpp
     src/frame_pacer.cpp
     src/framebuffer.cpp
     src/image_io.cpp
+    src/pipeline.cpp
     src/present_target.cpp
     src/raster.cpp
 )
 
 set(CYBER_SOFTWARE_HEADERS
+    include/cyber/software/camera.h
     include/cyber/software/debug_text.h
+    include/cyber/software/depth_buffer.h
     include/cyber/software/frame_pacer.h
     include/cyber/software/framebuffer.h
     include/cyber/software/image_io.h
+    include/cyber/software/pipeline.h
     include/cyber/software/present_target.h
     include/cyber/software/raster.h
     include/cyber/software/software.h
@@ -76,5 +82,23 @@ cyber_add_test(
 cyber_add_test(
     NAME software_raster_coverage
     SOURCES tests/raster_coverage_test.cpp
+    DEPENDS software_renderer memory jobs
+)
+
+cyber_add_test(
+    NAME software_depth_buffer
+    SOURCES tests/depth_buffer_test.cpp
+    DEPENDS software_renderer memory
+)
+
+cyber_add_test(
+    NAME software_camera
+    SOURCES tests/camera_test.cpp
+    DEPENDS software_renderer
+)
+
+cyber_add_test(
+    NAME software_pipeline
+    SOURCES tests/pipeline_test.cpp
     DEPENDS software_renderer memory jobs
 )

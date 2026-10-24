@@ -1,11 +1,13 @@
 #include <cyber/core/types.h>
 #include <cyber/jobs/job_system.h>
 #include <cyber/memory/dynamic_array.h>
+#include <cyber/software/depth_buffer.h>
 #include <cyber/software/raster.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <utility>
 
 namespace cyber::software
 {
@@ -43,6 +45,14 @@ struct PreparedTriangle
     math::Color c0;
     math::Color c1;
     math::Color c2;
+    // Reverse-Z NDC depth per vertex, only used by the depth-tested path.
+    f32 depth0 = 0.0f;
+    f32 depth1 = 0.0f;
+    f32 depth2 = 0.0f;
+    // Reciprocal clip w per vertex, only used by the depth-tested path.
+    f32 inverseW0 = 1.0f;
+    f32 inverseW1 = 1.0f;
+    f32 inverseW2 = 1.0f;
     // Coverage bias per edge: 0 for top-left, -1 otherwise. The unbiased edge
     // value is biasedValue - bias, which keeps interpolation exact.
     i64 bias0 = 0;
@@ -60,13 +70,21 @@ struct PreparedTriangle
     bool drawable = false;
 };
 
+struct TileCounters
+{
+    u64 pixels = 0;
+    u64 rejected = 0;
+};
+
 struct TileContext
 {
     Framebuffer* target = nullptr;
+    // Null selects the affine Phase 7 path.
+    DepthBuffer* depth = nullptr;
     const PreparedTriangle* triangles = nullptr;
     const u32* offsets = nullptr;
     const u32* indices = nullptr;
-    u64* tilePixels = nullptr;
+    TileCounters* counters = nullptr;
     u32 tilesX = 0;
     i32 tileSize = kDefaultTileSize;
     i32 width = 0;
@@ -124,46 +142,35 @@ i64 SetEdge(EdgeFunction& edge, i32 x0, i32 y0, i32 x1, i32 y1) noexcept
     return 0;
 }
 
-bool PrepareTriangle(const RasterTriangle& input, i32 width, i32 height, i32 tileSize,
-                     PreparedTriangle& out) noexcept
+// Snaps three screen positions and returns the signed area. A negative area
+// means the input is counter-clockwise on screen; callers swap vertices to
+// normalize it to clockwise.
+bool SnapTriangle(const math::Vec2& p0, const math::Vec2& p1, const math::Vec2& p2, i32 x[3],
+                  i32 y[3], i64& area) noexcept
 {
-    out.drawable = false;
-    i32 x[3] = {0, 0, 0};
-    i32 y[3] = {0, 0, 0};
-    if (!SnapCoordinate(input.v0.position.x, x[0]) || !SnapCoordinate(input.v0.position.y, y[0]) ||
-        !SnapCoordinate(input.v1.position.x, x[1]) || !SnapCoordinate(input.v1.position.y, y[1]) ||
-        !SnapCoordinate(input.v2.position.x, x[2]) || !SnapCoordinate(input.v2.position.y, y[2]))
+    if (!SnapCoordinate(p0.x, x[0]) || !SnapCoordinate(p0.y, y[0]) || !SnapCoordinate(p1.x, x[1]) ||
+        !SnapCoordinate(p1.y, y[1]) || !SnapCoordinate(p2.x, x[2]) || !SnapCoordinate(p2.y, y[2]))
     {
         return false;
     }
 
-    i64 area = (static_cast<i64>(x[1]) - x[0]) * (static_cast<i64>(y[2]) - y[0]) -
-               (static_cast<i64>(y[1]) - y[0]) * (static_cast<i64>(x[2]) - x[0]);
-    if (area == 0)
-    {
-        return false;
-    }
+    area = (static_cast<i64>(x[1]) - x[0]) * (static_cast<i64>(y[2]) - y[0]) -
+           (static_cast<i64>(y[1]) - y[0]) * (static_cast<i64>(x[2]) - x[0]);
+    return area != 0;
+}
 
-    math::Color c0 = input.v0.color;
-    math::Color c1 = input.v1.color;
-    math::Color c2 = input.v2.color;
-    if (area < 0)
-    {
-        std::swap(x[1], x[2]);
-        std::swap(y[1], y[2]);
-        std::swap(c1, c2);
-        area = -area;
-    }
-
+// Fills edge functions and the clipped pixel/tile bounds for an already snapped
+// and positively wound triangle. Returns false when the triangle has no sample
+// inside the framebuffer.
+bool SetCoverage(PreparedTriangle& out, const i32 x[3], const i32 y[3], i64 area, i32 width,
+                 i32 height, i32 tileSize) noexcept
+{
     out.e0 = EdgeFunction{};
     out.e1 = EdgeFunction{};
     out.e2 = EdgeFunction{};
     out.bias0 = SetEdge(out.e0, x[0], y[0], x[1], y[1]);
     out.bias1 = SetEdge(out.e1, x[1], y[1], x[2], y[2]);
     out.bias2 = SetEdge(out.e2, x[2], y[2], x[0], y[0]);
-    out.c0 = c0;
-    out.c1 = c1;
-    out.c2 = c2;
     out.area = area;
 
     const i64 minFixedX =
@@ -183,6 +190,7 @@ bool PrepareTriangle(const RasterTriangle& input, i32 width, i32 height, i32 til
     const i64 pixelMaxY = FloorDiv(maxFixedY - kSampleOffset, kSubpixelScale);
     if (pixelMinX > pixelMaxX || pixelMinY > pixelMaxY)
     {
+        out.drawable = false;
         return false;
     }
 
@@ -192,6 +200,7 @@ bool PrepareTriangle(const RasterTriangle& input, i32 width, i32 height, i32 til
     const i64 clippedMaxY = std::min<i64>(pixelMaxY, static_cast<i64>(height) - 1);
     if (clippedMinX > clippedMaxX || clippedMinY > clippedMaxY)
     {
+        out.drawable = false;
         return false;
     }
 
@@ -205,6 +214,93 @@ bool PrepareTriangle(const RasterTriangle& input, i32 width, i32 height, i32 til
     out.tileMaxY = out.maxY / tileSize;
     out.drawable = true;
     return true;
+}
+
+bool PrepareTriangle(const RasterTriangle& input, i32 width, i32 height, i32 tileSize,
+                     PreparedTriangle& out) noexcept
+{
+    out.drawable = false;
+
+    i32 x[3] = {0, 0, 0};
+    i32 y[3] = {0, 0, 0};
+    i64 area = 0;
+    if (!SnapTriangle(input.v0.position, input.v1.position, input.v2.position, x, y, area))
+    {
+        return false;
+    }
+
+    math::Color c0 = input.v0.color;
+    math::Color c1 = input.v1.color;
+    math::Color c2 = input.v2.color;
+    if (area < 0)
+    {
+        std::swap(x[1], x[2]);
+        std::swap(y[1], y[2]);
+        std::swap(c1, c2);
+        area = -area;
+    }
+
+    out.c0 = c0;
+    out.c1 = c1;
+    out.c2 = c2;
+    out.depth0 = 0.0f;
+    out.depth1 = 0.0f;
+    out.depth2 = 0.0f;
+    out.inverseW0 = 1.0f;
+    out.inverseW1 = 1.0f;
+    out.inverseW2 = 1.0f;
+
+    return SetCoverage(out, x, y, area, width, height, tileSize);
+}
+
+bool PrepareDepthTriangle(const DepthRasterTriangle& input, i32 width, i32 height, i32 tileSize,
+                          PreparedTriangle& out) noexcept
+{
+    out.drawable = false;
+
+    i32 x[3] = {0, 0, 0};
+    i32 y[3] = {0, 0, 0};
+    i64 area = 0;
+    if (!SnapTriangle(input.v0.position, input.v1.position, input.v2.position, x, y, area))
+    {
+        return false;
+    }
+
+    f32 depth[3] = {input.v0.depth, input.v1.depth, input.v2.depth};
+    f32 inverseW[3] = {input.v0.inverseW, input.v1.inverseW, input.v2.inverseW};
+    for (i32 index = 0; index < 3; ++index)
+    {
+        if (!std::isfinite(depth[index]) || !std::isfinite(inverseW[index]) ||
+            !(inverseW[index] > 0.0f))
+        {
+            return false;
+        }
+    }
+
+    math::Color c0 = input.v0.color;
+    math::Color c1 = input.v1.color;
+    math::Color c2 = input.v2.color;
+    if (area < 0)
+    {
+        std::swap(x[1], x[2]);
+        std::swap(y[1], y[2]);
+        std::swap(c1, c2);
+        std::swap(depth[1], depth[2]);
+        std::swap(inverseW[1], inverseW[2]);
+        area = -area;
+    }
+
+    out.c0 = c0;
+    out.c1 = c1;
+    out.c2 = c2;
+    out.depth0 = depth[0];
+    out.depth1 = depth[1];
+    out.depth2 = depth[2];
+    out.inverseW0 = inverseW[0];
+    out.inverseW1 = inverseW[1];
+    out.inverseW2 = inverseW[2];
+
+    return SetCoverage(out, x, y, area, width, height, tileSize);
 }
 
 template <PixelFormat kFormat>
@@ -285,6 +381,94 @@ u64 RasterizeBox(Framebuffer& target, const PreparedTriangle& triangle, i32 minX
     return written;
 }
 
+template <PixelFormat kFormat>
+u64 RasterizeBoxDepth(Framebuffer& target, DepthBuffer& depth, const PreparedTriangle& triangle,
+                      i32 minX, i32 minY, i32 maxX, i32 maxY, u64& rejected) noexcept
+{
+    const i64 sampleX = static_cast<i64>(minX) * kSubpixelScale + kSampleOffset;
+    const i64 sampleY = static_cast<i64>(minY) * kSubpixelScale + kSampleOffset;
+    i64 e0 = triangle.e0.a * sampleX + triangle.e0.b * sampleY + triangle.e0.c;
+    i64 e1 = triangle.e1.a * sampleX + triangle.e1.b * sampleY + triangle.e1.c;
+    i64 e2 = triangle.e2.a * sampleX + triangle.e2.b * sampleY + triangle.e2.c;
+
+    const i64 stepX0 = triangle.e0.a * kSubpixelScale;
+    const i64 stepX1 = triangle.e1.a * kSubpixelScale;
+    const i64 stepX2 = triangle.e2.a * kSubpixelScale;
+    const i64 stepY0 = triangle.e0.b * kSubpixelScale;
+    const i64 stepY1 = triangle.e1.b * kSubpixelScale;
+    const i64 stepY2 = triangle.e2.b * kSubpixelScale;
+
+    const f64 inverseArea = 1.0 / static_cast<f64>(triangle.area);
+    u64 written = 0;
+
+    for (i32 y = minY; y <= maxY; ++y)
+    {
+        i64 rowE0 = e0;
+        i64 rowE1 = e1;
+        i64 rowE2 = e2;
+        u8* row = target.Row(y);
+        f32* depthRow = depth.Row(y);
+        for (i32 x = minX; x <= maxX; ++x)
+        {
+            if (rowE0 >= 0 && rowE1 >= 0 && rowE2 >= 0)
+            {
+                const f64 unbiasedE0 = static_cast<f64>(rowE0 - triangle.bias0);
+                const f64 unbiasedE1 = static_cast<f64>(rowE1 - triangle.bias1);
+                const f64 unbiasedE2 = static_cast<f64>(rowE2 - triangle.bias2);
+                const f32 w0 = static_cast<f32>(unbiasedE1 * inverseArea);
+                const f32 w1 = static_cast<f32>(unbiasedE2 * inverseArea);
+                const f32 w2 = static_cast<f32>(unbiasedE0 * inverseArea);
+
+                // 1/w and depth are affine in screen space, so barycentric
+                // weights interpolate them directly. The color ratio restores
+                // the perspective-correct attribute.
+                const f32 inverseW =
+                    triangle.inverseW0 * w0 + triangle.inverseW1 * w1 + triangle.inverseW2 * w2;
+                const f32 sampleDepth =
+                    triangle.depth0 * w0 + triangle.depth1 * w1 + triangle.depth2 * w2;
+                if (!(inverseW > 0.0f))
+                {
+                    ++rejected;
+                }
+                else if (sampleDepth >= depthRow[x])
+                {
+                    depthRow[x] = sampleDepth;
+                    const f32 scale = 1.0f / inverseW;
+                    const f32 r = (triangle.c0.r * triangle.inverseW0 * w0 +
+                                   triangle.c1.r * triangle.inverseW1 * w1 +
+                                   triangle.c2.r * triangle.inverseW2 * w2) *
+                                  scale;
+                    const f32 g = (triangle.c0.g * triangle.inverseW0 * w0 +
+                                   triangle.c1.g * triangle.inverseW1 * w1 +
+                                   triangle.c2.g * triangle.inverseW2 * w2) *
+                                  scale;
+                    const f32 b = (triangle.c0.b * triangle.inverseW0 * w0 +
+                                   triangle.c1.b * triangle.inverseW1 * w1 +
+                                   triangle.c2.b * triangle.inverseW2 * w2) *
+                                  scale;
+                    const f32 a = (triangle.c0.a * triangle.inverseW0 * w0 +
+                                   triangle.c1.a * triangle.inverseW1 * w1 +
+                                   triangle.c2.a * triangle.inverseW2 * w2) *
+                                  scale;
+                    StorePixel<kFormat>(row, x, r, g, b, a);
+                    ++written;
+                }
+                else
+                {
+                    ++rejected;
+                }
+            }
+            rowE0 += stepX0;
+            rowE1 += stepX1;
+            rowE2 += stepX2;
+        }
+        e0 += stepY0;
+        e1 += stepY1;
+        e2 += stepY2;
+    }
+    return written;
+}
+
 u64 RasterizeBoxDispatch(Framebuffer& target, const PreparedTriangle& triangle, i32 minX, i32 minY,
                          i32 maxX, i32 maxY) noexcept
 {
@@ -293,6 +477,19 @@ u64 RasterizeBoxDispatch(Framebuffer& target, const PreparedTriangle& triangle, 
         return RasterizeBox<PixelFormat::RGBA8Unorm>(target, triangle, minX, minY, maxX, maxY);
     }
     return RasterizeBox<PixelFormat::RGBA32F>(target, triangle, minX, minY, maxX, maxY);
+}
+
+u64 RasterizeDepthBoxDispatch(Framebuffer& target, DepthBuffer& depth,
+                              const PreparedTriangle& triangle, i32 minX, i32 minY, i32 maxX,
+                              i32 maxY, u64& rejected) noexcept
+{
+    if (target.Format() == PixelFormat::RGBA8Unorm)
+    {
+        return RasterizeBoxDepth<PixelFormat::RGBA8Unorm>(target, depth, triangle, minX, minY, maxX,
+                                                          maxY, rejected);
+    }
+    return RasterizeBoxDepth<PixelFormat::RGBA32F>(target, depth, triangle, minX, minY, maxX, maxY,
+                                                   rejected);
 }
 
 void RasterizeTile(const TileContext& context, u32 tileIndex) noexcept
@@ -305,6 +502,7 @@ void RasterizeTile(const TileContext& context, u32 tileIndex) noexcept
     const i32 tileMaxY = std::min(tileMinY + context.tileSize - 1, context.height - 1);
 
     u64 written = 0;
+    u64 rejected = 0;
     for (u32 slot = context.offsets[tileIndex]; slot < context.offsets[tileIndex + 1]; ++slot)
     {
         const PreparedTriangle& triangle = context.triangles[context.indices[slot]];
@@ -316,9 +514,17 @@ void RasterizeTile(const TileContext& context, u32 tileIndex) noexcept
         {
             continue;
         }
-        written += RasterizeBoxDispatch(*context.target, triangle, minX, minY, maxX, maxY);
+        if (context.depth != nullptr)
+        {
+            written += RasterizeDepthBoxDispatch(*context.target, *context.depth, triangle, minX,
+                                                 minY, maxX, maxY, rejected);
+        }
+        else
+        {
+            written += RasterizeBoxDispatch(*context.target, triangle, minX, minY, maxX, maxY);
+        }
     }
-    context.tilePixels[tileIndex] = written;
+    context.counters[tileIndex] = TileCounters{written, rejected};
 }
 
 void RasterizeTileThunk(void* userData, u32 tileIndex) noexcept
@@ -384,6 +590,197 @@ constexpr f32 kMaxLineCoordinate = 1.0e7f;
 i32 ClampToRange(i32 value, i32 low, i32 high) noexcept
 {
     return value < low ? low : (value > high ? high : value);
+}
+
+// Shared preparation, binning, and dispatch. `prepare(index, tileSize, out)`
+// returns false for a triangle that must be skipped; `depth` selects the
+// depth-tested tile path.
+template <typename PrepareFunction>
+core::Status<core::Error> RasterizeImpl(Framebuffer& target, DepthBuffer* depth,
+                                        usize triangleCount, jobs::JobSystem* jobSystem,
+                                        memory::Allocator& allocator, const RasterizerDesc& desc,
+                                        RasterStats* stats, PrepareFunction&& prepare) noexcept
+{
+    if (triangleCount == 0)
+    {
+        return core::Status<core::Error>::Ok();
+    }
+
+    i32 tileSize = desc.tileSize;
+    if (tileSize < kMinTileSize)
+    {
+        tileSize = kMinTileSize;
+    }
+    if (tileSize > kMaxTileSize)
+    {
+        tileSize = kMaxTileSize;
+    }
+
+    const i32 width = target.Width();
+    const i32 height = target.Height();
+    // Tile counts and bin indices are stored in 32-bit integers.
+    constexpr u64 kMaxBinCount = 0xFFFFFFFFu;
+    if (static_cast<u64>(triangleCount) > kMaxBinCount)
+    {
+        return core::Status<core::Error>::Err(
+            core::Error{core::ErrorCode::Overflow, "triangle count is too large"});
+    }
+    const i64 tilesX64 = (static_cast<i64>(width) + tileSize - 1) / tileSize;
+    const i64 tilesY64 = (static_cast<i64>(height) + tileSize - 1) / tileSize;
+    const i64 tileCount64 = tilesX64 * tilesY64;
+    if (tileCount64 <= 0 || static_cast<u64>(tileCount64) > kMaxBinCount)
+    {
+        return core::Status<core::Error>::Err(
+            core::Error{core::ErrorCode::Overflow, "tile grid is too large"});
+    }
+    const u32 tilesX = static_cast<u32>(tilesX64);
+    const u32 tileCount = static_cast<u32>(tileCount64);
+
+    memory::DynamicArray<PreparedTriangle> prepared(allocator);
+    if (!prepared.TryResize(triangleCount))
+    {
+        return core::Status<core::Error>::Err(
+            core::Error{core::ErrorCode::Internal, "failed to prepare triangles"});
+    }
+    memory::DynamicArray<u32> counts(allocator);
+    if (!counts.TryResize(tileCount))
+    {
+        return core::Status<core::Error>::Err(
+            core::Error{core::ErrorCode::Internal, "failed to allocate tile counters"});
+    }
+
+    u64 drawn = 0;
+    u64 skipped = 0;
+    u64 totalEntries = 0;
+    for (usize index = 0; index < triangleCount; ++index)
+    {
+        PreparedTriangle& triangle = prepared[index];
+        if (!prepare(index, tileSize, triangle))
+        {
+            ++skipped;
+            continue;
+        }
+        ++drawn;
+        const u64 spanX = static_cast<u64>(triangle.tileMaxX - triangle.tileMinX) + 1;
+        const u64 spanY = static_cast<u64>(triangle.tileMaxY - triangle.tileMinY) + 1;
+        const u64 entries = spanX * spanY;
+        if (entries > kMaxBinCount || totalEntries > kMaxBinCount - entries)
+        {
+            return core::Status<core::Error>::Err(
+                core::Error{core::ErrorCode::Overflow, "triangle-tile bin is too large"});
+        }
+        totalEntries += entries;
+        for (i32 tileY = triangle.tileMinY; tileY <= triangle.tileMaxY; ++tileY)
+        {
+            for (i32 tileX = triangle.tileMinX; tileX <= triangle.tileMaxX; ++tileX)
+            {
+                const u32 tile = static_cast<u32>(tileY) * tilesX + static_cast<u32>(tileX);
+                ++counts[tile];
+            }
+        }
+    }
+
+    memory::DynamicArray<u32> offsets(allocator);
+    if (!offsets.TryResize(static_cast<usize>(tileCount) + 1))
+    {
+        return core::Status<core::Error>::Err(
+            core::Error{core::ErrorCode::Internal, "failed to allocate tile offsets"});
+    }
+    u64 running = 0;
+    for (u32 tile = 0; tile < tileCount; ++tile)
+    {
+        offsets[tile] = static_cast<u32>(running);
+        running += counts[tile];
+        if (running > kMaxBinCount)
+        {
+            return core::Status<core::Error>::Err(
+                core::Error{core::ErrorCode::Overflow, "tile offsets overflow"});
+        }
+    }
+    offsets[tileCount] = static_cast<u32>(running);
+
+    memory::DynamicArray<u32> indices(allocator);
+    if (!indices.TryResize(static_cast<usize>(running)))
+    {
+        return core::Status<core::Error>::Err(
+            core::Error{core::ErrorCode::Internal, "failed to allocate tile bins"});
+    }
+    memory::DynamicArray<u32> cursor(allocator);
+    if (!cursor.TryResize(tileCount))
+    {
+        return core::Status<core::Error>::Err(
+            core::Error{core::ErrorCode::Internal, "failed to allocate tile cursors"});
+    }
+    for (u32 tile = 0; tile < tileCount; ++tile)
+    {
+        cursor[tile] = offsets[tile];
+    }
+    for (usize index = 0; index < triangleCount; ++index)
+    {
+        const PreparedTriangle& triangle = prepared[index];
+        if (!triangle.drawable)
+        {
+            continue;
+        }
+        for (i32 tileY = triangle.tileMinY; tileY <= triangle.tileMaxY; ++tileY)
+        {
+            for (i32 tileX = triangle.tileMinX; tileX <= triangle.tileMaxX; ++tileX)
+            {
+                const u32 tile = static_cast<u32>(tileY) * tilesX + static_cast<u32>(tileX);
+                indices[cursor[tile]++] = static_cast<u32>(index);
+            }
+        }
+    }
+
+    memory::DynamicArray<TileCounters> tileCounters(allocator);
+    if (!tileCounters.TryResize(tileCount))
+    {
+        return core::Status<core::Error>::Err(
+            core::Error{core::ErrorCode::Internal, "failed to allocate tile counters"});
+    }
+
+    TileContext context;
+    context.target = &target;
+    context.depth = depth;
+    context.triangles = prepared.Data();
+    context.offsets = offsets.Data();
+    context.indices = indices.Data();
+    context.counters = tileCounters.Data();
+    context.tilesX = tilesX;
+    context.tileSize = tileSize;
+    context.width = width;
+    context.height = height;
+
+    if (jobSystem != nullptr && desc.useJobs && tileCount > 1)
+    {
+        jobSystem->ParallelFor(tileCount, 1, &RasterizeTileThunk, &context);
+    }
+    else
+    {
+        for (u32 tile = 0; tile < tileCount; ++tile)
+        {
+            RasterizeTile(context, tile);
+        }
+    }
+
+    u64 pixels = 0;
+    u64 rejected = 0;
+    for (u32 tile = 0; tile < tileCount; ++tile)
+    {
+        pixels += tileCounters[tile].pixels;
+        rejected += tileCounters[tile].rejected;
+    }
+
+    if (stats != nullptr)
+    {
+        stats->triangles = static_cast<u64>(triangleCount);
+        stats->trianglesDrawn = drawn;
+        stats->trianglesSkipped = skipped;
+        stats->tiles = static_cast<u64>(tileCount);
+        stats->pixels = pixels;
+        stats->pixelsRejected = rejected;
+    }
+    return core::Status<core::Error>::Ok();
 }
 
 }  // namespace
@@ -495,188 +892,55 @@ RasterizeTriangles(Framebuffer& target, memory::Span<const RasterTriangle> trian
         return core::Status<core::Error>::Err(
             core::Error{core::ErrorCode::InvalidArgument, "triangle span is null"});
     }
-    if (triangles.Size() == 0)
-    {
-        return core::Status<core::Error>::Ok();
-    }
 
-    i32 tileSize = desc.tileSize;
-    if (tileSize < kMinTileSize)
-    {
-        tileSize = kMinTileSize;
-    }
-    if (tileSize > kMaxTileSize)
-    {
-        tileSize = kMaxTileSize;
-    }
-
-    const i32 width = target.Width();
-    const i32 height = target.Height();
-    // Tile counts and bin indices are stored in 32-bit integers.
-    constexpr u64 kMaxBinCount = 0xFFFFFFFFu;
-    if (static_cast<u64>(triangles.Size()) > kMaxBinCount)
-    {
-        return core::Status<core::Error>::Err(
-            core::Error{core::ErrorCode::Overflow, "triangle count is too large"});
-    }
-    const i64 tilesX64 = (static_cast<i64>(width) + tileSize - 1) / tileSize;
-    const i64 tilesY64 = (static_cast<i64>(height) + tileSize - 1) / tileSize;
-    const i64 tileCount64 = tilesX64 * tilesY64;
-    if (tileCount64 <= 0 || static_cast<u64>(tileCount64) > kMaxBinCount)
-    {
-        return core::Status<core::Error>::Err(
-            core::Error{core::ErrorCode::Overflow, "tile grid is too large"});
-    }
-    const u32 tilesX = static_cast<u32>(tilesX64);
-    const u32 tileCount = static_cast<u32>(tileCount64);
-
-    memory::DynamicArray<PreparedTriangle> prepared(allocator);
-    if (!prepared.TryResize(triangles.Size()))
-    {
-        return core::Status<core::Error>::Err(
-            core::Error{core::ErrorCode::Internal, "failed to prepare triangles"});
-    }
-    memory::DynamicArray<u32> counts(allocator);
-    if (!counts.TryResize(tileCount))
-    {
-        return core::Status<core::Error>::Err(
-            core::Error{core::ErrorCode::Internal, "failed to allocate tile counters"});
-    }
-
-    u64 drawn = 0;
-    u64 skipped = 0;
-    u64 totalEntries = 0;
-    for (usize index = 0; index < triangles.Size(); ++index)
-    {
-        PreparedTriangle& triangle = prepared[index];
-        if (!PrepareTriangle(triangles[index], width, height, tileSize, triangle))
+    return RasterizeImpl(
+        target, nullptr, triangles.Size(), jobSystem, allocator, desc, stats,
+        [&triangles, &target](usize index, i32 tileSize, PreparedTriangle& out) noexcept
         {
-            ++skipped;
-            continue;
-        }
-        ++drawn;
-        const u64 spanX = static_cast<u64>(triangle.tileMaxX - triangle.tileMinX) + 1;
-        const u64 spanY = static_cast<u64>(triangle.tileMaxY - triangle.tileMinY) + 1;
-        const u64 entries = spanX * spanY;
-        if (entries > kMaxBinCount || totalEntries > kMaxBinCount - entries)
-        {
-            return core::Status<core::Error>::Err(
-                core::Error{core::ErrorCode::Overflow, "triangle-tile bin is too large"});
-        }
-        totalEntries += entries;
-        for (i32 tileY = triangle.tileMinY; tileY <= triangle.tileMaxY; ++tileY)
-        {
-            for (i32 tileX = triangle.tileMinX; tileX <= triangle.tileMaxX; ++tileX)
-            {
-                const u32 tile = static_cast<u32>(tileY) * tilesX + static_cast<u32>(tileX);
-                ++counts[tile];
-            }
-        }
-    }
+            return PrepareTriangle(triangles[index], target.Width(), target.Height(), tileSize,
+                                   out);
+        });
+}
 
-    if (totalEntries > kMaxBinCount)
-    {
-        return core::Status<core::Error>::Err(
-            core::Error{core::ErrorCode::Overflow, "triangle-tile bin is too large"});
-    }
-
-    memory::DynamicArray<u32> offsets(allocator);
-    if (!offsets.TryResize(static_cast<usize>(tileCount) + 1))
-    {
-        return core::Status<core::Error>::Err(
-            core::Error{core::ErrorCode::Internal, "failed to allocate tile offsets"});
-    }
-    u64 running = 0;
-    for (u32 tile = 0; tile < tileCount; ++tile)
-    {
-        offsets[tile] = static_cast<u32>(running);
-        running += counts[tile];
-        if (running > kMaxBinCount)
-        {
-            return core::Status<core::Error>::Err(
-                core::Error{core::ErrorCode::Overflow, "tile offsets overflow"});
-        }
-    }
-    offsets[tileCount] = static_cast<u32>(running);
-
-    memory::DynamicArray<u32> indices(allocator);
-    if (!indices.TryResize(static_cast<usize>(running)))
-    {
-        return core::Status<core::Error>::Err(
-            core::Error{core::ErrorCode::Internal, "failed to allocate tile bins"});
-    }
-    memory::DynamicArray<u32> cursor(allocator);
-    if (!cursor.TryResize(tileCount))
-    {
-        return core::Status<core::Error>::Err(
-            core::Error{core::ErrorCode::Internal, "failed to allocate tile cursors"});
-    }
-    for (u32 tile = 0; tile < tileCount; ++tile)
-    {
-        cursor[tile] = offsets[tile];
-    }
-    for (usize index = 0; index < triangles.Size(); ++index)
-    {
-        const PreparedTriangle& triangle = prepared[index];
-        if (!triangle.drawable)
-        {
-            continue;
-        }
-        for (i32 tileY = triangle.tileMinY; tileY <= triangle.tileMaxY; ++tileY)
-        {
-            for (i32 tileX = triangle.tileMinX; tileX <= triangle.tileMaxX; ++tileX)
-            {
-                const u32 tile = static_cast<u32>(tileY) * tilesX + static_cast<u32>(tileX);
-                indices[cursor[tile]++] = static_cast<u32>(index);
-            }
-        }
-    }
-
-    memory::DynamicArray<u64> tilePixels(allocator);
-    if (!tilePixels.TryResize(tileCount))
-    {
-        return core::Status<core::Error>::Err(
-            core::Error{core::ErrorCode::Internal, "failed to allocate tile counters"});
-    }
-
-    TileContext context;
-    context.target = &target;
-    context.triangles = prepared.Data();
-    context.offsets = offsets.Data();
-    context.indices = indices.Data();
-    context.tilePixels = tilePixels.Data();
-    context.tilesX = tilesX;
-    context.tileSize = tileSize;
-    context.width = width;
-    context.height = height;
-
-    if (jobSystem != nullptr && desc.useJobs && tileCount > 1)
-    {
-        jobSystem->ParallelFor(tileCount, 1, &RasterizeTileThunk, &context);
-    }
-    else
-    {
-        for (u32 tile = 0; tile < tileCount; ++tile)
-        {
-            RasterizeTile(context, tile);
-        }
-    }
-
-    u64 pixels = 0;
-    for (u32 tile = 0; tile < tileCount; ++tile)
-    {
-        pixels += tilePixels[tile];
-    }
-
+core::Status<core::Error>
+RasterizeDepthTestedTriangles(Framebuffer& target, DepthBuffer& depth,
+                              memory::Span<const DepthRasterTriangle> triangles,
+                              jobs::JobSystem* jobSystem, memory::Allocator& allocator,
+                              const RasterizerDesc& desc, RasterStats* stats) noexcept
+{
     if (stats != nullptr)
     {
-        stats->triangles = static_cast<u64>(triangles.Size());
-        stats->trianglesDrawn = drawn;
-        stats->trianglesSkipped = skipped;
-        stats->tiles = static_cast<u64>(tileCount);
-        stats->pixels = pixels;
+        *stats = RasterStats{};
     }
-    return core::Status<core::Error>::Ok();
+    if (!target.IsValid())
+    {
+        return core::Status<core::Error>::Err(
+            core::Error{core::ErrorCode::InvalidArgument, "framebuffer is invalid"});
+    }
+    if (!depth.IsValid())
+    {
+        return core::Status<core::Error>::Err(
+            core::Error{core::ErrorCode::InvalidArgument, "depth buffer is invalid"});
+    }
+    if (depth.Width() != target.Width() || depth.Height() != target.Height())
+    {
+        return core::Status<core::Error>::Err(
+            core::Error{core::ErrorCode::InvalidArgument,
+                        "depth buffer dimensions do not match the framebuffer"});
+    }
+    if (triangles.Data() == nullptr && triangles.Size() != 0)
+    {
+        return core::Status<core::Error>::Err(
+            core::Error{core::ErrorCode::InvalidArgument, "triangle span is null"});
+    }
+
+    return RasterizeImpl(
+        target, &depth, triangles.Size(), jobSystem, allocator, desc, stats,
+        [&triangles, &target](usize index, i32 tileSize, PreparedTriangle& out) noexcept
+        {
+            return PrepareDepthTriangle(triangles[index], target.Width(), target.Height(), tileSize,
+                                        out);
+        });
 }
 
 }  // namespace cyber::software

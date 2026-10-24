@@ -241,6 +241,38 @@ int main()
             return 31;
         }
 
+        // Phase 8: the vertex pipeline clips, culls, and depth-tests through the
+        // same installed target.
+        DepthBufferDesc depthDesc{};
+        depthDesc.width = framebuffer.Width();
+        depthDesc.height = framebuffer.Height();
+        auto createdDepth = DepthBuffer::Create(depthDesc, heap);
+        if (!createdDepth)
+        {
+            return 32;
+        }
+        DepthBuffer depth = std::move(createdDepth.Value());
+        depth.Clear(0.0f);
+
+        const Vertex quad[6] = {
+            Vertex{cyber::math::Vec3{-1.0f, -1.0f, 0.5f}, Color{0.0f, 1.0f, 0.0f, 1.0f}},
+            Vertex{cyber::math::Vec3{1.0f, -1.0f, 0.5f}, Color{0.0f, 1.0f, 0.0f, 1.0f}},
+            Vertex{cyber::math::Vec3{1.0f, 1.0f, 0.5f}, Color{0.0f, 1.0f, 0.0f, 1.0f}},
+            Vertex{cyber::math::Vec3{-1.0f, -1.0f, 0.5f}, Color{0.0f, 1.0f, 0.0f, 1.0f}},
+            Vertex{cyber::math::Vec3{1.0f, 1.0f, 0.5f}, Color{0.0f, 1.0f, 0.0f, 1.0f}},
+            Vertex{cyber::math::Vec3{-1.0f, 1.0f, 0.5f}, Color{0.0f, 1.0f, 0.0f, 1.0f}},
+        };
+        PipelineDesc pipelineDesc{};
+        pipelineDesc.viewport.width = 2.0f;
+        pipelineDesc.viewport.height = 2.0f;
+        PipelineStats pipelineStats{};
+        if (!DrawTriangles(pipelineDesc, Span<const Vertex>(quad), framebuffer, depth, nullptr,
+                           heap, &pipelineStats) ||
+            pipelineStats.pixels != 4 || depth.Get(1, 1) != 0.5f)
+        {
+            return 33;
+        }
+
         FramePacer pacer(60);
         if (pacer.TargetFramesPerSecond() != 60)
         {
