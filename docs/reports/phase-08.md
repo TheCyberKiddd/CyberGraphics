@@ -232,10 +232,15 @@ three new headers in the exported package.
 
 ### CI
 
-CI has not run for these commits yet: the branch has not been pushed, and this
-session is not authorized to push. The local gates above are the evidence that
-the Windows MSVC and Linux clang jobs will exercise; the CI link is added when
-the owner pushes `3500c23..e94b60e`.
+GitHub Actions run
+[40097126730](https://github.com/TheCyberKiddd/CyberGraphics/actions/runs/40097126730)
+passed Structure and dependency law, Formatting, Windows MSVC, and Linux clang +
+UBSan for `b28092e`, the last Phase 8 commit. Both platform jobs built every
+preset they own, ran the 44-test suite, installed the package, verified the
+installed headers and targets, and ran the package and source consumers. The
+first run for this change set failed only the Formatting job because the local
+formatter was newer than CI's clang-format 18; `e8aa255` applies the CI
+formatter and the re-run is green.
 
 ## Known gaps
 
