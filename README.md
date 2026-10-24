@@ -52,8 +52,8 @@ in place, and every module test runs through the project's own test runner.
   10,000-triangle mesh covers 640x360 exactly once, and serial and parallel
   output are byte-identical across tile sizes and worker counts. The raster
   sample holds 60.0 FPS in release and its two fixed-frame captures are
-  byte-identical. All 41 local tests pass in every preset and both package
-  consumers pass.
+  byte-identical. All 41 tests pass in every local preset, both package
+  consumers pass, and the Windows + Linux CI jobs are green.
 - Next: Phase 8 (depth, clipping, and perspective).
 
 See [engines/MODULES.md](engines/MODULES.md) for the module index and

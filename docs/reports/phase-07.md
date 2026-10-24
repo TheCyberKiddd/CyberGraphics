@@ -1,8 +1,7 @@
 # Phase 7 report: triangle rasterization
 
 Date: 2026-10-24
-Commits: `7f3d7d6` plus the Phase 7 change set (rasterizer, sample, tests, and
-docs; the Phase 7 commit is recorded on GitHub)
+Commits: `6d2f6e3` (rasterizer, sample, tests, and docs)
 Machine: Windows 10 Pro 19045, Intel Core i5-6400 (4 cores, 4 threads), 16 GB
 RAM, Intel HD 530, MSVC 19.44.35229 (Visual Studio 2022 Build Tools), CMake
 3.31.6, Ninja preset builds
@@ -180,10 +179,12 @@ Formatting check passed: 169 files.
 
 ### CI
 
-The Phase 7 commit is pushed after this report. The Windows MSVC and Linux
-clang + UBSan jobs run the structure and formatting gates, build every preset
-that CI owns, and run the suites. The CI run is linked from the final phase
-summary when it completes.
+GitHub Actions run
+[40072184312](https://github.com/TheCyberKiddd/CyberGraphics/actions/runs/40072184312)
+passed Structure, Formatting, Windows MSVC, and Linux clang + UBSan for
+`6d2f6e3`, the Phase 7 commit. Both platform jobs built the project, ran the
+41-test suite, installed the package, verified the installed headers and
+targets, and ran the package and source consumers.
 
 ## Decisions
 
