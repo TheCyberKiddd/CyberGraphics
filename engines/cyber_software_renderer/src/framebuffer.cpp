@@ -1,5 +1,6 @@
 #include <cyber/software/framebuffer.h>
 
+#include <algorithm>
 #include <cstring>
 #include <new>
 #include <utility>
@@ -68,6 +69,26 @@ math::Color LoadPixel(const u8* pointer, PixelFormat format) noexcept
 
     return math::Color{ReadFloat(pointer + 0), ReadFloat(pointer + 4), ReadFloat(pointer + 8),
                        ReadFloat(pointer + 12)};
+}
+
+// Fills a full row with a repeated pixel pattern by doubling the filled span,
+// so the memory system moves the row in a handful of large copies instead of
+// one small copy per pixel.
+void FillRowWithPattern(u8* row, const u8* pattern, usize pixelBytes, i32 count) noexcept
+{
+    const usize rowBytes = pixelBytes * static_cast<usize>(count);
+    if (rowBytes == 0)
+    {
+        return;
+    }
+    std::memcpy(row, pattern, pixelBytes);
+    usize filled = pixelBytes;
+    while (filled < rowBytes)
+    {
+        const usize chunk = std::min(filled, rowBytes - filled);
+        std::memcpy(row + filled, row, chunk);
+        filled += chunk;
+    }
 }
 
 i32 ClampToInt(i64 value, i32 low, i32 high) noexcept
@@ -281,9 +302,20 @@ void Framebuffer::ClearRect(i32 x, i32 y, i32 width, i32 height, const math::Col
     }
 
     const usize pixelBytes = PixelSizeBytes(m_format);
+    const bool fullWidth = x0 == 0 && x1 == m_width;
+    u8 pattern[16]{};
+    if (fullWidth)
+    {
+        StorePixel(pattern, m_format, color);
+    }
     for (i32 row = y0; row < y1; ++row)
     {
         u8* pixels = Row(row) + static_cast<usize>(x0) * pixelBytes;
+        if (fullWidth)
+        {
+            FillRowWithPattern(pixels, pattern, pixelBytes, x1 - x0);
+            continue;
+        }
         for (i32 column = x0; column < x1; ++column)
         {
             StorePixel(pixels, m_format, color);

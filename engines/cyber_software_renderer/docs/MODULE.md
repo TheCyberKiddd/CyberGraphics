@@ -97,8 +97,10 @@ Phases 9 and 25 need them. They have no targets yet and are not declared early.
   `attribute / w` and `1 / w`; the Phase 7 affine functions keep their original
   arithmetic and output.
 - The viewport maps NDC to screen with a y flip; positive screen-space signed
-  area is clockwise, and `FrontFace::Clockwise` is the default front face for
-  right-handed geometry. Culling happens after clipping and before binning.
+  area is clockwise and negative is counter-clockwise.
+  `FrontFace::CounterClockwise` is the default front face for right-handed
+  geometry, matching D3D12's `FrontCounterClockwise = TRUE`. Culling happens
+  after clipping and before binning.
 - Every runtime buffer uses an explicit allocator.
 - Row access is stride-aware; padding bytes are never written by pixel
   operations.
