@@ -66,6 +66,15 @@
         "CMAKE_CXX_COMPILER": "clang++",
         "CYBER_ENABLE_UBSAN": "ON"
       }
+    },
+    {
+      "name": "ci-linux-asan",
+      "displayName": "CI Linux (clang + ASan)",
+      "inherits": "debug",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CYBER_ENABLE_ASAN": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -92,6 +101,10 @@
     {
       "name": "ci-linux",
       "configurePreset": "ci-linux"
+    },
+    {
+      "name": "ci-linux-asan",
+      "configurePreset": "ci-linux-asan"
     }
   ],
   "testPresets": [
@@ -133,6 +146,13 @@
     {
       "name": "ci-linux",
       "configurePreset": "ci-linux",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "ci-linux-asan",
+      "configurePreset": "ci-linux-asan",
       "output": {
         "outputOnFailure": true
       }
