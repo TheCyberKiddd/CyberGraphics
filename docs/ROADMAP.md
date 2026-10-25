@@ -29,7 +29,7 @@ are recorded.
 
 ## Part 3: RHI and Direct3D 12 (phases 10-15)
 
-- [ ] **Phase 10 — RHI design** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-10-rhi-design) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-10-rhi-design)
+- [x] **Phase 10 — RHI design** — complete; [report](reports/phase-10.md), seven test binaries against the null backend, and the interface compiles and links · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-10-rhi-design) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-10-rhi-design)
 - [ ] **Phase 11 — Resources** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-11-resources) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-11-resources)
 - [ ] **Phase 12 — Pipelines and binding model** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-12-pipelines-and-binding-model) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-12-pipelines-and-binding-model)
 - [ ] **Phase 13 — Command lists, synchronization, swapchain** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-13-command-lists-synchronization-swapchain) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-13-command-lists-synchronization-and-swapchain)
@@ -93,4 +93,6 @@ are recorded.
 - Phase 9: complete. 51/51 tests in debug, release, shipping, and ASan, five
 golden scenes, a textured-lit sample captured with 4x supersampling, and all
 five CI jobs green.
-- Next: Phase 10, RHI design.
+- Phase 10: complete. The RHI object model, capabilities, conventions, backend
+boundary, and null backend; 58/58 tests in debug.
+- Next: Phase 11, resources.

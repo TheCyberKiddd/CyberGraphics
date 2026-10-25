@@ -75,7 +75,14 @@ in place, and every module test runs through the project's own test runner.
   one center sample per pixel.
   The Windows, Linux UBSan, Linux ASan, formatting, and structure CI jobs are
   green.
-- Next: Phase 10 (RHI design).
+- Phase 10: the RHI object model. `cyber_rhi` becomes a built module with
+eleven generation-counted handle types, a format enum with classification, a
+capabilities value (adapter, limits, features), the boundary conventions (+Y
+up, reverse-Z 0..1, top-left texture origin) with a per-backend mapping table,
+a function-pointer backend boundary, and a move-only `Device` with one queue per
+class and monotonic timeline fences. The null backend validates every call. 58
+tests pass in debug; the design is ADR 0013.
+- Next: Phase 11 (resources).
 
 See [engines/MODULES.md](engines/MODULES.md) for the module index and
 [docs/architecture/overview.md](docs/architecture/overview.md) for the design.
