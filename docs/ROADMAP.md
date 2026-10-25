@@ -25,7 +25,7 @@ are recorded.
 - [x] **Phase 6 — Framebuffer and present** — complete; report and CI evidence recorded · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-6-framebuffer-and-present) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-6-framebuffer-and-present)
 - [x] **Phase 7 — Triangle rasterization** — complete; report and CI evidence recorded · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-7-triangle-rasterization) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-7-triangle-rasterization)
 - [x] **Phase 8 — Depth, clipping, and perspective** — complete; report and CI evidence recorded · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-8-depth-clipping-and-perspective) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-8-depth-clipping-and-perspective)
-- [ ] **Phase 9 — Textures, CPU shaders, and test scenes** — implemented; [report](reports/phase-09.md) and local evidence recorded, CI pending the push · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-9-textures-cpu-shaders-and-test-scenes) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-9-textures-cpu-shaders-and-test-scenes)
+- [x] **Phase 9 — Textures, CPU shaders, and test scenes** — complete; [report](reports/phase-09.md), 51/51 tests in four presets, and green CI on run 40198572801 · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-9-textures-cpu-shaders-and-test-scenes) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-9-textures-cpu-shaders-and-test-scenes)
 
 ## Part 3: RHI and Direct3D 12 (phases 10-15)
 
@@ -90,6 +90,6 @@ are recorded.
 - Phase 6: complete. Report and CI evidence recorded.
 - Phase 7: complete. Report and CI evidence recorded.
 - Phase 8: complete. Report and CI evidence recorded.
-- Phase 9: implemented; 51/51 tests in debug, release, shipping, and ASan, five
-golden scenes and a textured-lit sample captured. CI runs on the next push.
+- Phase 9: complete. 51/51 tests in debug, release, shipping, and ASan, five
+golden scenes and a textured-lit sample captured, and all five CI jobs green.
 - Next: Phase 10, RHI design.

@@ -70,7 +70,8 @@ in place, and every module test runs through the project's own test runner.
   committed 640x360 golden scenes; and `samples/04_textured`. All 51 tests pass
   in debug, release, shipping, and ASan, both package consumers pass, every
   check is green, and the textured capture is byte-identical across two writes.
-  CI is pending the push.
+  The Windows, Linux UBSan, Linux ASan, formatting, and structure CI jobs are
+  green.
 - Next: Phase 10 (RHI design).
 
 See [engines/MODULES.md](engines/MODULES.md) for the module index and
