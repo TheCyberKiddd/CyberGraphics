@@ -46,7 +46,6 @@ constexpr i32 kDefaultHeight = 720;
 constexpr i32 kCaptureWidth = 640;
 constexpr i32 kCaptureHeight = 360;
 constexpr usize kCapturePathBytes = 512;
-constexpr usize kCubeVertexCount = 36;
 
 struct Options
 {
