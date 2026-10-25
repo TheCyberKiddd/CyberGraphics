@@ -4,6 +4,7 @@
 #include <cyber/core/result.h>
 #include <cyber/memory/allocator.h>
 #include <cyber/memory/dynamic_array.h>
+#include <cyber/memory/span.h>
 #include <cyber/memory/types.h>
 #include <cyber/software/framebuffer.h>
 
@@ -41,5 +42,17 @@ EncodeImage(const Framebuffer& source, const ImageWriteDesc& desc,
 [[nodiscard]] core::Status<core::Error>
 WriteImage(const char* utf8Path, const Framebuffer& source, memory::Allocator& allocator,
            const ImageWriteDesc& desc = ImageWriteDesc{}) noexcept;
+
+// Decodes an image held in memory into a new linear RGBA32F framebuffer. PPM
+// (P6, P5, and P3) and TGA (type 2 or 3, 8/24/32 bits) are recognized from the
+// leading bytes. Input is treated as hostile: the decoder never reads past
+// `bytes` and returns InvalidArgument or Unsupported for malformed data.
+[[nodiscard]] core::Result<Framebuffer, core::Error>
+ReadImageFromMemory(memory::Span<const memory::Byte> bytes, memory::Allocator& allocator) noexcept;
+
+// Reads a file through cyber_platform and decodes it with
+// `ReadImageFromMemory`. Fails with NotFound, InvalidArgument, or Unsupported.
+[[nodiscard]] core::Result<Framebuffer, core::Error>
+LoadImage(const char* utf8Path, memory::Allocator& allocator) noexcept;
 
 }  // namespace cyber::software

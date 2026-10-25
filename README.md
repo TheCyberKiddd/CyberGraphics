@@ -61,7 +61,17 @@ in place, and every module test runs through the project's own test runner.
   1280x720 in release and both fixed-frame captures are byte-identical; the
   Phase 7 capture hash is unchanged. All 44 tests pass in every local preset,
   both package consumers pass, and the Windows + Linux CI jobs are green.
-- Next: Phase 9 (textures, CPU shaders, and test scenes).
+- Phase 9: implementation complete locally. `cyber_software_renderer` adds
+  mipmapped textures with repeat/clamp/mirrored addressing and
+  nearest/bilinear/trilinear sampling; a CPU shader interface with vertex and
+  pixel stages over perspective-correct varyings; the shaded pipeline with
+  near-plane clipping; Lambert and Blinn-Phong lighting; PPM, TGA, and OBJ
+  readers; a golden-image harness with tolerance and difference images; five
+  committed 640x360 golden scenes; and `samples/04_textured`. All 51 tests pass
+  in debug, release, shipping, and ASan, both package consumers pass, every
+  check is green, and the textured capture is byte-identical across two writes.
+  CI is pending the push.
+- Next: Phase 10 (RHI design).
 
 See [engines/MODULES.md](engines/MODULES.md) for the module index and
 [docs/architecture/overview.md](docs/architecture/overview.md) for the design.

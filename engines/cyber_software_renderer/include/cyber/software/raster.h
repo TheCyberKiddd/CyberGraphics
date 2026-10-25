@@ -8,6 +8,7 @@
 #include <cyber/memory/span.h>
 #include <cyber/memory/types.h>
 #include <cyber/software/framebuffer.h>
+#include <cyber/software/shading.h>
 
 namespace cyber::jobs
 {
@@ -69,6 +70,24 @@ struct DepthRasterTriangle
     DepthRasterVertex v0;
     DepthRasterVertex v1;
     DepthRasterVertex v2;
+};
+
+// A screen-space vertex for the shaded path. Coverage, depth, and perspective
+// correction follow DepthRasterVertex; `varyings` replaces the single color and
+// is interpolated perspective-correctly before the pixel shader runs.
+struct ShadedRasterVertex
+{
+    math::Vec2 position;
+    Varyings varyings;
+    f32 depth = 0.0f;
+    f32 inverseW = 1.0f;
+};
+
+struct ShadedRasterTriangle
+{
+    ShadedRasterVertex v0;
+    ShadedRasterVertex v1;
+    ShadedRasterVertex v2;
 };
 
 struct RasterizerDesc
@@ -155,5 +174,26 @@ RasterizeTriangles(Framebuffer& target, memory::Span<const RasterTriangle> trian
     Framebuffer& target, DepthBuffer& depth, memory::Span<const DepthRasterTriangle> triangles,
     jobs::JobSystem* jobSystem, memory::Allocator& allocator, const RasterizerDesc& desc = {},
     RasterStats* stats = nullptr) noexcept;
+
+// Rasterizes depth-tested triangles whose color is produced by a pixel shader.
+//
+// Coverage, snapping, the top-left rule, and tile binning are identical to
+// RasterizeDepthTestedTriangles. A covered sample interpolates every varying
+// perspective-correctly, runs the depth test, and on success calls
+// `pixelShader(varyings, userData)` and writes the returned linear color.
+// A failing depth test leaves the targets untouched and increments
+// RasterStats::pixelsRejected.
+//
+// `pixelShader` must be non-null; a null shader returns InvalidArgument. The
+// depth buffer must be valid and match the color target. The allocator supplies
+// temporary arrays only and is not accessed by workers. Both the allocator and
+// the pixel shader must be safe to call concurrently: the shader runs on the
+// thread that owns the tile.
+[[nodiscard]] core::Status<core::Error>
+RasterizeShadedTriangles(Framebuffer& target, DepthBuffer& depth,
+                         memory::Span<const ShadedRasterTriangle> triangles,
+                         PixelShaderFn pixelShader, const void* userData,
+                         jobs::JobSystem* jobSystem, memory::Allocator& allocator,
+                         const RasterizerDesc& desc = {}, RasterStats* stats = nullptr) noexcept;
 
 }  // namespace cyber::software
