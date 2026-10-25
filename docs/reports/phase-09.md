@@ -1,7 +1,7 @@
 # Phase 9 report — Textures, CPU shaders, and test scenes
 
 Date: 2026-10-25
-Status: implemented; local evidence complete, CI run pending the push
+Status: implemented; all 51 tests pass in every local preset, CI re-run in flight
 Design note: [phase-09-textures-shaders.md](../design/phase-09-textures-shaders.md)
 ADR: [0011](../adr/0011-textures-shaders-and-golden-images.md)
 Contract: [`cyber_software_renderer`](../../engines/cyber_software_renderer/docs/MODULE.md)
@@ -174,8 +174,12 @@ three consecutive captures; it is a deterministic function of the fixed camera.
   the load; there is no material (`mtllib`) support.
 - **The parsers are not fuzzed.** They are bounded and range-checked; fuzzing is
   Phase 40 work.
-- **CI has not run for these commits.** The local evidence above is complete;
-  the workflow run is pending the push.
+- **The first CI run failed twice and both causes are fixed.** Clang rejected an
+  unused constant in the new sample (`-Wunused-const-variable`, which MSVC does
+  not emit), and the source-consumer build failed to configure because the
+  golden-directory definition was applied to a test target that only exists in
+  the CyberGraphics build. The definition is now guarded with `if(TARGET ...)`,
+  and the consumer configures, builds, and runs locally.
 
 ## Sources
 

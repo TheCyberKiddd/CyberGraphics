@@ -156,7 +156,11 @@ cyber_add_test(
     DEPENDS software_renderer memory platform
 )
 
-target_compile_definitions(
-    cyber_test_software_golden_scenes
-    PRIVATE CYBER_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden"
-)
+# Tests are skipped when a consumer adds this directory, so the target only
+# exists in the CyberGraphics build.
+if(TARGET cyber_test_software_golden_scenes)
+    target_compile_definitions(
+        cyber_test_software_golden_scenes
+        PRIVATE CYBER_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden"
+    )
+endif()
