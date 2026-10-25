@@ -142,11 +142,23 @@ semantic versioning once a public API exists.
 - CI now runs AddressSanitizer on Linux through the `ci-linux-asan` preset.
 - ADR 0011, ADR 0012 (supersampling until multisample coverage exists), the
   Phase 9 design note, `docs/testing-golden-images.md`, and the Phase 9 report.
+- Phase 10 `cyber_rhi`: the GPU object model. Eleven generation-counted handle
+  types; a `Format` enum with depth, sRGB, block-compressed, and integer
+  classification; `BackendKind`, `AdapterInfo`, `Limits`, `Feature`, and
+  `Capabilities`; the boundary conventions (+Y up, reverse-Z in 0..1, top-left
+  texture origin) with a per-backend mapping table; a function-pointer backend
+  boundary (`Backend`, `DeviceInterface`); a move-only `Device` with one queue
+  per class, monotonic 64-bit timeline fences, and `WaitIdle`; and the null
+  backend that validates every call.
+- ADR 0013 (RHI object model), the Phase 10 design note, the D3D12/Vulkan/WebGPU
+  comparison notes, and the Phase 10 report.
 
 ### Notes
 
-- The public API, renderer, RHI, and tools are not implemented yet. Planned
-  modules intentionally have folders and contracts but no CMake targets.
+- The public API, renderer, and tools are not implemented yet. Planned modules
+  intentionally have folders and contracts but no CMake targets.
+- `cyber_rhi` implements its object model only: resource, pipeline, and
+  command-list creation arrive in Phases 11 to 13.
 - The project test runner is a developer tool; it is not installed and is never
   linked into a shipping target.
 - `Transform` is an authoring record. Non-uniform TRS is not closed under
