@@ -91,5 +91,6 @@ are recorded.
 - Phase 7: complete. Report and CI evidence recorded.
 - Phase 8: complete. Report and CI evidence recorded.
 - Phase 9: complete. 51/51 tests in debug, release, shipping, and ASan, five
-golden scenes and a textured-lit sample captured, and all five CI jobs green.
+golden scenes, a textured-lit sample captured with 4x supersampling, and all
+five CI jobs green.
 - Next: Phase 10, RHI design.

@@ -135,7 +135,10 @@ semantic versioning once a public API exists.
   `blinn_cube`, `uv_gradient`, `depth_order`) compared in every preset, plus a
   determinism check that renders twice byte-identically.
 - `samples/04_textured` renders a checker-textured, lit cube with a Blinn-Phong
-  highlight and captures byte-identical fixed frames.
+  highlight and captures byte-identical fixed frames. Its `--supersample` flag
+  renders `n` samples per axis and box-filters the result in linear space, which
+  antialiases the silhouette until the rasterizer has multisample coverage; the
+  window lowers the factor to stay within 2560x1440.
 - CI now runs AddressSanitizer on Linux through the `ci-linux-asan` preset.
 - ADR 0011, the Phase 9 design note, `docs/testing-golden-images.md`, and the
   Phase 9 report.

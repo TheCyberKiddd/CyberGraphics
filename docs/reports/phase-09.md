@@ -117,7 +117,8 @@ All commands ran on Windows 11, 13th Gen Intel Core i7, MSVC 19.44, CMake 3.31.
 | `scripts/layer_check.py` | 16 modules |
 | `scripts/check_format.py` | 197 files |
 | `scripts/verify_package.ps1` | installed and source consumers build and run |
-| `cyber_sample_textured --capture` | 6 submitted, 6 culled, 30709 pixels; two writes byte-identical |
+| `cyber_sample_textured --capture --supersample 4` | 6 submitted, 6 culled, 491393 pixels; two writes byte-identical |
+| `cyber_sample_textured --frames 40 --supersample 1 / 2` | 23.3 / 14.6 FPS at 1280x720 |
 
 New tests, all passing in all four presets:
 
@@ -156,6 +157,23 @@ diffuse and a Blinn-Phong highlight. Capture: `6 submitted, 6 culled` — the
 back faces never reach the rasterizer. The image is committed at
 `docs/reports/images/phase9_textured.png`.
 
+### Antialiasing
+
+The rasterizer takes one center sample per pixel, so a silhouette steps in whole
+pixels. The sample therefore renders into a target `n` times larger per axis and
+box-filters it down in linear space before the sRGB transfer function, which is
+supersampling: `--supersample 4` on the 640x360 capture renders 2560x1440 and
+costs nothing at rest because a capture is one frame. The interactive path
+starts at 2 and walks the factor down until the offscreen target fits
+`kMaxWindowRenderPixels` (2560x1440), so a full-screen window stays responsive;
+`--supersample 1` disables it. Both paths use bilinear magnification and a
+256-texel checker whose blocks are 32 texels wide, because bilinear blends over
+one texel and a coarse source smears each border across a quarter of a check.
+
+The five golden references deliberately stay at one sample per pixel and nearest
+sampling: they exist to pin rasterizer behavior, not to look good, so a change to
+the sample's quality path cannot move them.
+
 The release capture (640x360, texture generation, mip chain, shaded raster, PPM
 encode) completes in 0.14 s warm and 0.22 s on the first run, measured over
 three consecutive captures; it is a deterministic function of the fixed camera.
@@ -169,6 +187,12 @@ three consecutive captures; it is a deterministic function of the fixed camera.
   edges average fewer samples.
 - **`Varyings` is fixed.** Adding an attribute changes a public struct; Phase 16
   generalizes it with a shader language.
+- **No multisample coverage.** Edges are smoothed by supersampling the whole
+  frame, which costs the full frame budget; per-sample coverage, which is what a
+  real MSAA path costs, arrives with the GPU renderer. Supersampling also means
+  the interactive window runs at 14.6 FPS at 1280x720 with a factor of 2 against
+  23.3 FPS at 1 on a CPU rasterizer, so quality is a flag rather than a free
+  default.
 - **No alpha blending.** A covered sample overwrites.
 - **OBJ is strict.** Unsupported records are ignored but a malformed face fails
   the load; there is no material (`mtllib`) support.
