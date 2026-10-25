@@ -20,7 +20,7 @@ to it, and the consequences. Use one when a future reader would otherwise ask
 | [0009](0009-rasterization-conventions.md) | Rasterization conventions | accepted |
 | [0010](0010-depth-clipping-and-perspective.md) | Depth, clipping, and perspective | accepted |
 | [0011](0011-textures-shaders-and-golden-images.md) | Texture sampling, CPU shader interface, and golden images | accepted |
-| [0010](0010-depth-clipping-and-perspective.md) | Depth, clipping, and perspective interpolation | accepted |
+| [0012](0012-supersampling-before-multisample-coverage.md) | Supersampling before multisample coverage | accepted |
 
 Add new records as `NNNN-title.md`, starting at `0001`. Never delete an ADR;
 supersede it with a new one and update the old record's status.

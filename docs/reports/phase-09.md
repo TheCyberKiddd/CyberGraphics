@@ -1,9 +1,10 @@
 # Phase 9 report — Textures, CPU shaders, and test scenes
 
 Date: 2026-10-25
-Status: complete; 51/51 tests in four presets, all five CI jobs green (run 40198572801)
+Status: complete; 51/51 tests in four presets, all five CI jobs green (run 40203650656)
 Design note: [phase-09-textures-shaders.md](../design/phase-09-textures-shaders.md)
-ADR: [0011](../adr/0011-textures-shaders-and-golden-images.md)
+ADR: [0011](../adr/0011-textures-shaders-and-golden-images.md),
+[0012](../adr/0012-supersampling-before-multisample-coverage.md)
 Contract: [`cyber_software_renderer`](../../engines/cyber_software_renderer/docs/MODULE.md)
 
 ## Done-when line
@@ -13,7 +14,9 @@ Contract: [`cyber_software_renderer`](../../engines/cyber_software_renderer/docs
 Both halves are proved locally and in CI. Five golden scenes render a textured
 cube, a Lambert cube, a Blinn-Phong cube, a UV gradient, and a depth-ordered pair
 of quads at 640x360, and each is compared with a committed reference. The
-Windows and both Linux sanitizer jobs run the same tests in every preset.
+Windows and both Linux sanitizer jobs run the same tests in every preset; the
+last green run on `main` is
+[40203650656](https://github.com/TheCyberKiddd/CyberGraphics/actions/runs/40203650656).
 
 ## What was built
 
