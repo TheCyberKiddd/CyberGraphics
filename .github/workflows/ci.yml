@@ -101,3 +101,20 @@ jobs:
           cmake -S tests/integration/source_consumer -B build/source-consumer -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++
           cmake --build build/source-consumer
           ./build/source-consumer/source_consumer
+
+  linux-asan:
+    name: Linux clang + ASan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang ninja-build
+      - name: Configure
+        run: cmake --preset ci-linux-asan
+      - name: Build
+        run: cmake --build --preset ci-linux-asan
+      - name: Test
+        run: ctest --preset ci-linux-asan --output-on-failure
