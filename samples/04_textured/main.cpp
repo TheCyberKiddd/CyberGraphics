@@ -11,6 +11,10 @@
 // `--capture <path.ppm|path.tga>` renders one fixed 640x360 frame offscreen,
 // writes it twice, and fails unless the two files are byte-identical.
 // `--frames <count>` bounds the window run for measurement.
+// `--supersample <1-4>` renders that many samples per axis and box-filters the
+// result down, which is the sample's antialiasing path. The software
+// rasterizer has no multisample coverage yet, so supersampling is how a
+// silhouette is smoothed: 1 is aliased, 4 is reference quality.
 
 #include <cyber/jobs/job_system.h>
 #include <cyber/memory/heap_allocator.h>
@@ -30,6 +34,7 @@ using namespace cyber::memory;
 using cyber::core::f32;
 using cyber::core::f64;
 using cyber::core::i32;
+using cyber::core::i64;
 using cyber::core::u32;
 using cyber::core::u64;
 using cyber::core::usize;
@@ -46,11 +51,20 @@ constexpr i32 kDefaultHeight = 720;
 constexpr i32 kCaptureWidth = 640;
 constexpr i32 kCaptureHeight = 360;
 constexpr usize kCapturePathBytes = 512;
+// Lowest and highest samples per axis the supersampler accepts.
+constexpr i32 kMinSupersample = 1;
+constexpr i32 kMaxSupersample = 4;
+// Ceiling on the offscreen render target in the interactive path. A window
+// larger than this renders at a lower sample count so the frame rate does not
+// collapse; the capture path is not bounded because it renders one frame.
+constexpr i64 kMaxWindowRenderPixels = 2560 * 1440;
+constexpr i64 kMaxFramebufferDimension = 16384;
 
 struct Options
 {
     const char* capturePath = nullptr;
     u32 frames = 0;
+    i32 supersample = 2;
 };
 
 struct SceneUniforms
@@ -73,8 +87,9 @@ Color ScenePixel(const Varyings& varyings, const void* userData) noexcept
 void PrintUsage()
 {
     std::printf("usage: cyber_sample_textured [--capture <path.ppm|path.tga>] "
-                "[--frames <count>]\n");
+                "[--frames <count>] [--supersample <1-4>]\n");
     std::printf("  drag rotates, wheel zooms, Escape closes, F11 toggles fullscreen\n");
+    std::printf("  supersample is samples per axis: 1 aliased, 4 reference quality\n");
 }
 
 bool ParseOptions(int argc, char** argv, Options& options)
@@ -97,6 +112,19 @@ bool ParseOptions(int argc, char** argv, Options& options)
             }
             options.frames = static_cast<u32>(std::strtoul(argv[++index], nullptr, 10));
         }
+        else if (std::strcmp(argv[index], "--supersample") == 0)
+        {
+            if (index + 1 >= argc)
+            {
+                return false;
+            }
+            const long value = std::strtol(argv[++index], nullptr, 10);
+            if (value < kMinSupersample || value > kMaxSupersample)
+            {
+                return false;
+            }
+            options.supersample = static_cast<i32>(value);
+        }
         else
         {
             return false;
@@ -116,8 +144,7 @@ ImageFormat FormatFromPath(const char* path)
     return ImageFormat::Ppm;
 }
 
-bool CreateTargets(Framebuffer& color, DepthBuffer& depth, i32 width, i32 height,
-                   Allocator& allocator)
+bool CreateColorTarget(Framebuffer& color, i32 width, i32 height, Allocator& allocator)
 {
     FramebufferDesc colorDesc{};
     colorDesc.width = width;
@@ -129,6 +156,16 @@ bool CreateTargets(Framebuffer& color, DepthBuffer& depth, i32 width, i32 height
         return false;
     }
     color = std::move(createdColor.Value());
+    return true;
+}
+
+bool CreateTargets(Framebuffer& color, DepthBuffer& depth, i32 width, i32 height,
+                   Allocator& allocator)
+{
+    if (!CreateColorTarget(color, width, height, allocator))
+    {
+        return false;
+    }
 
     DepthBufferDesc depthDesc{};
     depthDesc.width = width;
@@ -139,6 +176,69 @@ bool CreateTargets(Framebuffer& color, DepthBuffer& depth, i32 width, i32 height
         return false;
     }
     depth = std::move(createdDepth.Value());
+    return true;
+}
+
+// Vertical studio backdrop: brighter above the horizon, near-black below. A flat
+// fill reads as a viewport default rather than a rendered frame.
+void FillBackground(Framebuffer& color) noexcept
+{
+    const Color top{0.040f, 0.049f, 0.068f, 1.0f};
+    const Color bottom{0.006f, 0.007f, 0.011f, 1.0f};
+    const i32 height = color.Height();
+    const f32 inverseHeight = height > 1 ? 1.0f / static_cast<f32>(height - 1) : 0.0f;
+    for (i32 y = 0; y < height; ++y)
+    {
+        const f32 t = static_cast<f32>(y) * inverseHeight;
+        color.ClearRect(0, y, color.Width(), 1,
+                        Color{top.r + (bottom.r - top.r) * t,
+                                    top.g + (bottom.g - top.g) * t,
+                                    top.b + (bottom.b - top.b) * t, 1.0f});
+    }
+}
+
+// Box-filters an integer supersampled source down by `factor` samples per axis.
+// Averaging happens in linear space before the sRGB transfer function, which is
+// what makes the result the mean radiance of the covered samples rather than a
+// brighter one. Returns false when the sizes do not divide exactly.
+bool ResolveDownsample(const Framebuffer& source, Framebuffer& destination, i32 factor) noexcept
+{
+    if (!source.IsValid() || !destination.IsValid() || factor < 1)
+    {
+        return false;
+    }
+    if (source.Width() != destination.Width() * factor ||
+        source.Height() != destination.Height() * factor)
+    {
+        return false;
+    }
+
+    const f32 inverseSamples = 1.0f / static_cast<f32>(factor * factor);
+    for (i32 y = 0; y < destination.Height(); ++y)
+    {
+        for (i32 x = 0; x < destination.Width(); ++x)
+        {
+            f32 red = 0.0f;
+            f32 green = 0.0f;
+            f32 blue = 0.0f;
+            f32 alpha = 0.0f;
+            for (i32 sampleY = 0; sampleY < factor; ++sampleY)
+            {
+                for (i32 sampleX = 0; sampleX < factor; ++sampleX)
+                {
+                    const Color texel =
+                        source.GetPixel(x * factor + sampleX, y * factor + sampleY);
+                    red += texel.r;
+                    green += texel.g;
+                    blue += texel.b;
+                    alpha += texel.a;
+                }
+            }
+            destination.SetPixel(x, y,
+                                 Color{red * inverseSamples, green * inverseSamples,
+                                             blue * inverseSamples, alpha * inverseSamples});
+        }
+    }
     return true;
 }
 
@@ -182,9 +282,15 @@ void BuildCube(Mesh& mesh)
 
 bool MakeCheckerTexture(Texture& texture, Allocator& allocator)
 {
+    // Eight checks per face from a 256-texel square. A block has to be many
+    // texels wide: bilinear magnification blends over one texel, so a coarse
+    // source with two-texel blocks smears each border across a quarter of the
+    // check and reads as a soft blur rather than an edge.
+    constexpr i32 kSize = 256;
+    constexpr i32 kBlock = 32;
     TextureDesc desc{};
-    desc.width = 8;
-    desc.height = 8;
+    desc.width = kSize;
+    desc.height = kSize;
     desc.format = TextureFormat::RGBA32F;
     desc.generateMips = true;
     auto created = Texture::Create(desc, allocator);
@@ -194,11 +300,11 @@ bool MakeCheckerTexture(Texture& texture, Allocator& allocator)
     }
     texture = std::move(created.Value());
 
-    for (i32 y = 0; y < 8; ++y)
+    for (i32 y = 0; y < kSize; ++y)
     {
-        for (i32 x = 0; x < 8; ++x)
+        for (i32 x = 0; x < kSize; ++x)
         {
-            const bool light = ((x / 2) + (y / 2)) % 2 == 0;
+            const bool light = ((x / kBlock) + (y / kBlock)) % 2 == 0;
             texture.SetTexel(0, x, y,
                              light ? Color{0.90f, 0.78f, 0.55f, 1.0f}
                                    : Color{0.16f, 0.20f, 0.26f, 1.0f});
@@ -209,13 +315,11 @@ bool MakeCheckerTexture(Texture& texture, Allocator& allocator)
 }
 
 void ConfigureScene(SceneUniforms& uniforms, const OrbitCamera& orbit, const Mat4& model,
-                    const Texture& texture)
+                    const Texture& texture, f32 aspect)
 {
     const Vec3 eye = OrbitCameraPosition(orbit);
     uniforms.transform.modelViewProjection =
-        OrbitCameraProjection(orbit,
-                              static_cast<f32>(kCaptureWidth) / static_cast<f32>(kCaptureHeight)) *
-        OrbitCameraView(orbit) * model;
+        OrbitCameraProjection(orbit, aspect) * OrbitCameraView(orbit) * model;
     uniforms.transform.modelToWorld = model;
     uniforms.transform.normalToWorld = model;
     uniforms.transform.eyePosition = eye;
@@ -225,8 +329,9 @@ void ConfigureScene(SceneUniforms& uniforms, const OrbitCamera& orbit, const Mat
     uniforms.lighting.texture = &texture;
     uniforms.lighting.sampler.addressU = AddressMode::Repeat;
     uniforms.lighting.sampler.addressV = AddressMode::Repeat;
-    uniforms.lighting.sampler.minFilter = FilterMode::Nearest;
-    uniforms.lighting.sampler.magFilter = FilterMode::Nearest;
+    uniforms.lighting.sampler.minFilter = FilterMode::Bilinear;
+    uniforms.lighting.sampler.magFilter = FilterMode::Bilinear;
+    uniforms.lighting.sampler.mipFilter = FilterMode::Bilinear;
     uniforms.lighting.mipLevel = 0.0f;
     uniforms.lighting.material.albedo = Color{1.0f, 1.0f, 1.0f, 1.0f};
     uniforms.lighting.material.specular = 0.45f;
@@ -255,11 +360,27 @@ bool DrawScene(const Mesh& mesh, SceneUniforms& uniforms, Framebuffer& color, De
 
 int RunCapture(const Options& options, Allocator& allocator)
 {
+    const i32 factor = options.supersample;
+    const i32 renderWidth = kCaptureWidth * factor;
+    const i32 renderHeight = kCaptureHeight * factor;
+    if (renderWidth > kMaxFramebufferDimension || renderHeight > kMaxFramebufferDimension)
+    {
+        std::printf("capture: supersampled size exceeds the framebuffer limit\n");
+        return 1;
+    }
+
     Framebuffer framebuffer;
     DepthBuffer depth;
-    if (!CreateTargets(framebuffer, depth, kCaptureWidth, kCaptureHeight, allocator))
+    if (!CreateTargets(framebuffer, depth, renderWidth, renderHeight, allocator))
     {
         std::printf("capture: target creation failed\n");
+        return 1;
+    }
+
+    Framebuffer resolved;
+    if (!CreateColorTarget(resolved, kCaptureWidth, kCaptureHeight, allocator))
+    {
+        std::printf("capture: resolve target creation failed\n");
         return 1;
     }
 
@@ -281,9 +402,10 @@ int RunCapture(const Options& options, Allocator& allocator)
     orbit.farPlane = 200.0f;
 
     SceneUniforms uniforms{};
-    ConfigureScene(uniforms, orbit, Mat4::RotationY(0.4f), texture);
+    ConfigureScene(uniforms, orbit, Mat4::RotationY(0.4f), texture,
+                   static_cast<f32>(kCaptureWidth) / static_cast<f32>(kCaptureHeight));
 
-    framebuffer.Clear(Color{0.03f, 0.04f, 0.06f, 1.0f});
+    FillBackground(framebuffer);
     depth.Clear(0.0f);
     PipelineStats stats{};
     if (!DrawScene(mesh, uniforms, framebuffer, depth, allocator, nullptr, stats))
@@ -291,11 +413,18 @@ int RunCapture(const Options& options, Allocator& allocator)
         std::printf("capture: draw failed\n");
         return 1;
     }
-    std::printf("capture: %llu submitted, %llu culled, %llu clipped, %llu pixels\n",
+    if (!ResolveDownsample(framebuffer, resolved, factor))
+    {
+        std::printf("capture: resolve failed\n");
+        return 1;
+    }
+    std::printf("capture: %llu submitted, %llu culled, %llu clipped, %llu pixels "
+                "(%dx%d supersampled %dx, resolved to %dx%d)\n",
                 static_cast<unsigned long long>(stats.trianglesSubmitted),
                 static_cast<unsigned long long>(stats.trianglesCulled),
                 static_cast<unsigned long long>(stats.trianglesClipped),
-                static_cast<unsigned long long>(stats.pixels));
+                static_cast<unsigned long long>(stats.pixels), renderWidth, renderHeight, factor,
+                kCaptureWidth, kCaptureHeight);
 
     char copyPath[kCapturePathBytes] = {};
     const usize pathLength = std::strlen(options.capturePath);
@@ -311,8 +440,8 @@ int RunCapture(const Options& options, Allocator& allocator)
     ImageWriteDesc writeDesc{};
     writeDesc.format = FormatFromPath(options.capturePath);
     writeDesc.encodeSrgb = true;
-    auto firstWrite = WriteImage(options.capturePath, framebuffer, allocator, writeDesc);
-    auto secondWrite = WriteImage(copyPath, framebuffer, allocator, writeDesc);
+    auto firstWrite = WriteImage(options.capturePath, resolved, allocator, writeDesc);
+    auto secondWrite = WriteImage(copyPath, resolved, allocator, writeDesc);
     if (!firstWrite || !secondWrite)
     {
         std::printf("capture: image write failed\n");
@@ -367,15 +496,40 @@ int RunWindow(const Options& options, Allocator& allocator)
     Presenter presenter = std::move(createdPresenter.Value());
 
     Framebuffer framebuffer;
+    Framebuffer resolved;
     DepthBuffer depth;
-    if (!CreateTargets(framebuffer, depth, window.Width(), window.Height(), allocator))
+    i32 factor = 1;
+    // Allocates the supersampled render target plus the present-resolution
+    // target, lowering the sample count until the render fits the interactive
+    // pixel ceiling. Returns false when either allocation fails.
+    const auto recreateTargets = [&](i32 width, i32 height) -> bool
+    {
+        i32 samples = options.supersample;
+        while (samples > 1 &&
+               static_cast<i64>(width) * samples * height * samples > kMaxWindowRenderPixels)
+        {
+            --samples;
+        }
+        if (!CreateTargets(framebuffer, depth, width * samples, height * samples, allocator))
+        {
+            return false;
+        }
+        if (!CreateColorTarget(resolved, width, height, allocator))
+        {
+            return false;
+        }
+        factor = samples;
+        return true;
+    };
+
+    if (!recreateTargets(window.Width(), window.Height()))
     {
         std::printf("target creation failed\n");
         return 1;
     }
 
     DynamicArray<Byte> presentPixels(allocator);
-    usize presentSize = PresentByteSize(framebuffer.Width(), framebuffer.Height());
+    usize presentSize = PresentByteSize(resolved.Width(), resolved.Height());
     if (presentSize == 0 || !presentPixels.TryResize(presentSize))
     {
         std::printf("present buffer allocation failed\n");
@@ -431,14 +585,14 @@ int RunWindow(const Options& options, Allocator& allocator)
                 running = false;
             }
             else if (event.type == WindowEventType::Resize && event.width > 0 && event.height > 0 &&
-                     (event.width != framebuffer.Width() || event.height != framebuffer.Height()))
+                     (event.width != resolved.Width() || event.height != resolved.Height()))
             {
-                if (!CreateTargets(framebuffer, depth, event.width, event.height, allocator))
+                if (!recreateTargets(event.width, event.height))
                 {
                     running = false;
                     break;
                 }
-                presentSize = PresentByteSize(framebuffer.Width(), framebuffer.Height());
+                presentSize = PresentByteSize(resolved.Width(), resolved.Height());
                 if (presentSize == 0 || !presentPixels.TryResize(presentSize))
                 {
                     running = false;
@@ -470,12 +624,13 @@ int RunWindow(const Options& options, Allocator& allocator)
         orbitInput.zoomDelta = input.WheelDelta() * 0.15f;
         UpdateOrbitCamera(orbit, orbitInput, static_cast<f32>(frameDelta));
 
-        framebuffer.Clear(Color{0.03f, 0.04f, 0.06f, 1.0f});
+        FillBackground(framebuffer);
         depth.Clear(0.0f);
 
         SceneUniforms uniforms{};
         const Mat4 model = Mat4::RotationY(animationSeconds * 0.6f);
-        ConfigureScene(uniforms, orbit, model, texture);
+        ConfigureScene(uniforms, orbit, model, texture,
+                       static_cast<f32>(resolved.Width()) / static_cast<f32>(resolved.Height()));
 
         PipelineStats stats{};
         if (!DrawScene(mesh, uniforms, framebuffer, depth, allocator,
@@ -484,10 +639,15 @@ int RunWindow(const Options& options, Allocator& allocator)
             std::printf("draw failed\n");
             return 1;
         }
+        if (!ResolveDownsample(framebuffer, resolved, factor))
+        {
+            std::printf("resolve failed\n");
+            return 1;
+        }
 
         auto packed =
-            PackPresentPixels(framebuffer, Span<u8>(reinterpret_cast<u8*>(presentPixels.Data()),
-                                                    presentPixels.Size()));
+            PackPresentPixels(resolved, Span<u8>(reinterpret_cast<u8*>(presentPixels.Data()),
+                                                 presentPixels.Size()));
         if (!packed)
         {
             std::printf("present packing failed\n");
@@ -496,8 +656,8 @@ int RunWindow(const Options& options, Allocator& allocator)
 
         PresentSource source{};
         source.pixels = Span<const Byte>(presentPixels.Data(), presentPixels.Size());
-        source.width = framebuffer.Width();
-        source.height = framebuffer.Height();
+        source.width = resolved.Width();
+        source.height = resolved.Height();
         source.format = PresentFormat::RGBA8Unorm;
         auto presented = presenter.Present(source);
         if (!presented)
