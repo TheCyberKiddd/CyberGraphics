@@ -121,6 +121,24 @@ semantic versioning once a public API exists.
   release, and captures byte-identical fixed frames including an inside-the-cube
   near-clipping pose.
 - ADR 0010, the Phase 8 design note, and the Phase 8 report.
+- Phase 9 `cyber_software_renderer`: a move-only `Texture` with a box-filtered
+  mip chain, repeat/clamp/mirrored-repeat addressing, and nearest, bilinear, and
+  trilinear sampling; a CPU shader interface (`VertexShaderFn`/`PixelShaderFn`
+  over `VertexInput` and `Varyings`); `DrawShadedTriangles` and
+  `RasterizeShadedTriangles` with perspective-correct varying interpolation and
+  near-plane clipping; Lambert and Blinn-Phong lighting with directional and
+  point lights; PPM (P6/P5/P3) and TGA (24/32-bit, both origins) readers that
+  decode sRGB to linear; an OBJ reader with fan triangulation and negative
+  indices; and a golden-image harness with per-channel tolerance and a
+  difference image.
+- Five committed 640x360 golden scenes (`checker_cube`, `lambert_cube`,
+  `blinn_cube`, `uv_gradient`, `depth_order`) compared in every preset, plus a
+  determinism check that renders twice byte-identically.
+- `samples/04_textured` renders a checker-textured, lit cube with a Blinn-Phong
+  highlight and captures byte-identical fixed frames.
+- CI now runs AddressSanitizer on Linux through the `ci-linux-asan` preset.
+- ADR 0011, the Phase 9 design note, `docs/testing-golden-images.md`, and the
+  Phase 9 report.
 
 ### Notes
 

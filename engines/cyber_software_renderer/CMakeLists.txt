@@ -4,10 +4,15 @@ set(CYBER_SOFTWARE_SOURCES
     src/depth_buffer.cpp
     src/frame_pacer.cpp
     src/framebuffer.cpp
+    src/golden_image.cpp
     src/image_io.cpp
+    src/lighting.cpp
+    src/mesh.cpp
     src/pipeline.cpp
     src/present_target.cpp
     src/raster.cpp
+    src/shader.cpp
+    src/texture.cpp
 )
 
 set(CYBER_SOFTWARE_HEADERS
@@ -16,10 +21,16 @@ set(CYBER_SOFTWARE_HEADERS
     include/cyber/software/depth_buffer.h
     include/cyber/software/frame_pacer.h
     include/cyber/software/framebuffer.h
+    include/cyber/software/golden_image.h
     include/cyber/software/image_io.h
+    include/cyber/software/lighting.h
+    include/cyber/software/mesh.h
     include/cyber/software/pipeline.h
     include/cyber/software/present_target.h
     include/cyber/software/raster.h
+    include/cyber/software/shading.h
+    include/cyber/software/shader.h
+    include/cyber/software/texture.h
     include/cyber/software/software.h
 )
 
@@ -101,4 +112,51 @@ cyber_add_test(
     NAME software_pipeline
     SOURCES tests/pipeline_test.cpp
     DEPENDS software_renderer memory jobs
+)
+
+cyber_add_test(
+    NAME software_texture
+    SOURCES tests/texture_test.cpp
+    DEPENDS software_renderer memory
+)
+
+cyber_add_test(
+    NAME software_shader
+    SOURCES tests/shader_test.cpp
+    DEPENDS software_renderer memory
+)
+
+cyber_add_test(
+    NAME software_lighting
+    SOURCES tests/lighting_test.cpp
+    DEPENDS software_renderer memory
+)
+
+cyber_add_test(
+    NAME software_image_load
+    SOURCES tests/image_load_test.cpp
+    DEPENDS software_renderer memory platform
+)
+
+cyber_add_test(
+    NAME software_mesh
+    SOURCES tests/mesh_test.cpp
+    DEPENDS software_renderer memory platform
+)
+
+cyber_add_test(
+    NAME software_golden_image
+    SOURCES tests/golden_image_test.cpp
+    DEPENDS software_renderer memory platform
+)
+
+cyber_add_test(
+    NAME software_golden_scenes
+    SOURCES tests/golden_scenes_test.cpp
+    DEPENDS software_renderer memory platform
+)
+
+target_compile_definitions(
+    cyber_test_software_golden_scenes
+    PRIVATE CYBER_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden"
 )

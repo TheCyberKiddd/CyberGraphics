@@ -53,6 +53,10 @@ struct PreparedTriangle
     f32 inverseW0 = 1.0f;
     f32 inverseW1 = 1.0f;
     f32 inverseW2 = 1.0f;
+    // Interpolated attributes, only used by the shaded path.
+    Varyings v0;
+    Varyings v1;
+    Varyings v2;
     // Coverage bias per edge: 0 for top-left, -1 otherwise. The unbiased edge
     // value is biasedValue - bias, which keeps interpolation exact.
     i64 bias0 = 0;
@@ -81,6 +85,9 @@ struct TileContext
     Framebuffer* target = nullptr;
     // Null selects the affine Phase 7 path.
     DepthBuffer* depth = nullptr;
+    // Non-null selects the shaded path; the pixel shader produces the color.
+    PixelShaderFn pixelShader = nullptr;
+    const void* userData = nullptr;
     const PreparedTriangle* triangles = nullptr;
     const u32* offsets = nullptr;
     const u32* indices = nullptr;
@@ -303,6 +310,54 @@ bool PrepareDepthTriangle(const DepthRasterTriangle& input, i32 width, i32 heigh
     return SetCoverage(out, x, y, area, width, height, tileSize);
 }
 
+bool PrepareShadedTriangle(const ShadedRasterTriangle& input, i32 width, i32 height, i32 tileSize,
+                           PreparedTriangle& out) noexcept
+{
+    out.drawable = false;
+
+    i32 x[3] = {0, 0, 0};
+    i32 y[3] = {0, 0, 0};
+    i64 area = 0;
+    if (!SnapTriangle(input.v0.position, input.v1.position, input.v2.position, x, y, area))
+    {
+        return false;
+    }
+
+    f32 depth[3] = {input.v0.depth, input.v1.depth, input.v2.depth};
+    f32 inverseW[3] = {input.v0.inverseW, input.v1.inverseW, input.v2.inverseW};
+    for (i32 index = 0; index < 3; ++index)
+    {
+        if (!std::isfinite(depth[index]) || !std::isfinite(inverseW[index]) ||
+            !(inverseW[index] > 0.0f))
+        {
+            return false;
+        }
+    }
+
+    Varyings varyings[3] = {input.v0.varyings, input.v1.varyings, input.v2.varyings};
+    if (area < 0)
+    {
+        std::swap(x[1], x[2]);
+        std::swap(y[1], y[2]);
+        std::swap(depth[1], depth[2]);
+        std::swap(inverseW[1], inverseW[2]);
+        std::swap(varyings[1], varyings[2]);
+        area = -area;
+    }
+
+    out.v0 = varyings[0];
+    out.v1 = varyings[1];
+    out.v2 = varyings[2];
+    out.depth0 = depth[0];
+    out.depth1 = depth[1];
+    out.depth2 = depth[2];
+    out.inverseW0 = inverseW[0];
+    out.inverseW1 = inverseW[1];
+    out.inverseW2 = inverseW[2];
+
+    return SetCoverage(out, x, y, area, width, height, tileSize);
+}
+
 template <PixelFormat kFormat>
 void StorePixel(u8* row, i32 x, f32 r, f32 g, f32 b, f32 a) noexcept
 {
@@ -469,6 +524,109 @@ u64 RasterizeBoxDepth(Framebuffer& target, DepthBuffer& depth, const PreparedTri
     return written;
 }
 
+template <PixelFormat kFormat>
+u64 RasterizeBoxShaded(Framebuffer& target, DepthBuffer& depth, const PreparedTriangle& triangle,
+                       i32 minX, i32 minY, i32 maxX, i32 maxY, PixelShaderFn pixelShader,
+                       const void* userData, u64& rejected) noexcept
+{
+    const i64 sampleX = static_cast<i64>(minX) * kSubpixelScale + kSampleOffset;
+    const i64 sampleY = static_cast<i64>(minY) * kSubpixelScale + kSampleOffset;
+    i64 e0 = triangle.e0.a * sampleX + triangle.e0.b * sampleY + triangle.e0.c;
+    i64 e1 = triangle.e1.a * sampleX + triangle.e1.b * sampleY + triangle.e1.c;
+    i64 e2 = triangle.e2.a * sampleX + triangle.e2.b * sampleY + triangle.e2.c;
+
+    const i64 stepX0 = triangle.e0.a * kSubpixelScale;
+    const i64 stepX1 = triangle.e1.a * kSubpixelScale;
+    const i64 stepX2 = triangle.e2.a * kSubpixelScale;
+    const i64 stepY0 = triangle.e0.b * kSubpixelScale;
+    const i64 stepY1 = triangle.e1.b * kSubpixelScale;
+    const i64 stepY2 = triangle.e2.b * kSubpixelScale;
+
+    const f64 inverseArea = 1.0 / static_cast<f64>(triangle.area);
+    u64 written = 0;
+
+    for (i32 y = minY; y <= maxY; ++y)
+    {
+        i64 rowE0 = e0;
+        i64 rowE1 = e1;
+        i64 rowE2 = e2;
+        u8* row = target.Row(y);
+        f32* depthRow = depth.Row(y);
+        for (i32 x = minX; x <= maxX; ++x)
+        {
+            if (rowE0 >= 0 && rowE1 >= 0 && rowE2 >= 0)
+            {
+                const f64 unbiasedE0 = static_cast<f64>(rowE0 - triangle.bias0);
+                const f64 unbiasedE1 = static_cast<f64>(rowE1 - triangle.bias1);
+                const f64 unbiasedE2 = static_cast<f64>(rowE2 - triangle.bias2);
+                const f32 w0 = static_cast<f32>(unbiasedE1 * inverseArea);
+                const f32 w1 = static_cast<f32>(unbiasedE2 * inverseArea);
+                const f32 w2 = static_cast<f32>(unbiasedE0 * inverseArea);
+
+                const f32 inverseW =
+                    triangle.inverseW0 * w0 + triangle.inverseW1 * w1 + triangle.inverseW2 * w2;
+                const f32 sampleDepth =
+                    triangle.depth0 * w0 + triangle.depth1 * w1 + triangle.depth2 * w2;
+                if (!(inverseW > 0.0f))
+                {
+                    ++rejected;
+                }
+                else if (sampleDepth >= depthRow[x])
+                {
+                    depthRow[x] = sampleDepth;
+                    const f32 scale = 1.0f / inverseW;
+
+                    Varyings varying;
+                    varying.uv = (triangle.v0.uv * (triangle.inverseW0 * w0) +
+                                  triangle.v1.uv * (triangle.inverseW1 * w1) +
+                                  triangle.v2.uv * (triangle.inverseW2 * w2)) *
+                                 scale;
+                    varying.normal = (triangle.v0.normal * (triangle.inverseW0 * w0) +
+                                      triangle.v1.normal * (triangle.inverseW1 * w1) +
+                                      triangle.v2.normal * (triangle.inverseW2 * w2)) *
+                                     scale;
+                    varying.worldPosition =
+                        (triangle.v0.worldPosition * (triangle.inverseW0 * w0) +
+                         triangle.v1.worldPosition * (triangle.inverseW1 * w1) +
+                         triangle.v2.worldPosition * (triangle.inverseW2 * w2)) *
+                        scale;
+                    varying.color = math::Color{(triangle.v0.color.r * (triangle.inverseW0 * w0) +
+                                                 triangle.v1.color.r * (triangle.inverseW1 * w1) +
+                                                 triangle.v2.color.r * (triangle.inverseW2 * w2)) *
+                                                    scale,
+                                                (triangle.v0.color.g * (triangle.inverseW0 * w0) +
+                                                 triangle.v1.color.g * (triangle.inverseW1 * w1) +
+                                                 triangle.v2.color.g * (triangle.inverseW2 * w2)) *
+                                                    scale,
+                                                (triangle.v0.color.b * (triangle.inverseW0 * w0) +
+                                                 triangle.v1.color.b * (triangle.inverseW1 * w1) +
+                                                 triangle.v2.color.b * (triangle.inverseW2 * w2)) *
+                                                    scale,
+                                                (triangle.v0.color.a * (triangle.inverseW0 * w0) +
+                                                 triangle.v1.color.a * (triangle.inverseW1 * w1) +
+                                                 triangle.v2.color.a * (triangle.inverseW2 * w2)) *
+                                                    scale};
+
+                    const math::Color color = pixelShader(varying, userData);
+                    StorePixel<kFormat>(row, x, color.r, color.g, color.b, color.a);
+                    ++written;
+                }
+                else
+                {
+                    ++rejected;
+                }
+            }
+            rowE0 += stepX0;
+            rowE1 += stepX1;
+            rowE2 += stepX2;
+        }
+        e0 += stepY0;
+        e1 += stepY1;
+        e2 += stepY2;
+    }
+    return written;
+}
+
 u64 RasterizeBoxDispatch(Framebuffer& target, const PreparedTriangle& triangle, i32 minX, i32 minY,
                          i32 maxX, i32 maxY) noexcept
 {
@@ -490,6 +648,20 @@ u64 RasterizeDepthBoxDispatch(Framebuffer& target, DepthBuffer& depth,
     }
     return RasterizeBoxDepth<PixelFormat::RGBA32F>(target, depth, triangle, minX, minY, maxX, maxY,
                                                    rejected);
+}
+
+u64 RasterizeShadedBoxDispatch(Framebuffer& target, DepthBuffer& depth,
+                               const PreparedTriangle& triangle, i32 minX, i32 minY, i32 maxX,
+                               i32 maxY, PixelShaderFn pixelShader, const void* userData,
+                               u64& rejected) noexcept
+{
+    if (target.Format() == PixelFormat::RGBA8Unorm)
+    {
+        return RasterizeBoxShaded<PixelFormat::RGBA8Unorm>(
+            target, depth, triangle, minX, minY, maxX, maxY, pixelShader, userData, rejected);
+    }
+    return RasterizeBoxShaded<PixelFormat::RGBA32F>(target, depth, triangle, minX, minY, maxX, maxY,
+                                                    pixelShader, userData, rejected);
 }
 
 void RasterizeTile(const TileContext& context, u32 tileIndex) noexcept
@@ -514,7 +686,13 @@ void RasterizeTile(const TileContext& context, u32 tileIndex) noexcept
         {
             continue;
         }
-        if (context.depth != nullptr)
+        if (context.depth != nullptr && context.pixelShader != nullptr)
+        {
+            written += RasterizeShadedBoxDispatch(*context.target, *context.depth, triangle, minX,
+                                                  minY, maxX, maxY, context.pixelShader,
+                                                  context.userData, rejected);
+        }
+        else if (context.depth != nullptr)
         {
             written += RasterizeDepthBoxDispatch(*context.target, *context.depth, triangle, minX,
                                                  minY, maxX, maxY, rejected);
@@ -599,7 +777,8 @@ template <typename PrepareFunction>
 core::Status<core::Error> RasterizeImpl(Framebuffer& target, DepthBuffer* depth,
                                         usize triangleCount, jobs::JobSystem* jobSystem,
                                         memory::Allocator& allocator, const RasterizerDesc& desc,
-                                        RasterStats* stats, PrepareFunction&& prepare) noexcept
+                                        RasterStats* stats, PixelShaderFn pixelShader,
+                                        const void* userData, PrepareFunction&& prepare) noexcept
 {
     if (triangleCount == 0)
     {
@@ -742,6 +921,8 @@ core::Status<core::Error> RasterizeImpl(Framebuffer& target, DepthBuffer* depth,
     TileContext context;
     context.target = &target;
     context.depth = depth;
+    context.pixelShader = pixelShader;
+    context.userData = userData;
     context.triangles = prepared.Data();
     context.offsets = offsets.Data();
     context.indices = indices.Data();
@@ -894,7 +1075,7 @@ RasterizeTriangles(Framebuffer& target, memory::Span<const RasterTriangle> trian
     }
 
     return RasterizeImpl(
-        target, nullptr, triangles.Size(), jobSystem, allocator, desc, stats,
+        target, nullptr, triangles.Size(), jobSystem, allocator, desc, stats, nullptr, nullptr,
         [&triangles, &target](usize index, i32 tileSize, PreparedTriangle& out) noexcept {
             return PrepareTriangle(triangles[index], target.Width(), target.Height(), tileSize,
                                    out);
@@ -934,10 +1115,55 @@ RasterizeDepthTestedTriangles(Framebuffer& target, DepthBuffer& depth,
     }
 
     return RasterizeImpl(
-        target, &depth, triangles.Size(), jobSystem, allocator, desc, stats,
+        target, &depth, triangles.Size(), jobSystem, allocator, desc, stats, nullptr, nullptr,
         [&triangles, &target](usize index, i32 tileSize, PreparedTriangle& out) noexcept {
             return PrepareDepthTriangle(triangles[index], target.Width(), target.Height(), tileSize,
                                         out);
+        });
+}
+
+core::Status<core::Error> RasterizeShadedTriangles(
+    Framebuffer& target, DepthBuffer& depth, memory::Span<const ShadedRasterTriangle> triangles,
+    PixelShaderFn pixelShader, const void* userData, jobs::JobSystem* jobSystem,
+    memory::Allocator& allocator, const RasterizerDesc& desc, RasterStats* stats) noexcept
+{
+    if (stats != nullptr)
+    {
+        *stats = RasterStats{};
+    }
+    if (!target.IsValid())
+    {
+        return core::Status<core::Error>::Err(
+            core::Error{core::ErrorCode::InvalidArgument, "framebuffer is invalid"});
+    }
+    if (!depth.IsValid())
+    {
+        return core::Status<core::Error>::Err(
+            core::Error{core::ErrorCode::InvalidArgument, "depth buffer is invalid"});
+    }
+    if (depth.Width() != target.Width() || depth.Height() != target.Height())
+    {
+        return core::Status<core::Error>::Err(
+            core::Error{core::ErrorCode::InvalidArgument,
+                        "depth buffer dimensions do not match the framebuffer"});
+    }
+    if (pixelShader == nullptr)
+    {
+        return core::Status<core::Error>::Err(
+            core::Error{core::ErrorCode::InvalidArgument, "pixel shader is null"});
+    }
+    if (triangles.Data() == nullptr && triangles.Size() != 0)
+    {
+        return core::Status<core::Error>::Err(
+            core::Error{core::ErrorCode::InvalidArgument, "triangle span is null"});
+    }
+
+    return RasterizeImpl(
+        target, &depth, triangles.Size(), jobSystem, allocator, desc, stats, pixelShader, userData,
+        [&triangles, &target](usize index, i32 tileSize, PreparedTriangle& out) noexcept
+        {
+            return PrepareShadedTriangle(triangles[index], target.Width(), target.Height(),
+                                         tileSize, out);
         });
 }
 

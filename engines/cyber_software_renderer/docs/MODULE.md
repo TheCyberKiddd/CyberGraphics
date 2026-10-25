@@ -27,10 +27,16 @@ CPU shaders.
 | `image_io.h` | `ImageFormat`, `ImageWriteDesc`, `EncodeImage`, `WriteImage`. |
 | `debug_text.h` | 5x7 glyph metrics, `TextMetrics`, `MeasureText`, `DrawText`. |
 | `frame_pacer.h` | `FramePacer`. |
-| `raster.h` | `RasterVertex`, `RasterTriangle`, `RasterizerDesc`, `RasterStats`, `DrawLine`, `FillTriangle`, `RasterizeTriangles`, `DepthRasterVertex`, `DepthRasterTriangle`, `RasterizeDepthTestedTriangles`. |
+| `raster.h` | `RasterVertex`, `RasterTriangle`, `RasterizerDesc`, `RasterStats`, `DrawLine`, `FillTriangle`, `RasterizeTriangles`, `DepthRasterVertex`, `DepthRasterTriangle`, `RasterizeDepthTestedTriangles`, `ShadedRasterVertex`, `ShadedRasterTriangle`, `RasterizeShadedTriangles`. |
 | `depth_buffer.h` | `DepthBufferDesc`, `DepthBuffer`. |
 | `camera.h` | `Camera`, `CameraForward`, `CameraRight`, `CameraUp`, `CameraView`, `CameraProjection`, `FlyCamera`, `FlyCameraInput`, `UpdateFlyCamera`, `OrbitCamera`, `OrbitCameraInput`, `UpdateOrbitCamera`, `OrbitCameraPosition`, `OrbitCameraView`, `OrbitCameraProjection`. |
 | `pipeline.h` | `Vertex`, `Viewport`, `CullMode`, `FrontFace`, `PipelineDesc`, `PipelineStats`, `ClipVertex`, `ClipPolygon`, `ClipTriangleNearPlane`, `DrawTriangles`. |
+| `shading.h` | `VertexInput`, `Varyings`, `VertexStageOutput`, `VertexShaderFn`, `PixelShaderFn`, `LerpVaryings`. |
+| `shader.h` | `ShaderDesc`, `TransformShaderData`, `TransformVertexShader`, `DrawShadedTriangles`. |
+| `texture.h` | `TextureFormat`, `AddressMode`, `FilterMode`, `SamplerDesc`, `TextureDesc`, `Texture`, `SampleTexture`, `SampleTextureLevel`. |
+| `lighting.h` | `DirectionalLight`, `PointLight`, `SurfaceMaterial`, `LightingData`, `LambertBlinnPhongPixelShader`. |
+| `mesh.h` | `MeshVertex`, `Mesh`, `ObjMesh`, `LoadObjFromMemory`, `LoadObjFile`. |
+| `golden_image.h` | `GoldenImageStatus`, `GoldenImageDesc`, `GoldenImageResult`, `CompareImages`, `WriteDifferenceImage`. |
 | `software.h` | Umbrella include. |
 
 Only headers under this path are public. Everything under `src/` is private.
@@ -110,7 +116,7 @@ Phases 9 and 25 need them. They have no targets yet and are not declared early.
 
 - Performance parity with the GPU.
 - Production rendering, HDR, tone mapping, and color management beyond sRGB.
-- Image loading; Phase 6 writes images only.
+- General image transcoding and PNG decoding; Phase 9 reads PPM and TGA and writes them, and Phase 24 adds cooked assets.
 - vsync, swapchains, and GPU presentation (`cyber_rhi`, Phase 13).
 - The stable plugin ABI; it stays reserved for Phase 25.
 
@@ -138,6 +144,21 @@ files read back equal.
 clear, greater-or-equal test/write, out-of-range safety, and moves.
 `software_camera`: camera basis and view/projection mapping, fly movement,
 frame-rate independence, pitch and distance clamps, and orbit zoom.
+`software_texture`: descriptor validation, mip dimensions, wrap modes, nearest and
+bilinear sampling, trilinear blending, both storage formats, and allocator
+balance.
+`software_shader`: vertex-stage output, perspective-correct varying interpolation,
+clipped UVs and normals, and a constant and a pattern pixel shader.
+`software_lighting`: Lambert falloff, Blinn-Phong specular, point attenuation,
+ambient, and texture modulation.
+`software_image_load`: PPM P6/P5/P3, comments, malformed headers, TGA 24/32-bit
+origins, and unsupported rejection.
+`software_mesh`: OBJ positions, normals, UVs, fan triangulation, negative
+indices, and malformed faces.
+`software_golden_image`: matching images, tolerance enforcement, differing-pixel
+reporting, and difference-image output.
+`software_golden_scenes`: five fixed 640x360 scenes, deterministic re-render, and
+comparison against committed references.
 `software_pipeline`: viewport transform and y flip, near-plane clipping output,
 behind-camera rejection, winding and culling, depth ordering, perspective-correct
 color, clipped-cube determinism, and invalid-input handling.
