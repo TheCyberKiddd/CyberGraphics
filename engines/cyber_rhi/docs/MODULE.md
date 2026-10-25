@@ -3,7 +3,7 @@
 **Kind:** graphics
 **Layer:** 2
 **Order:** 20
-**Status:** planned
+**Status:** active
 **Owner:** @TheCyberKiddd
 
 ## Purpose
@@ -17,6 +17,17 @@ GPU hardware interface: device, queues, resources, pipelines, command lists, syn
 Only headers under this path are public. Everything under `src/` is private.
 Public headers must compile on their own and must not include another module's
 private headers.
+
+| Header | Contents |
+|---|---|
+| `handle.h` | `Handle<Tag>` aliases for every object type, validity, `PackHandle`/`UnpackHandle`. |
+| `format.h` | `Format`, `FormatName`, depth/stencil, sRGB, block-compressed, and integer classification. |
+| `conventions.h` | Boundary constants (+Y up, reverse-Z 0..1, top-left origin) and the per-backend mapping predicates. |
+| `capabilities.h` | `BackendKind`, `AdapterInfo`, `Limits`, `Feature`, `Features`, `Capabilities`. |
+| `descriptors.h` | `QueueKind`, `ValidationLevel`, `DeviceDesc`, `FenceDesc`, `SurfaceDesc`. |
+| `backend.h` | `Backend`, `DeviceInterface`, `DeviceCreation`, `EnumerateAdapters`, `NullBackend`. |
+| `device.h` | `Device` with queues, timeline fences, and `WaitIdle`. |
+| `rhi.h` | Umbrella include. |
 
 ## Dependencies
 
@@ -42,6 +53,9 @@ Dependencies are one-way. A module may depend only on modules with a lower
 ## Tests
 
 Null-backend creation, lifetime and invalid-use tests; barrier validation; backend conformance suite.
+
+Phase 10 delivers `rhi_public_headers`, `rhi_handle`, `rhi_format`,
+`rhi_conventions`, `rhi_capabilities`, `rhi_device`, and `rhi_fence`.
 
 ## Budgets
 

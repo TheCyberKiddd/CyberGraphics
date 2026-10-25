@@ -60,6 +60,7 @@ add_subdirectory(engines/cyber_memory)
 add_subdirectory(engines/cyber_platform)
 add_subdirectory(engines/cyber_perf)
 add_subdirectory(engines/cyber_jobs)
+add_subdirectory(engines/cyber_rhi)
 add_subdirectory(engines/cyber_software_renderer)
 
 if(CYBER_BUILD_SAMPLES)

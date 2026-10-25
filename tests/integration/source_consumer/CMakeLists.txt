@@ -17,6 +17,7 @@ target_link_libraries(source_consumer PRIVATE
     cyber::platform
     cyber::perf
     cyber::jobs
+    cyber::rhi
     cyber::software_renderer
     cyber::graphics_api
 )
