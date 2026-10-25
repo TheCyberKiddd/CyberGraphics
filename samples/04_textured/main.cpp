@@ -191,9 +191,8 @@ void FillBackground(Framebuffer& color) noexcept
     {
         const f32 t = static_cast<f32>(y) * inverseHeight;
         color.ClearRect(0, y, color.Width(), 1,
-                        Color{top.r + (bottom.r - top.r) * t,
-                                    top.g + (bottom.g - top.g) * t,
-                                    top.b + (bottom.b - top.b) * t, 1.0f});
+                        Color{top.r + (bottom.r - top.r) * t, top.g + (bottom.g - top.g) * t,
+                              top.b + (bottom.b - top.b) * t, 1.0f});
     }
 }
 
@@ -226,8 +225,7 @@ bool ResolveDownsample(const Framebuffer& source, Framebuffer& destination, i32 
             {
                 for (i32 sampleX = 0; sampleX < factor; ++sampleX)
                 {
-                    const Color texel =
-                        source.GetPixel(x * factor + sampleX, y * factor + sampleY);
+                    const Color texel = source.GetPixel(x * factor + sampleX, y * factor + sampleY);
                     red += texel.r;
                     green += texel.g;
                     blue += texel.b;
@@ -236,7 +234,7 @@ bool ResolveDownsample(const Framebuffer& source, Framebuffer& destination, i32 
             }
             destination.SetPixel(x, y,
                                  Color{red * inverseSamples, green * inverseSamples,
-                                             blue * inverseSamples, alpha * inverseSamples});
+                                       blue * inverseSamples, alpha * inverseSamples});
         }
     }
     return true;
@@ -645,9 +643,8 @@ int RunWindow(const Options& options, Allocator& allocator)
             return 1;
         }
 
-        auto packed =
-            PackPresentPixels(resolved, Span<u8>(reinterpret_cast<u8*>(presentPixels.Data()),
-                                                 presentPixels.Size()));
+        auto packed = PackPresentPixels(
+            resolved, Span<u8>(reinterpret_cast<u8*>(presentPixels.Data()), presentPixels.Size()));
         if (!packed)
         {
             std::printf("present packing failed\n");
