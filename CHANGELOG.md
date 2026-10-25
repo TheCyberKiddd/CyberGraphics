@@ -140,8 +140,8 @@ semantic versioning once a public API exists.
   antialiases the silhouette until the rasterizer has multisample coverage; the
   window lowers the factor to stay within 2560x1440.
 - CI now runs AddressSanitizer on Linux through the `ci-linux-asan` preset.
-- ADR 0011, the Phase 9 design note, `docs/testing-golden-images.md`, and the
-  Phase 9 report.
+- ADR 0011, ADR 0012 (supersampling until multisample coverage exists), the
+  Phase 9 design note, `docs/testing-golden-images.md`, and the Phase 9 report.
 
 ### Notes
 
