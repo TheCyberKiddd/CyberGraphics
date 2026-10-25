@@ -1,7 +1,7 @@
 # Phase 9 report — Textures, CPU shaders, and test scenes
 
 Date: 2026-10-25
-Status: implemented; all 51 tests pass in every local preset, CI re-run in flight
+Status: complete; 51/51 tests in four presets, all five CI jobs green (run 40198572801)
 Design note: [phase-09-textures-shaders.md](../design/phase-09-textures-shaders.md)
 ADR: [0011](../adr/0011-textures-shaders-and-golden-images.md)
 Contract: [`cyber_software_renderer`](../../engines/cyber_software_renderer/docs/MODULE.md)
@@ -10,10 +10,10 @@ Contract: [`cyber_software_renderer`](../../engines/cyber_software_renderer/docs
 
 > A textured, lit model renders and five golden-image tests pass in CI.
 
-Both halves are proved locally. Five golden scenes render a textured cube, a
-Lambert cube, a Blinn-Phong cube, a UV gradient, and a depth-ordered pair of
-quads at 640x360, and each is compared with a committed reference. CI runs the
-same test in every preset; the run link is added when the branch is pushed.
+Both halves are proved locally and in CI. Five golden scenes render a textured
+cube, a Lambert cube, a Blinn-Phong cube, a UV gradient, and a depth-ordered pair
+of quads at 640x360, and each is compared with a committed reference. The
+Windows and both Linux sanitizer jobs run the same tests in every preset.
 
 ## What was built
 
@@ -179,7 +179,8 @@ three consecutive captures; it is a deterministic function of the fixed camera.
   not emit), and the source-consumer build failed to configure because the
   golden-directory definition was applied to a test target that only exists in
   the CyberGraphics build. The definition is now guarded with `if(TARGET ...)`,
-  and the consumer configures, builds, and runs locally.
+  and the consumer configures, builds, and runs locally. The re-run (formatting,
+  structure, Windows MSVC, Linux UBSan, Linux ASan) passed.
 
 ## Sources
 
