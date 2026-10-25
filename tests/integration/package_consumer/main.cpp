@@ -9,6 +9,7 @@
 #include <cyber/memory/memory.h>
 #include <cyber/perf/perf.h>
 #include <cyber/platform/platform.h>
+#include <cyber/rhi/rhi.h>
 #include <cyber/software/raster.h>
 #include <cyber/software/software.h>
 
@@ -281,6 +282,62 @@ int main()
         if (!IsGlyphSupported('A') || MeasureText("AB").width != 11)
         {
             return 30;
+        }
+    }
+
+    // Phase 10: the RHI object model and the null backend arrive through the
+    // installed package, including the exported headers and the static library.
+    {
+        using namespace cyber::rhi;
+
+        const Backend* backend = NullBackend();
+        if (backend == nullptr || backend->kind != BackendKind::Null)
+        {
+            return 34;
+        }
+
+        AdapterInfo adapters[2] = {};
+        if (EnumerateAdapters(*backend, Span<AdapterInfo>(adapters, 2)) != 1 ||
+            !BackendUsesZeroToOneDepth(adapters[0].backend) ||
+            !BackendUsesTopLeftTextureOrigin(adapters[0].backend))
+        {
+            return 35;
+        }
+        if (FormatName(Format::RGBA8UnormSrgb) == nullptr || !IsSrgbFormat(Format::RGBA8UnormSrgb))
+        {
+            return 42;
+        }
+
+        DeviceDesc deviceDesc{};
+        deviceDesc.backend = backend;
+        auto createdDevice = Device::Create(deviceDesc, heap);
+        if (!createdDevice)
+        {
+            return 36;
+        }
+        Device device = std::move(createdDevice.Value());
+        if (!device.Queue(QueueKind::Graphics).IsValid())
+        {
+            return 37;
+        }
+        if (!device.Capabilities().features.Has(Feature::TimelineFences))
+        {
+            return 38;
+        }
+
+        auto createdFence = device.CreateFence(FenceDesc{});
+        if (!createdFence)
+        {
+            return 39;
+        }
+        const FenceHandle fence = createdFence.Value();
+        if (!device.SignalFence(fence, 2).IsOk() || !device.WaitFence(fence, 2, 0).IsOk())
+        {
+            return 40;
+        }
+        if (device.FenceValue(fence) != 2 || !device.DestroyFence(fence).IsOk())
+        {
+            return 41;
         }
     }
 

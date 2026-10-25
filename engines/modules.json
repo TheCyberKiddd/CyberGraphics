@@ -191,7 +191,7 @@
       "kind": "graphics",
       "layer": 2,
       "order": 20,
-      "status": "planned",
+      "status": "active",
       "purpose": "GPU hardware interface: device, queues, resources, pipelines, command lists, synchronization, swapchain, and backends.",
       "public_api": "include/cyber/rhi/",
       "depends": [
