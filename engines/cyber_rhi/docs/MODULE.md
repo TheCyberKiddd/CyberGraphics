@@ -21,12 +21,16 @@ private headers.
 | Header | Contents |
 |---|---|
 | `handle.h` | `Handle<Tag>` aliases for every object type, validity, `PackHandle`/`UnpackHandle`. |
-| `format.h` | `Format`, `FormatName`, depth/stencil, sRGB, block-compressed, and integer classification. |
+| `format.h` | `Format`, the `FormatInfo` numeric table, `FormatInfoOf`, classification, sRGB/linear variants, view compatibility, and support rules. |
 | `conventions.h` | Boundary constants (+Y up, reverse-Z 0..1, top-left origin) and the per-backend mapping predicates. |
 | `capabilities.h` | `BackendKind`, `AdapterInfo`, `Limits`, `Feature`, `Features`, `Capabilities`. |
 | `descriptors.h` | `QueueKind`, `ValidationLevel`, `DeviceDesc`, `FenceDesc`, `SurfaceDesc`. |
-| `backend.h` | `Backend`, `DeviceInterface`, `DeviceCreation`, `EnumerateAdapters`, `NullBackend`. |
-| `device.h` | `Device` with queues, timeline fences, and `WaitIdle`. |
+| `buffer.h` | `BufferUsage`, `BufferDesc`, `BufferInfo`, and usage set helpers. |
+| `texture.h` | `TextureDimension`, `TextureUsage`, `TextureAspect`, `SubresourceRange`, `TextureDesc`, `TextureViewDesc`, `TextureInfo`, `TextureViewInfo`, `MaxMipLevels`, `TextureByteSize`. |
+| `sampler.h` | `FilterMode`, `AddressMode`, `BorderColor`, `CompareFunction`, `SamplerDesc`. |
+| `resource_state.h` | `ResourceState` and its set rules, `BufferBarrier`, `TextureBarrier`, `ResolveSubresourceRange`. |
+| `backend.h` | `Backend`, `DeviceInterface` (device, fence, resource, and barrier entries), `DeviceCreation`, `EnumerateAdapters`, `NullBackend`. |
+| `device.h` | `Device`: queues, timeline fences, buffers, textures, views, samplers, host access, state queries, transitions, and `WaitIdle`. |
 | `rhi.h` | Umbrella include. |
 
 ## Dependencies
@@ -57,6 +61,11 @@ Null-backend creation, lifetime and invalid-use tests; barrier validation; backe
 Phase 10 delivers `rhi_public_headers`, `rhi_handle`, `rhi_format`,
 `rhi_conventions`, `rhi_capabilities`, `rhi_device`, and `rhi_fence`.
 
+Phase 11 adds `rhi_format_table`, `rhi_buffer`, `rhi_texture`, `rhi_sampler`,
+and `rhi_resource_state`. Every rule a real backend must enforce — descriptor
+shape, limits, capability, format compatibility, host visibility, state
+matching, and stale handles — has a case that fails if the rule is removed.
+
 ## Budgets
 
 CPU submission cost measured. No per-draw heap allocation.
@@ -64,3 +73,16 @@ CPU submission cost measured. No per-draw heap allocation.
 ## Roadmap
 
 Phases 10, 11, 12, 13, 14, 15, 34, 35.
+
+Phase 11 is complete: resources, views, samplers, the format table, and the
+resource state model, validated by the null backend.
+
+## Notes
+
+- State is tracked per `(mip, array layer)`, not per aspect: D3D12 cannot express
+  a per-aspect barrier, and Vulkan's second layout is derived from one state in
+  Phase 34.
+- Destruction is immediate in Phase 11 because nothing is submitted; Phase 13
+  adds retirement queues without changing the public API.
+- Error messages are static strings until Phase 15 provides an error sink that
+  can format a value without allocating.
