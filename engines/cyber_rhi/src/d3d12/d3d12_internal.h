@@ -94,6 +94,54 @@ struct D3D12SamplerSlot
     u32 generation = 0;
 };
 
+// Most entries one bind group layout may declare. The RHI's limit is the same
+// number, so a layout that exceeds it is refused before it reaches here.
+inline constexpr u32 kMaxLayoutEntries = 64;
+
+struct D3D12ShaderSlot
+{
+    // Compiled bytecode, owned. HLSL is compiled at creation, so what is stored
+    // here is always a binary blob.
+    void* code = nullptr;
+    u64 codeSize = 0;
+    ShaderStage stage = ShaderStage::Vertex;
+    ShaderBytecodeFormat format = ShaderBytecodeFormat::Dxil;
+    bool alive = false;
+    u32 generation = 0;
+};
+
+struct D3D12LayoutSlot
+{
+    BindGroupLayoutEntry entries[kMaxLayoutEntries]{};
+    u32 entryCount = 0;
+    // Descriptors this group occupies in a table: the sum of every array count.
+    u32 descriptorCount = 0;
+    bool alive = false;
+    u32 generation = 0;
+};
+
+struct D3D12GroupSlot
+{
+    BindGroupLayoutHandle layout{};
+    // First descriptor of this group's contiguous block in the shader-visible
+    // heap, and how many it spans.
+    u32 descriptorIndex = 0;
+    u32 descriptorCount = 0;
+    bool alive = false;
+    u32 generation = 0;
+};
+
+struct D3D12PipelineLayoutSlot
+{
+    ID3D12RootSignature* rootSignature = nullptr;
+    // Descriptor count per slot, so a bind group can be checked against the
+    // layout it will be bound through.
+    u32 descriptorCounts[kBindGroupSlotCount]{};
+    u32 pushConstantBytes = 0;
+    bool alive = false;
+    u32 generation = 0;
+};
+
 // What a device owns. Two devices of this backend share nothing: every pointer
 // below hangs off `device`, and the one mutex guards the slot tables.
 struct D3D12Device
@@ -102,7 +150,9 @@ struct D3D12Device
         : fences(allocator), freeFenceSlots(allocator), buffers(allocator),
           freeBufferSlots(allocator), textures(allocator), freeTextureSlots(allocator),
           views(allocator), freeViewSlots(allocator), samplers(allocator),
-          freeSamplerSlots(allocator)
+          freeSamplerSlots(allocator), shaders(allocator), freeShaderSlots(allocator),
+          layouts(allocator), freeLayoutSlots(allocator), groups(allocator),
+          freeGroupSlots(allocator), pipelineLayouts(allocator), freePipelineLayoutSlots(allocator)
     {
     }
 
@@ -128,6 +178,14 @@ struct D3D12Device
     DynamicArray<u32> freeViewSlots;
     DynamicArray<D3D12SamplerSlot> samplers;
     DynamicArray<u32> freeSamplerSlots;
+    DynamicArray<D3D12ShaderSlot> shaders;
+    DynamicArray<u32> freeShaderSlots;
+    DynamicArray<D3D12LayoutSlot> layouts;
+    DynamicArray<u32> freeLayoutSlots;
+    DynamicArray<D3D12GroupSlot> groups;
+    DynamicArray<u32> freeGroupSlots;
+    DynamicArray<D3D12PipelineLayoutSlot> pipelineLayouts;
+    DynamicArray<u32> freePipelineLayoutSlots;
 
     // Shader-visible descriptors for views and samplers. One heap each because
     // D3D12 refuses to mix sampler and resource descriptors in one heap.
@@ -150,6 +208,11 @@ struct D3D12Device
 [[nodiscard]] D3D12TextureSlot* Resolve(D3D12Device& device, TextureHandle handle) noexcept;
 [[nodiscard]] D3D12ViewSlot* Resolve(D3D12Device& device, TextureViewHandle handle) noexcept;
 [[nodiscard]] D3D12SamplerSlot* Resolve(D3D12Device& device, SamplerHandle handle) noexcept;
+[[nodiscard]] D3D12ShaderSlot* Resolve(D3D12Device& device, ShaderHandle handle) noexcept;
+[[nodiscard]] D3D12LayoutSlot* Resolve(D3D12Device& device, BindGroupLayoutHandle handle) noexcept;
+[[nodiscard]] D3D12GroupSlot* Resolve(D3D12Device& device, BindGroupHandle handle) noexcept;
+[[nodiscard]] D3D12PipelineLayoutSlot* Resolve(D3D12Device& device,
+                                               PipelineLayoutHandle handle) noexcept;
 
 // Conversion between the RHI's vocabulary and D3D12's. Every one is total: an
 // unknown enumerator maps to the API's conservative answer rather than asserting,
@@ -209,6 +272,28 @@ void ReleaseResources(D3D12Device& device) noexcept;
 [[nodiscard]] Status<Error> D3D12Transition(void* internal,
                                             memory::Span<const BufferBarrier> buffers,
                                             memory::Span<const TextureBarrier> textures) noexcept;
+
+// Shader, binding, and pipeline-layout entries, implemented in
+// `d3d12_binding.cpp`.
+[[nodiscard]] Status<Error> D3D12CreateShader(void* internal, const ShaderDesc& desc,
+                                              ShaderHandle* out) noexcept;
+[[nodiscard]] Status<Error> D3D12DestroyShader(void* internal, ShaderHandle shader) noexcept;
+[[nodiscard]] ShaderInfo D3D12ShaderInfo(const void* internal, ShaderHandle shader) noexcept;
+[[nodiscard]] Status<Error> D3D12CreateBindGroupLayout(void* internal,
+                                                       const BindGroupLayoutDesc& desc,
+                                                       BindGroupLayoutHandle* out) noexcept;
+[[nodiscard]] Status<Error> D3D12DestroyBindGroupLayout(void* internal,
+                                                        BindGroupLayoutHandle layout) noexcept;
+[[nodiscard]] Status<Error> D3D12CreateBindGroup(void* internal, const BindGroupDesc& desc,
+                                                 BindGroupHandle* out) noexcept;
+[[nodiscard]] Status<Error> D3D12DestroyBindGroup(void* internal, BindGroupHandle group) noexcept;
+[[nodiscard]] BindGroupInfo D3D12BindGroupInfo(const void* internal,
+                                               BindGroupHandle group) noexcept;
+[[nodiscard]] Status<Error> D3D12CreatePipelineLayout(void* internal,
+                                                      const PipelineLayoutDesc& desc,
+                                                      PipelineLayoutHandle* out) noexcept;
+[[nodiscard]] Status<Error> D3D12DestroyPipelineLayout(void* internal,
+                                                       PipelineLayoutHandle layout) noexcept;
 
 }  // namespace cyber::rhi::detail
 

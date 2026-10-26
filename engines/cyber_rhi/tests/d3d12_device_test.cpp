@@ -220,11 +220,9 @@ CG_TEST(d3d12_device_unimplemented_calls_report_unsupported)
     CG_REQUIRE(OpenSoftwareDevice(device, heap));
 
     // A call this increment has not reached answers `Unsupported` with a message
-    // naming it, rather than pretending to succeed or crashing. Buffers landed,
-    // shaders have not, so a shader is the current boundary.
-    ShaderDesc shader{};
-    shader.stage = ShaderStage::Vertex;
-    const auto created = device.CreateShader(shader);
+    // naming it, rather than pretending to succeed or crashing. Resources and
+    // shaders landed, pipelines have not, so a pipeline is the current boundary.
+    const auto created = device.CreateGraphicsPipeline(GraphicsPipelineDesc{});
     CG_EXPECT_FALSE(created);
     if (!created)
     {

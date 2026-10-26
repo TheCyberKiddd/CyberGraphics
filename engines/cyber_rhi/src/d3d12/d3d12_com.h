@@ -12,10 +12,12 @@
 #include <cyber/core/types.h>
 #include <cyber/rhi/capabilities.h>
 
-// Both SDK headers are parsed here, before the `interface` macro is dropped
-// below: `d3d12.h` declares its COM types with that keyword, so a translation
-// unit that included it afterwards would see a broken header.
+// Every SDK header this backend needs is parsed here, before the `interface`
+// macro is dropped below: `d3d12.h`, `dxgi1_6.h`, and `d3dcompiler.h` all declare
+// COM types with that keyword, so a translation unit that included one of them
+// afterwards would see a broken header.
 #include <d3d12.h>
+#include <d3dcompiler.h>
 #include <dxgi1_6.h>
 
 // The Windows SDK declares `interface` as a macro for its COM bindings, and
