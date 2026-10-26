@@ -8,6 +8,30 @@ semantic versioning once a public API exists.
 
 ### Added
 
+- Phase 11 `cyber_rhi` resources: `BufferUsage`/`BufferDesc`/`BufferInfo`,
+  `TextureDimension`/`TextureUsage`/`TextureAspect`/`SubresourceRange`,
+  `TextureDesc`/`TextureViewDesc`, and `SamplerDesc` with every filter, address,
+  border, LOD, anisotropy, and comparison field a D3D12 or Vulkan sampler needs.
+- A numeric format table: `FormatInfo`, `FormatInfoOf`, per-field accessors,
+  sRGB/linear variant lookup, view compatibility, and multisample, render-target,
+  storage, and blend support rules. `docs/formats.md` renders the table and a
+  test walks every enumerator.
+- A resource state vocabulary (`ResourceState`, `BufferBarrier`,
+  `TextureBarrier`, `ResolveSubresourceRange`) that maps to D3D12 resource states
+  and Vulkan image layouts, with read states that combine and at most one write.
+- `Device` resource creation and destruction for buffers, textures, views, and
+  samplers; `WriteBuffer`/`ReadBuffer` host access; `BufferStateOf` and
+  `TextureStateOf`; and `Transition`, which validates a whole batch before
+  applying any of it.
+- Validation of every descriptor in the null backend: usage combinations,
+  extents, mip chains, cubes, arrays, multisampling, limits, format capability,
+  view compatibility, sampler LOD and anisotropy, and stale-handle rejection.
+  Views are retired with their texture, and host-visible bytes actually
+  round-trip.
+- `rhi_format_table`, `rhi_buffer`, `rhi_texture`, `rhi_sampler`, and
+  `rhi_resource_state` test binaries; the installed-package and source consumers
+  exercise buffers, textures, views, samplers, and barriers.
+- ADR 0014, the Phase 11 design note, `docs/formats.md`, and the Phase 11 report.
 - Repository skeleton: `engines/`, `include/`, `tools/`, `samples/`, `tests/`,
   `docs/`, `cmake/`, `scripts/`, `assets/`, and `third_party/`.
 - Sixteen engine modules with written contracts in `engines/MODULES.md` and

@@ -79,10 +79,15 @@ in place, and every module test runs through the project's own test runner.
 eleven generation-counted handle types, a format enum with classification, a
 capabilities value (adapter, limits, features), the boundary conventions (+Y
 up, reverse-Z 0..1, top-left texture origin) with a per-backend mapping table,
-a function-pointer backend boundary, and a move-only `Device` with one queue per
-class and monotonic timeline fences. The null backend validates every call. 58
+a function-pointer backend boundary, and a move-only `Device` with one queue per  class and monotonic timeline fences. The null backend validates every call. 58
 tests pass in debug; the design is ADR 0013.
-- Next: Phase 11 (resources).
+- Phase 11: RHI resources. `cyber_rhi` gains buffers, textures, texture views,
+  samplers, a numeric format table, and one resource-state vocabulary with
+  validated transitions. The null backend validates every descriptor, tracks
+  state per `(mip, layer)`, keeps real host-visible bytes so a write round-trips,
+  and retires a texture's views when the texture dies. 63 tests pass in every
+  preset; the design is ADR 0014.
+- Next: Phase 12 (pipelines and the binding model).
 
 See [engines/MODULES.md](engines/MODULES.md) for the module index and
 [docs/architecture/overview.md](docs/architecture/overview.md) for the design.

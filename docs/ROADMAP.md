@@ -30,7 +30,7 @@ are recorded.
 ## Part 3: RHI and Direct3D 12 (phases 10-15)
 
 - [x] **Phase 10 — RHI design** — complete; [report](reports/phase-10.md), seven test binaries against the null backend, and the interface compiles and links · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-10-rhi-design) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-10-rhi-design)
-- [ ] **Phase 11 — Resources** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-11-resources) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-11-resources)
+- [x] **Phase 11 — Resources** — complete; [report](reports/phase-11.md), twelve RHI test binaries, and the null backend passes creation, lifetime, and invalid-use tests · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-11-resources) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-11-resources)
 - [ ] **Phase 12 — Pipelines and binding model** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-12-pipelines-and-binding-model) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-12-pipelines-and-binding-model)
 - [ ] **Phase 13 — Command lists, synchronization, swapchain** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-13-command-lists-synchronization-swapchain) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-13-command-lists-synchronization-and-swapchain)
 - [ ] **Phase 14 — Direct3D 12 backend** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-14-direct3d-12-backend) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-14-direct3d-12-backend)
