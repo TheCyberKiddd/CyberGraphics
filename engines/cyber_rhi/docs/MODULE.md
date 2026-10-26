@@ -86,9 +86,12 @@ the recording state machine, every command's rules, batch submission, present an
 resize, retirements that wait for a fence, and the two tests the done-when line
 names.
 
-Phase 14 adds `rhi_d3d12_adapters` with the backend's first increment: DXGI
-adapter enumeration with Microsoft's WARP software adapter last, the short-span
-contract, and the reported error an incomplete backend table produces.
+Phase 14 adds `rhi_d3d12_adapters` — DXGI adapter enumeration with Microsoft's
+WARP software adapter last, the short-span contract, and a complete per-device
+table — and `rhi_d3d12_device`: a real `ID3D12Device` on a chosen adapter, three
+command queues, timeline fences over `ID3D12Fence` with GPU signals and
+event-based waits, `Capabilities` from the feature level and the API's
+guaranteed limits, and a drain on `WaitIdle`.
 
 ## Budgets
 
@@ -110,9 +113,12 @@ fences, the frame ring, the retirement queue, and the swapchain. The null backen
 validates every recorded command against a per-list shadow of resource state, so
 a missing barrier is a record-time error naming the resource.
 
-Phase 14 is in progress: adapter discovery is in place, and the device, the
+Phase 14 is in progress: adapter discovery and the device are in place, and the
 descriptor heaps, the upload ring, shader compilation, and the two reference
-images land in order behind it. `cyber/rhi/d3d12.h` is the only public header the
+images land in order behind them. Every entry this increment has not reached yet
+answers `Unsupported` with a message naming the increment, so a caller is never
+lied to about what a device can do; `Capabilities::features` advertises only
+`TimelineFences` for the same reason. `cyber/rhi/d3d12.h` is the only public header the
 phase adds. The backend lives under `src/d3d12/`, the only directory in the
 renderer that includes a graphics API header.
 

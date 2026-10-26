@@ -841,6 +841,41 @@ int main()
             {
                 return 85;
             }
+
+            // A device on the last adapter, which is WARP and therefore present
+            // on any Windows machine, including a CI runner with no GPU.
+            cyber::rhi::DeviceDesc gpuDesc{};
+            gpuDesc.backend = d3d12;
+            gpuDesc.adapterIndex = d3d12->enumerateAdapters(nullptr, 0) - 1;
+            cyber::memory::HeapAllocator gpuHeap;
+            auto gpu = cyber::rhi::Device::Create(gpuDesc, gpuHeap);
+            if (!gpu)
+            {
+                return 86;
+            }
+            {
+                cyber::rhi::Device device = std::move(gpu.Value());
+                if (!device.Capabilities().features.Has(cyber::rhi::Feature::TimelineFences) ||
+                    !device.Queue(cyber::rhi::QueueKind::Graphics).IsValid())
+                {
+                    return 87;
+                }
+                auto fence = device.CreateFence(cyber::rhi::FenceDesc{});
+                if (!fence || !device.SignalFence(fence.Value(), 2).IsOk() ||
+                    !device.WaitFence(fence.Value(), 2).IsOk() ||
+                    device.FenceValue(fence.Value()) != 2)
+                {
+                    return 88;
+                }
+                if (!device.WaitIdle().IsOk())
+                {
+                    return 89;
+                }
+            }
+            if (gpuHeap.Stats().used != 0)
+            {
+                return 90;
+            }
         }
     }
 

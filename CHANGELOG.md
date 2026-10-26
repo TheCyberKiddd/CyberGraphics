@@ -87,6 +87,16 @@ semantic versioning once a public API exists.
   incomplete backend table produces instead of a crash.
 - ADR 0017 and the Phase 14 design note with the RHI-to-D3D12 mapping table and
   the phase's increment plan.
+- Phase 14 `cyber_rhi` Direct3D 12 device: creation on a chosen adapter through
+  `D3D12CreateDevice`, the debug layer plus GPU-based validation in debug builds,
+  three command queues (direct, compute, copy), timeline fences over
+  `ID3D12Fence` with queue-side signals and event-based waits that wake on
+  destroy, `Capabilities` from the feature level and the API's guaranteed limits,
+  and `WaitIdle` draining every queue that accepted work.
+- `rhi_d3d12_device` test binary: adapter identity against enumeration, the three
+  queues, the fence timeline including stale handles and slot reuse, two devices
+  sharing nothing, the `Unsupported` answer an unimplemented call gives, and full
+  allocator accounting on teardown.
 - Repository skeleton: `engines/`, `include/`, `tools/`, `samples/`, `tests/`,
   `docs/`, `cmake/`, `scripts/`, `assets/`, and `third_party/`.
 - Sixteen engine modules with written contracts in `engines/MODULES.md` and

@@ -5,6 +5,8 @@
 #include <cyber/rhi/device.h>
 #include <cyber/test/test.h>
 
+#include <utility>
+
 using namespace cyber::rhi;
 using cyber::core::u32;
 using cyber::core::u64;
@@ -129,27 +131,29 @@ CG_TEST(d3d12_backend_is_the_same_object_every_call)
     CG_EXPECT_TRUE(first == second);
 }
 
-CG_TEST(d3d12_backend_reports_no_device_until_one_is_implemented)
+CG_TEST(d3d12_backend_advertises_a_complete_table)
 {
-    // This increment ships adapter enumeration only. Creating a device has to
-    // fail with a reported error rather than a crash or a half-initialized
-    // device, and that contract is what this case pins: when the device lands,
-    // this case is replaced by the conformance suite, not deleted.
+    // `Device::Create` refuses an incomplete table before any backend code runs,
+    // so a complete one here is what makes the backend usable at all. The table
+    // must also be the same object on every call, because a caller may keep the
+    // pointer it read.
     const Backend* backend = D3D12Backend();
     CG_REQUIRE(backend != nullptr);
-    CG_EXPECT_TRUE(backend->interface == nullptr);
-    CG_EXPECT_TRUE(backend->createDevice == nullptr);
+    CG_REQUIRE(backend->interface != nullptr);
+    CG_EXPECT_TRUE(backend->interface == D3D12Backend()->interface);
+    CG_EXPECT_TRUE(backend->createDevice != nullptr);
+    CG_EXPECT_TRUE(backend->destroyDevice != nullptr);
 
     HeapAllocator heap;
     DeviceDesc desc{};
     desc.backend = backend;
-    const auto created = Device::Create(desc, heap);
-    CG_EXPECT_FALSE(created);
-    if (!created)
+    auto created = Device::Create(desc, heap);
+    CG_REQUIRE(static_cast<bool>(created));
     {
-        // `InvalidArgument`, because the table it was handed is incomplete: the
-        // device layer rejects that before any backend code runs.
-        CG_EXPECT_EQ(created.Error().code, cyber::core::ErrorCode::InvalidArgument);
+        Device device = std::move(created.Value());
+        const Capabilities capabilities = device.Capabilities();
+        CG_EXPECT_TRUE(capabilities.features.Has(Feature::TimelineFences));
+        CG_EXPECT_TRUE(capabilities.adapter.backend == BackendKind::D3D12);
     }
     CG_EXPECT_EQ(heap.Stats().used, u64{0});
 }
