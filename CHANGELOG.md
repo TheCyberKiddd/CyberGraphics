@@ -97,6 +97,16 @@ semantic versioning once a public API exists.
   queues, the fence timeline including stale handles and slot reuse, two devices
   sharing nothing, the `Unsupported` answer an unimplemented call gives, and full
   allocator accounting on teardown.
+- Phase 14 `cyber_rhi` Direct3D 12 resources: buffers placed on the heap their
+  usage names (default, upload, or readback) with persistent host mapping,
+  textures for every dimension the RHI describes, views that become render
+  target, depth stencil, or shader resource descriptors, samplers on a
+  shader-visible heap, and the barrier path with one-shot submission and
+  per-subresource texture state.
+- `rhi_d3d12_resources` test binary: host-visible write ranges, readback reads,
+  texture and view lifetime including views retired with their texture, a format
+  with no native equivalent, sampler creation, buffer and texture state across
+  transitions, a mismatched and a stale barrier, and full release on teardown.
 - Repository skeleton: `engines/`, `include/`, `tools/`, `samples/`, `tests/`,
   `docs/`, `cmake/`, `scripts/`, `assets/`, and `third_party/`.
 - Sixteen engine modules with written contracts in `engines/MODULES.md` and

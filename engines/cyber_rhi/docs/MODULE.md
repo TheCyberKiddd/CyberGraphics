@@ -88,10 +88,13 @@ names.
 
 Phase 14 adds `rhi_d3d12_adapters` — DXGI adapter enumeration with Microsoft's
 WARP software adapter last, the short-span contract, and a complete per-device
-table — and `rhi_d3d12_device`: a real `ID3D12Device` on a chosen adapter, three
+table — `rhi_d3d12_device`: a real `ID3D12Device` on a chosen adapter, three
 command queues, timeline fences over `ID3D12Fence` with GPU signals and
 event-based waits, `Capabilities` from the feature level and the API's
-guaranteed limits, and a drain on `WaitIdle`.
+guaranteed limits, and a drain on `WaitIdle` — and `rhi_d3d12_resources`:
+buffers on the heap their usage names, textures, views, samplers, host-visible
+writes and readback reads, and the barrier path with per-subresource texture
+state.
 
 ## Budgets
 
@@ -113,9 +116,11 @@ fences, the frame ring, the retirement queue, and the swapchain. The null backen
 validates every recorded command against a per-list shadow of resource state, so
 a missing barrier is a record-time error naming the resource.
 
-Phase 14 is in progress: adapter discovery and the device are in place, and the
-descriptor heaps, the upload ring, shader compilation, and the two reference
-images land in order behind them. Every entry this increment has not reached yet
+Phase 14 is in progress: adapter discovery, the device, and the resource layer
+are in place, and the upload ring, shader compilation, pipelines, command
+recording, and the two reference images land in order behind them. Resources
+carry their own D3D12 state, and a transition is submitted through a one-shot
+list and waited on, because the API has no immediate-mode barrier. Every entry this increment has not reached yet
 answers `Unsupported` with a message naming the increment, so a caller is never
 lied to about what a device can do; `Capabilities::features` advertises only
 `TimelineFences` for the same reason. `cyber/rhi/d3d12.h` is the only public header the

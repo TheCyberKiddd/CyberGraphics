@@ -2,18 +2,8 @@
 
 #if defined(CYBER_RHI_HAS_D3D12)
 
-#include "d3d12_com.h"
+#include "d3d12_internal.h"
 
-#include <cyber/core/error.h>
-#include <cyber/memory/dynamic_array.h>
-#include <cyber/rhi/backend.h>
-#include <cyber/rhi/capabilities.h>
-#include <cyber/rhi/descriptors.h>
-#include <cyber/rhi/handle.h>
-
-#include <chrono>
-#include <condition_variable>
-#include <mutex>
 #include <new>
 
 namespace cyber::rhi::detail
@@ -27,7 +17,6 @@ using cyber::core::Result;
 using cyber::core::Status;
 using cyber::core::u32;
 using cyber::core::u64;
-using cyber::memory::DynamicArray;
 using cyber::memory::kInvalidHandleIndex;
 
 [[nodiscard]] Status<Error> StatusError(ErrorCode code, const char* message) noexcept
@@ -35,91 +24,15 @@ using cyber::memory::kInvalidHandleIndex;
     return Status<Error>::Err(Error{code, message});
 }
 
-// Next generation for a slot, skipping zero so a valid handle is always
-// distinguishable from a default one.
 [[nodiscard]] u32 NextGeneration(u32 current) noexcept
 {
     const u32 next = current + 1;
     return next == 0 ? 1 : next;
 }
 
-// One timeline fence. The D3D12 object is owned here and released when the slot
-// dies, so nothing outside this file holds a fence reference.
-struct D3D12FenceSlot
-{
-    ID3D12Fence* fence = nullptr;
-    u64 value = 0;
-    bool alive = false;
-    u32 generation = 0;
-};
-
-// One queue per class. `signalled` is the highest value this queue has ever
-// signalled, which is what `SubmissionInfo` reports until submission lands.
-struct D3D12Queue
-{
-    ID3D12CommandQueue* queue = nullptr;
-    D3D12_COMMAND_LIST_TYPE type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-    u64 signalled = 0;
-    u64 submissions = 0;
-};
-
-struct D3D12Device
-{
-    explicit D3D12Device(memory::Allocator& allocator) noexcept
-        : fences(allocator), freeFenceSlots(allocator)
-    {
-    }
-
-    D3D12Device(const D3D12Device&) = delete;
-    D3D12Device& operator=(const D3D12Device&) = delete;
-
-    // `internal` is the D3D12 device; everything else hangs off it.
-    ID3D12Device* device = nullptr;
-    // The debug layer, when it was enabled. Released with the device.
-    ID3D12Debug* debug = nullptr;
-    // Feature level the device was created at. Reported through capabilities as
-    // a limit, not through `AdapterInfo::apiVersion`.
-    D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_0;
-    // The adapter the device was created on, for `Capabilities::adapter`.
-    AdapterInfo adapterInfo{};
-    // One per queue class, in `QueueKind` order. A class the queue creation
-    // failed for stays null and reports an invalid handle.
-    D3D12Queue queues[kQueueKindCount]{};
-    QueueHandle queueHandles[kQueueKindCount]{};
-    Capabilities capabilities{};
-    DynamicArray<D3D12FenceSlot> fences;
-    DynamicArray<u32> freeFenceSlots;
-    memory::Allocator* allocator = nullptr;
-    u64 fenceSignals = 0;
-    // The device's table is shared by every device of this backend, so a
-    // per-device mutex is the only state two devices would share.
-    mutable std::mutex mutex;
-    std::condition_variable condition;
-};
-
-[[nodiscard]] D3D12FenceSlot* ResolveFence(D3D12Device& device, FenceHandle handle) noexcept
-{
-    if (!handle.IsValid() || handle.index >= device.fences.Size())
-    {
-        return nullptr;
-    }
-    D3D12FenceSlot& slot = device.fences[handle.index];
-    if (!slot.alive || slot.generation != handle.generation)
-    {
-        return nullptr;
-    }
-    return &slot;
-}
-
-[[nodiscard]] const D3D12FenceSlot* ResolveFence(const D3D12Device& device,
-                                                 FenceHandle handle) noexcept
-{
-    return ResolveFence(const_cast<D3D12Device&>(device), handle);
-}
-
-// The limits every D3D12 device guarantees. These are the API's own guaranteed
-// maxima, not what this particular adapter reports, because a caller plans
-// against the worst case the interface promises.
+// The limits every D3D12 device guarantees: the API's own maxima, not what this
+// particular adapter reports, because a caller plans against what the interface
+// promises.
 [[nodiscard]] Limits D3D12Limits() noexcept
 {
     Limits limits{};
@@ -133,37 +46,32 @@ struct D3D12Device
     limits.maxColorAttachments = D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT;
     limits.maxVertexBuffers = D3D12_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT;
     limits.maxVertexAttributes = D3D12_IA_VERTEX_INPUT_STRUCTURE_ELEMENT_COUNT;
-    // Four, because the RHI fixes four binding slots by change frequency.
     limits.maxBindGroups = kBindGroupSlotCount;
     limits.maxBindingsPerGroup = 64;
-    // D3D12 root constants are 256 shader-visible DWORDs, but the RHI keeps the
-    // 128-byte floor that Vulkan guarantees so a layout is portable.
+    // D3D12 root constants reach 256 DWORDs, but the RHI keeps the 128-byte floor
+    // Vulkan guarantees so a layout stays portable.
     limits.maxPushConstantBytes = 128;
     limits.maxSamplerAnisotropy = D3D12_MAX_MAXANISOTROPY;
     limits.minUniformBufferOffsetAlignment = D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT;
     limits.minStorageBufferOffsetAlignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
-    // One resource is bounded by the 4 GiB addressable range of a raw buffer,
-    // less the placement alignment the API reserves.
     limits.maxBufferBytes = (u64{1} << 32) - D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
     return limits;
 }
 
-// What this increment can actually honour. Advertising `Compute` before
-// `CreateComputePipeline` exists would be a claim a caller could plan against
-// and be refused by, so the set grows one increment at a time.
+// What this increment can honour. The set grows one increment at a time: a
+// feature a caller could plan against and then be refused by is worse than an
+// absent one.
 [[nodiscard]] Features D3D12Features(const D3D12Device& device) noexcept
 {
     Features features{};
-    // Fences are `ID3D12Fence` timelines: a 64-bit value, signalled and waited on
-    // by the CPU and by a queue.
     features.Add(Feature::TimelineFences);
+    features.Add(Feature::AnisotropicFiltering);
+    features.Add(Feature::DebugMarkers);
 
     D3D12_FEATURE_DATA_D3D12_OPTIONS options{};
     if (device.device != nullptr && SUCCEEDED(device.device->CheckFeatureSupport(
                                         D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(options))))
     {
-        // Root signatures can point at a resource array without a descriptor per
-        // index, which is what a bindless binding needs later.
         if (options.ResourceBindingTier >= D3D12_RESOURCE_BINDING_TIER_3)
         {
             features.Add(Feature::StorageTextures);
@@ -214,10 +122,6 @@ void ReleaseFences(D3D12Device& device) noexcept
     }
 }
 
-// ---------------------------------------------------------------------------
-// Fences
-// ---------------------------------------------------------------------------
-
 Capabilities D3D12Capabilities(const void* internal) noexcept
 {
     if (internal == nullptr)
@@ -256,29 +160,14 @@ Status<Error> D3D12CreateFence(void* internal, const FenceDesc& desc, FenceHandl
     const std::lock_guard<std::mutex> lock(device.mutex);
 
     ID3D12Fence* fence = nullptr;
-    const HRESULT result =
-        device.device->CreateFence(desc.initialValue, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence),
-                                   reinterpret_cast<void**>(&fence));
-    if (FAILED(result) || fence == nullptr)
+    if (FAILED(device.device->CreateFence(desc.initialValue, D3D12_FENCE_FLAG_NONE,
+                                          __uuidof(ID3D12Fence),
+                                          reinterpret_cast<void**>(&fence))) ||
+        fence == nullptr)
     {
         return StatusError(ErrorCode::Internal, "d3d12 backend: fence creation failed");
     }
-    if (desc.label != nullptr && device.device != nullptr)
-    {
-        // Object names are what PIX and the debug layer print.
-        const int wideLength = MultiByteToWideChar(CP_UTF8, 0, desc.label, -1, nullptr, 0);
-        if (wideLength > 1)
-        {
-            // The name lives as long as the fence, so a fixed buffer is enough.
-            wchar_t wide[128]{};
-            const int copied = MultiByteToWideChar(CP_UTF8, 0, desc.label, -1, wide,
-                                                   wideLength < 128 ? wideLength : 128);
-            if (copied > 0)
-            {
-                (void)fence->SetName(wide);
-            }
-        }
-    }
+    NameObject(fence, desc.label);
 
     u32 index = kInvalidHandleIndex;
     if (device.freeFenceSlots.Size() > 0)
@@ -320,7 +209,7 @@ Status<Error> D3D12DestroyFence(void* internal, FenceHandle handle) noexcept
     ID3D12Fence* doomed = nullptr;
     {
         const std::lock_guard<std::mutex> lock(device.mutex);
-        D3D12FenceSlot* slot = ResolveFence(device, handle);
+        D3D12FenceSlot* slot = Resolve(device, handle);
         if (slot == nullptr)
         {
             return StatusError(ErrorCode::InvalidArgument,
@@ -346,8 +235,6 @@ Status<Error> D3D12DestroyFence(void* internal, FenceHandle handle) noexcept
             return StatusError(ErrorCode::Internal, "d3d12 backend: fence free list growth failed");
         }
     }
-    // A waiter must wake and report the handle as stale rather than block until
-    // its timeout. Signalling the maximum value completes every pending wait.
     if (doomed != nullptr)
     {
         (void)doomed->Signal(UINT64_MAX);
@@ -369,7 +256,7 @@ Status<Error> D3D12SignalFence(void* internal, FenceHandle handle, u64 value) no
     ID3D12Fence* fence = nullptr;
     {
         const std::lock_guard<std::mutex> lock(device.mutex);
-        D3D12FenceSlot* slot = ResolveFence(device, handle);
+        D3D12FenceSlot* slot = Resolve(device, handle);
         if (slot == nullptr)
         {
             return StatusError(ErrorCode::InvalidArgument,
@@ -377,16 +264,13 @@ Status<Error> D3D12SignalFence(void* internal, FenceHandle handle, u64 value) no
         }
         if (value <= slot->value)
         {
-            // A timeline never moves backwards; a signal at or below the current
-            // value is already satisfied.
             return Status<Error>::Ok();
         }
         slot->value = value;
         ++device.fenceSignals;
         fence = slot->fence;
         // A queue signal is the faithful mapping: the value is reached when the
-        // GPU reaches it, which is what a frame's completion means. Without a
-        // graphics queue the CPU signal is the only timeline left.
+        // GPU reaches it, which is what a frame's completion means.
         queue = device.queues[static_cast<u32>(QueueKind::Graphics)].queue;
         if (queue != nullptr)
         {
@@ -400,10 +284,10 @@ Status<Error> D3D12SignalFence(void* internal, FenceHandle handle, u64 value) no
 
     if (queue != nullptr)
     {
-        const HRESULT result = queue->Signal(fence, value);
+        const HRESULT signalled = queue->Signal(fence, value);
         queue->Release();
         fence->Release();
-        if (FAILED(result))
+        if (FAILED(signalled))
         {
             return StatusError(ErrorCode::Internal, "d3d12 backend: queue signal failed");
         }
@@ -429,7 +313,7 @@ Status<Error> D3D12WaitFence(void* internal, FenceHandle handle, u64 value,
     ID3D12Fence* fence = nullptr;
     {
         const std::lock_guard<std::mutex> lock(device.mutex);
-        D3D12FenceSlot* slot = ResolveFence(device, handle);
+        D3D12FenceSlot* slot = Resolve(device, handle);
         if (slot == nullptr)
         {
             return StatusError(ErrorCode::InvalidArgument,
@@ -464,8 +348,8 @@ Status<Error> D3D12WaitFence(void* internal, FenceHandle handle, u64 value,
     DWORD milliseconds = INFINITE;
     if (timeoutNanoseconds != kInfiniteWaitNanoseconds)
     {
-        // A bounded wait rounds up, so a sub-millisecond timeout still waits
-        // once rather than reporting a spurious timeout.
+        // A bounded wait rounds up, so a sub-millisecond timeout still waits once
+        // rather than reporting a spurious timeout.
         const u64 rounded = (timeoutNanoseconds + 999'999ULL) / 1'000'000ULL;
         milliseconds = static_cast<DWORD>(rounded == 0 ? 1 : rounded);
     }
@@ -475,7 +359,7 @@ Status<Error> D3D12WaitFence(void* internal, FenceHandle handle, u64 value,
     Status<Error> result = Status<Error>::Ok();
     {
         const std::lock_guard<std::mutex> lock(device.mutex);
-        if (ResolveFence(device, handle) == nullptr)
+        if (Resolve(device, handle) == nullptr)
         {
             result = StatusError(ErrorCode::InvalidArgument,
                                  "d3d12 backend: fence was destroyed while waiting");
@@ -498,7 +382,7 @@ u64 D3D12FenceValue(const void* internal, FenceHandle handle) noexcept
     }
     const auto& device = *static_cast<const D3D12Device*>(internal);
     const std::lock_guard<std::mutex> lock(device.mutex);
-    const D3D12FenceSlot* slot = ResolveFence(device, handle);
+    const D3D12FenceSlot* slot = Resolve(const_cast<D3D12Device&>(device), handle);
     return slot != nullptr ? slot->value : 0;
 }
 
@@ -510,9 +394,8 @@ Status<Error> D3D12WaitIdle(void* internal) noexcept
     }
     auto& device = *static_cast<D3D12Device*>(internal);
 
-    // Drain every queue that has accepted work by signalling a value on it and
-    // waiting for the GPU to reach it. A queue that never submitted returns
-    // immediately, which is why no fence is created here.
+    // Drain every queue that accepted work by signalling a value and waiting for
+    // the GPU to reach it. A queue that never submitted returns immediately.
     for (u32 index = 0; index < kQueueKindCount; ++index)
     {
         D3D12Queue& entry = device.queues[index];
@@ -521,9 +404,9 @@ Status<Error> D3D12WaitIdle(void* internal) noexcept
             continue;
         }
         ID3D12Fence* fence = nullptr;
-        const HRESULT created = device.device->CreateFence(
-            0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), reinterpret_cast<void**>(&fence));
-        if (FAILED(created) || fence == nullptr)
+        if (FAILED(device.device->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence),
+                                              reinterpret_cast<void**>(&fence))) ||
+            fence == nullptr)
         {
             return StatusError(ErrorCode::Internal, "d3d12 backend: idle fence creation failed");
         }
@@ -548,9 +431,9 @@ Status<Error> D3D12WaitIdle(void* internal) noexcept
 // Entries this increment does not implement
 //
 // The table must be complete or `Device::Create` refuses it, so each entry that
-// arrives in a later Phase 14 increment answers with `Unsupported` and a message
-// that names the increment. A query returns a zeroed value: asking a device what
-// it has when it has nothing is not an error.
+// arrives in a later Phase 14 increment answers `Unsupported` with a message that
+// names the increment. A query returns a zeroed value: asking a device what it
+// has when it has nothing is not an error.
 // ---------------------------------------------------------------------------
 
 constexpr const char* kLaterIncrement = "d3d12 backend: this call arrives in a later Phase 14 "
@@ -563,79 +446,10 @@ constexpr const char* kLaterIncrement = "d3d12 backend: this call arrives in a l
 
 [[nodiscard]] Status<Error> NoSuchHandle() noexcept
 {
-    // A destroy of something this backend never created is a stale handle, not an
-    // unsupported feature.
     return Status<Error>::Err(
         Error{ErrorCode::InvalidArgument, "d3d12 backend: handle is stale or invalid"});
 }
 
-Status<Error> D3D12CreateBuffer(void*, const BufferDesc&, BufferHandle*) noexcept
-{
-    return NotYet();
-}
-Status<Error> D3D12DestroyBuffer(void*, BufferHandle) noexcept
-{
-    return NoSuchHandle();
-}
-BufferInfo D3D12BufferInfo(const void*, BufferHandle) noexcept
-{
-    return BufferInfo{};
-}
-Status<Error> D3D12WriteBuffer(void*, BufferHandle, u64,
-                               cyber::memory::Span<const cyber::memory::Byte>) noexcept
-{
-    return NotYet();
-}
-Status<Error> D3D12ReadBuffer(void*, BufferHandle, u64,
-                              cyber::memory::Span<cyber::memory::Byte>) noexcept
-{
-    return NotYet();
-}
-ResourceState D3D12BufferState(const void*, BufferHandle) noexcept
-{
-    return ResourceState::Undefined;
-}
-Status<Error> D3D12CreateTexture(void*, const TextureDesc&, TextureHandle*) noexcept
-{
-    return NotYet();
-}
-Status<Error> D3D12DestroyTexture(void*, TextureHandle) noexcept
-{
-    return NoSuchHandle();
-}
-TextureInfo D3D12TextureInfo(const void*, TextureHandle) noexcept
-{
-    return TextureInfo{};
-}
-Status<Error> D3D12CreateTextureView(void*, const TextureViewDesc&, TextureViewHandle*) noexcept
-{
-    return NotYet();
-}
-Status<Error> D3D12DestroyTextureView(void*, TextureViewHandle) noexcept
-{
-    return NoSuchHandle();
-}
-TextureViewInfo D3D12TextureViewInfo(const void*, TextureViewHandle) noexcept
-{
-    return TextureViewInfo{};
-}
-ResourceState D3D12TextureState(const void*, TextureHandle, u32, u32) noexcept
-{
-    return ResourceState::Undefined;
-}
-Status<Error> D3D12CreateSampler(void*, const SamplerDesc&, SamplerHandle*) noexcept
-{
-    return NotYet();
-}
-Status<Error> D3D12DestroySampler(void*, SamplerHandle) noexcept
-{
-    return NoSuchHandle();
-}
-Status<Error> D3D12Transition(void*, cyber::memory::Span<const BufferBarrier>,
-                              cyber::memory::Span<const TextureBarrier>) noexcept
-{
-    return NotYet();
-}
 Status<Error> D3D12CreateShader(void*, const ShaderDesc&, ShaderHandle*) noexcept
 {
     return NotYet();
@@ -705,8 +519,8 @@ Status<Error> D3D12DestroyPipelineCache(void*, PipelineCacheHandle) noexcept
 {
     return NoSuchHandle();
 }
-Status<Error> D3D12PipelineCacheBytes(const void*, PipelineCacheHandle, cyber::memory::Allocator&,
-                                      DynamicArray<cyber::memory::Byte>*) noexcept
+Status<Error> D3D12PipelineCacheBytes(const void*, PipelineCacheHandle, memory::Allocator&,
+                                      DynamicArray<memory::Byte>*) noexcept
 {
     return NotYet();
 }
@@ -803,8 +617,7 @@ Status<Error> D3D12DestroySwapChain(void*, SwapChainHandle) noexcept
 }
 
 // Finds the adapter at `index` in the order enumeration reports: hardware in
-// DXGI's preference order, then WARP. Returns false when the index is past the
-// end.
+// DXGI's preference order, then WARP.
 [[nodiscard]] bool FindAdapter(IDXGIFactory4& factory, u32 index,
                                ComOwner<IDXGIAdapter1>& out) noexcept
 {
@@ -846,6 +659,39 @@ Status<Error> D3D12DestroySwapChain(void*, SwapChainHandle) noexcept
     return false;
 }
 
+// One shader-visible heap for views and one for samplers. Both are sized from the
+// API's per-heap limit so a device never has to grow one mid-frame.
+[[nodiscard]] bool CreateDescriptorHeaps(D3D12Device& device) noexcept
+{
+    D3D12_DESCRIPTOR_HEAP_DESC viewDesc{};
+    viewDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    viewDesc.NumDescriptors = D3D12_MAX_SHADER_VISIBLE_DESCRIPTOR_HEAP_SIZE_TIER_1;
+    viewDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    if (FAILED(device.device->CreateDescriptorHeap(&viewDesc, __uuidof(ID3D12DescriptorHeap),
+                                                   reinterpret_cast<void**>(&device.viewHeap))) ||
+        device.viewHeap == nullptr)
+    {
+        return false;
+    }
+    device.viewDescriptorSize =
+        device.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+    D3D12_DESCRIPTOR_HEAP_DESC samplerDesc{};
+    samplerDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER;
+    samplerDesc.NumDescriptors = D3D12_MAX_SHADER_VISIBLE_SAMPLER_HEAP_SIZE;
+    samplerDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    if (FAILED(
+            device.device->CreateDescriptorHeap(&samplerDesc, __uuidof(ID3D12DescriptorHeap),
+                                                reinterpret_cast<void**>(&device.samplerHeap))) ||
+        device.samplerHeap == nullptr)
+    {
+        return false;
+    }
+    device.samplerDescriptorSize =
+        device.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
+    return true;
+}
+
 }  // namespace
 
 const DeviceInterface* D3D12Interface() noexcept
@@ -877,8 +723,7 @@ Result<DeviceCreation, Error> CreateD3D12Device(const DeviceDesc& desc,
     }
 
     // The debug layer is enabled before the device exists, because the device
-    // records every message from its creation onward. A debug build asks for it
-    // unless the caller opted out.
+    // records every message from its creation onward.
     ComOwner<ID3D12Debug> debug;
 #if defined(CG_DEBUG) && CG_DEBUG
     if (desc.validation != ValidationLevel::Off)
@@ -936,8 +781,6 @@ Result<DeviceCreation, Error> CreateD3D12Device(const DeviceDesc& desc,
     device->allocator = &allocator;
     device->adapterInfo = DescribeAdapter(*adapter.Get());
 
-    // A feature level query is what tells a caller which shader model the device
-    // accepts; the value is part of the device's identity, not the adapter's.
     D3D12_FEATURE_DATA_FEATURE_LEVELS levels{};
     static const D3D_FEATURE_LEVEL requested[] = {D3D_FEATURE_LEVEL_12_2, D3D_FEATURE_LEVEL_12_1,
                                                   D3D_FEATURE_LEVEL_12_0, D3D_FEATURE_LEVEL_11_1,
@@ -961,9 +804,9 @@ Result<DeviceCreation, Error> CreateD3D12Device(const DeviceDesc& desc,
         queueDesc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL;
         queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
         ID3D12CommandQueue* queue = nullptr;
-        const HRESULT queued = raw->CreateCommandQueue(&queueDesc, __uuidof(ID3D12CommandQueue),
-                                                       reinterpret_cast<void**>(&queue));
-        if (FAILED(queued) || queue == nullptr)
+        if (FAILED(raw->CreateCommandQueue(&queueDesc, __uuidof(ID3D12CommandQueue),
+                                           reinterpret_cast<void**>(&queue))) ||
+            queue == nullptr)
         {
             // A device without its graphics queue cannot do anything the RHI
             // promises, so a partial queue set is a failed creation.
@@ -985,6 +828,29 @@ Result<DeviceCreation, Error> CreateD3D12Device(const DeviceDesc& desc,
         device->queueHandles[index].generation = 1;
     }
 
+    if (!CreateDescriptorHeaps(*device))
+    {
+        ReleaseQueues(*device);
+        ReleaseFences(*device);
+        if (device->viewHeap != nullptr)
+        {
+            device->viewHeap->Release();
+        }
+        if (device->samplerHeap != nullptr)
+        {
+            device->samplerHeap->Release();
+        }
+        if (device->debug != nullptr)
+        {
+            device->debug->Release();
+        }
+        raw->Release();
+        device->~D3D12Device();
+        allocator.Deallocate(memory);
+        return Result<DeviceCreation, Error>::Err(
+            Error{ErrorCode::Internal, "d3d12 backend: descriptor heap creation failed"});
+    }
+
     device->capabilities = BuildCapabilities(*device);
     debug.Reset();
 
@@ -1003,10 +869,29 @@ void DestroyD3D12Device(void* internal) noexcept
     auto* device = static_cast<D3D12Device*>(internal);
     (void)D3D12WaitIdle(device);
 
+    ReleaseResources(*device);
     ReleaseFences(*device);
     ReleaseQueues(*device);
     device->fences.Clear();
     device->freeFenceSlots.Clear();
+    device->buffers.Clear();
+    device->freeBufferSlots.Clear();
+    device->textures.Clear();
+    device->freeTextureSlots.Clear();
+    device->views.Clear();
+    device->freeViewSlots.Clear();
+    device->samplers.Clear();
+    device->freeSamplerSlots.Clear();
+    if (device->viewHeap != nullptr)
+    {
+        device->viewHeap->Release();
+        device->viewHeap = nullptr;
+    }
+    if (device->samplerHeap != nullptr)
+    {
+        device->samplerHeap->Release();
+        device->samplerHeap = nullptr;
+    }
     if (device->debug != nullptr)
     {
         device->debug->Release();

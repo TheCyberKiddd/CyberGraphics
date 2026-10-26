@@ -219,12 +219,12 @@ CG_TEST(d3d12_device_unimplemented_calls_report_unsupported)
     Device device;
     CG_REQUIRE(OpenSoftwareDevice(device, heap));
 
-    // A resource call this increment has not reached answers `Unsupported` with a
-    // message, rather than pretending to succeed or crashing.
-    BufferDesc desc{};
-    desc.sizeBytes = 256;
-    desc.usage = BufferUsage::Vertex;
-    const auto created = device.CreateBuffer(desc);
+    // A call this increment has not reached answers `Unsupported` with a message
+    // naming it, rather than pretending to succeed or crashing. Buffers landed,
+    // shaders have not, so a shader is the current boundary.
+    ShaderDesc shader{};
+    shader.stage = ShaderStage::Vertex;
+    const auto created = device.CreateShader(shader);
     CG_EXPECT_FALSE(created);
     if (!created)
     {
