@@ -32,6 +32,23 @@ semantic versioning once a public API exists.
   `rhi_resource_state` test binaries; the installed-package and source consumers
   exercise buffers, textures, views, samplers, and barriers.
 - ADR 0014, the Phase 11 design note, `docs/formats.md`, and the Phase 11 report.
+- Phase 12 `cyber_rhi` pipelines and binding: shader modules with stage,
+  bytecode format, and entry point; four binding slots fixed by change frequency;
+  group layouts with type, visibility, and array count; bind groups with
+  flattened resources; pipeline layouts with group slots and up to four
+  push-constant ranges; complete graphics and compute pipeline descriptions;
+  and a pipeline cache object.
+- Stable `HashGraphicsPipelineDesc`/`HashComputePipelineDesc` over every field
+  that changes the compiled object, excluding labels.
+- Validation of shader stages, layout entries and collisions, group resource
+  counts and types, buffer ranges and alignment, texture and sampler usage,
+  vertex bindings and attributes, rasterizer, blend, multisample, and
+  depth-stencil state, attachment formats, and sample counts.
+- `R32G32B32Float` joins the format table for three-component vertex positions.
+- `rhi_shader`, `rhi_binding`, `rhi_pipeline`, and `rhi_pipeline_hash` test
+  binaries; the package consumer creates a shader, a layout, a group, and a
+  graphics pipeline through the exported target.
+- ADR 0015, the Phase 12 design note, and the Phase 12 report.
 - Repository skeleton: `engines/`, `include/`, `tools/`, `samples/`, `tests/`,
   `docs/`, `cmake/`, `scripts/`, `assets/`, and `third_party/`.
 - Sixteen engine modules with written contracts in `engines/MODULES.md` and

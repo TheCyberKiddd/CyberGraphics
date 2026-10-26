@@ -87,7 +87,13 @@ tests pass in debug; the design is ADR 0013.
   state per `(mip, layer)`, keeps real host-visible bytes so a write round-trips,
   and retires a texture's views when the texture dies. 63 tests pass in every
   preset; the design is ADR 0014.
-- Next: Phase 12 (pipelines and the binding model).
+- Phase 12: pipelines and the binding model. `cyber_rhi` adds shader modules,
+  four binding slots (per frame, view, material, draw), group layouts and groups,
+  pipeline layouts with push constants, graphics and compute pipeline
+  descriptions, a hash-keyed pipeline cache, and the validation that rejects
+  every impossible combination. 67 tests pass in every preset; the design is
+  ADR 0015.
+- Next: Phase 13 (command lists, synchronization, and the swapchain).
 
 See [engines/MODULES.md](engines/MODULES.md) for the module index and
 [docs/architecture/overview.md](docs/architecture/overview.md) for the design.

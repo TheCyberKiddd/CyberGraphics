@@ -37,6 +37,7 @@ row added to one and not the other fails the build.
 | `RGBA16Float` | 8 | 1x1 | 4 | float | no |
 | `R32Float` | 4 | 1x1 | 1 | float | no |
 | `RG32Float` | 8 | 1x1 | 2 | float | no |
+| `R32G32B32Float` | 12 | 1x1 | 3 | float | no |
 | `RGBA32Float` | 16 | 1x1 | 4 | float | no |
 | `R32Uint` | 4 | 1x1 | 1 | uint | no |
 | `RG32Uint` | 8 | 1x1 | 2 | uint | no |
