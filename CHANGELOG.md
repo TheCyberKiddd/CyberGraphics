@@ -77,6 +77,16 @@ semantic versioning once a public API exists.
   and proves a missing barrier is caught through the installed package.
 - ADR 0016, the Phase 13 design note with the frame lifecycle diagram, and the
   Phase 13 report.
+- Phase 14 `cyber_rhi` Direct3D 12 backend, first increment: `cyber/rhi/d3d12.h`
+  with `IsD3D12CompiledIn()` and `D3D12Backend()`, DXGI adapter enumeration with
+  vendor, device, and memory fields, Microsoft's WARP adapter appended last so a
+  machine with no GPU is still testable, and a build option
+  (`CYBER_RHI_ENABLE_D3D12`) that compiles the backend out on other platforms.
+- `rhi_d3d12_adapters` test binary: adapter enumeration, the zero-capacity and
+  short-span contract, WARP ordering, backend identity, and the reported error an
+  incomplete backend table produces instead of a crash.
+- ADR 0017 and the Phase 14 design note with the RHI-to-D3D12 mapping table and
+  the phase's increment plan.
 - Repository skeleton: `engines/`, `include/`, `tools/`, `samples/`, `tests/`,
   `docs/`, `cmake/`, `scripts/`, `assets/`, and `third_party/`.
 - Sixteen engine modules with written contracts in `engines/MODULES.md` and

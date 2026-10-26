@@ -38,6 +38,7 @@ private headers.
 | `swapchain.h` | `PresentMode`, `SwapChainDesc`, `SwapChainFrame`, `SwapChainInfo`, `SwapChainInterface`, and `SwapChain`. |
 | `frame_ring.h` | `FrameRingDesc`, `FrameSlot`, and `FrameRing`: frames in flight over one timeline. |
 | `retirement.h` | `RetireKind`, `RetireEntry`, and `RetirementQueue`: destruction keyed by fence value. |
+| `d3d12.h` | `IsD3D12CompiledIn()` and `D3D12Backend()`: the Direct3D 12 entry point, built only when `CYBER_RHI_ENABLE_D3D12` is on. |
 | `backend.h` | `Backend`, `DeviceInterface` (device, fence, resource, barrier, command list, submission, and swapchain entries), `DeviceCreation`, `EnumerateAdapters`, `NullBackend`. |
 | `device.h` | `Device`: queues, timeline fences, buffers, textures, views, samplers, host access, state queries, transitions, command lists, submission, swapchains, and `WaitIdle`. |
 | `rhi.h` | Umbrella include. |
@@ -85,6 +86,10 @@ the recording state machine, every command's rules, batch submission, present an
 resize, retirements that wait for a fence, and the two tests the done-when line
 names.
 
+Phase 14 adds `rhi_d3d12_adapters` with the backend's first increment: DXGI
+adapter enumeration with Microsoft's WARP software adapter last, the short-span
+contract, and the reported error an incomplete backend table produces.
+
 ## Budgets
 
 CPU submission cost measured. No per-draw heap allocation.
@@ -104,6 +109,12 @@ Phase 13 is complete: command lists, render passes, submission with timeline
 fences, the frame ring, the retirement queue, and the swapchain. The null backend
 validates every recorded command against a per-list shadow of resource state, so
 a missing barrier is a record-time error naming the resource.
+
+Phase 14 is in progress: adapter discovery is in place, and the device, the
+descriptor heaps, the upload ring, shader compilation, and the two reference
+images land in order behind it. `cyber/rhi/d3d12.h` is the only public header the
+phase adds. The backend lives under `src/d3d12/`, the only directory in the
+renderer that includes a graphics API header.
 
 ## Notes
 
