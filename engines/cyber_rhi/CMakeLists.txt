@@ -7,6 +7,8 @@ set(CYBER_RHI_SOURCES
     # `CYBER_RHI_HAS_D3D12`.
     src/d3d12/d3d12_backend.cpp
     src/d3d12/d3d12_device.cpp
+    src/d3d12/d3d12_resources.cpp
+    src/d3d12/d3d12_textures.cpp
     src/device.cpp
     src/frame_ring.cpp
     src/null_backend.cpp
@@ -209,6 +211,11 @@ if(CYBER_RHI_ENABLE_D3D12)
     cyber_add_test(
         NAME rhi_d3d12_device
         SOURCES tests/d3d12_device_test.cpp
+        DEPENDS rhi memory
+    )
+    cyber_add_test(
+        NAME rhi_d3d12_resources
+        SOURCES tests/d3d12_resources_test.cpp
         DEPENDS rhi memory
     )
 endif()

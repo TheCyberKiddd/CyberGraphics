@@ -101,13 +101,15 @@ tests pass in debug; the design is ADR 0013.
   backend tracks state per list and per subresource, so a missing barrier is a
   record-time error that names the resource. 74 tests pass in every preset; the
   design is ADR 0016.
-- Phase 14 (in progress): the Direct3D 12 backend. Adapter discovery and the
-  device are in: `cyber_rhi` enumerates DXGI adapters with vendor, device, and
-  memory, appends Microsoft's WARP adapter last so a machine without a GPU is
-  still testable, creates a real `ID3D12Device` with three command queues and
-  timeline fences, and compiles the whole backend out when
-  `CYBER_RHI_ENABLE_D3D12` is off. 76 tests pass in every preset; the design is
-  ADR 0017. The descriptor heaps, the upload ring, shader compilation, and the two
+- Phase 14 (in progress): the Direct3D 12 backend. Adapter discovery, the device,
+  and the resource layer are in: `cyber_rhi` enumerates DXGI adapters with vendor,
+  device, and memory, appends Microsoft's WARP adapter last so a machine without a
+  GPU is still testable, creates a real `ID3D12Device` with three command queues
+  and timeline fences, and places buffers, textures, views, and samplers on the
+  heaps and descriptors the API names, with per-subresource state tracked for
+  barriers. The backend compiles out entirely when `CYBER_RHI_ENABLE_D3D12` is
+  off. 77 tests pass in every preset; the design is ADR 0017. The descriptor ring,
+  the upload ring, shader compilation, pipelines, command recording, and the two
   reference images follow.
 
 See [engines/MODULES.md](engines/MODULES.md) for the module index and
