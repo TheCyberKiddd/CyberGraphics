@@ -1076,7 +1076,8 @@ RasterizeTriangles(Framebuffer& target, memory::Span<const RasterTriangle> trian
 
     return RasterizeImpl(
         target, nullptr, triangles.Size(), jobSystem, allocator, desc, stats, nullptr, nullptr,
-        [&triangles, &target](usize index, i32 tileSize, PreparedTriangle& out) noexcept {
+        [&triangles, &target](usize index, i32 tileSize, PreparedTriangle& out) noexcept
+        {
             return PrepareTriangle(triangles[index], target.Width(), target.Height(), tileSize,
                                    out);
         });
@@ -1116,7 +1117,8 @@ RasterizeDepthTestedTriangles(Framebuffer& target, DepthBuffer& depth,
 
     return RasterizeImpl(
         target, &depth, triangles.Size(), jobSystem, allocator, desc, stats, nullptr, nullptr,
-        [&triangles, &target](usize index, i32 tileSize, PreparedTriangle& out) noexcept {
+        [&triangles, &target](usize index, i32 tileSize, PreparedTriangle& out) noexcept
+        {
             return PrepareDepthTriangle(triangles[index], target.Width(), target.Height(), tileSize,
                                         out);
         });

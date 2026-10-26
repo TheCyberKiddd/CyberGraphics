@@ -1,7 +1,13 @@
 set(CYBER_RHI_SOURCES
+    src/command_list.cpp
     src/device.cpp
+    src/frame_ring.cpp
     src/null_backend.cpp
     src/pipeline.cpp
+    src/render_pass.cpp
+    src/retirement.cpp
+    src/submission.cpp
+    src/swapchain.cpp
 )
 
 set(CYBER_RHI_HEADERS
@@ -9,16 +15,22 @@ set(CYBER_RHI_HEADERS
     include/cyber/rhi/binding.h
     include/cyber/rhi/buffer.h
     include/cyber/rhi/capabilities.h
+    include/cyber/rhi/command_list.h
     include/cyber/rhi/conventions.h
     include/cyber/rhi/descriptors.h
     include/cyber/rhi/device.h
     include/cyber/rhi/format.h
+    include/cyber/rhi/frame_ring.h
     include/cyber/rhi/handle.h
     include/cyber/rhi/pipeline.h
+    include/cyber/rhi/render_pass.h
     include/cyber/rhi/resource_state.h
+    include/cyber/rhi/retirement.h
     include/cyber/rhi/rhi.h
     include/cyber/rhi/sampler.h
     include/cyber/rhi/shader.h
+    include/cyber/rhi/submission.h
+    include/cyber/rhi/swapchain.h
     include/cyber/rhi/texture.h
 )
 
@@ -124,4 +136,46 @@ cyber_add_test(
     NAME rhi_pipeline_hash
     SOURCES tests/pipeline_hash_test.cpp
     DEPENDS rhi
+)
+
+cyber_add_test(
+    NAME rhi_render_pass
+    SOURCES tests/render_pass_test.cpp
+    DEPENDS rhi memory
+)
+
+cyber_add_test(
+    NAME rhi_command_list
+    SOURCES tests/command_list_test.cpp
+    DEPENDS rhi memory
+)
+
+cyber_add_test(
+    NAME rhi_submit
+    SOURCES tests/submit_test.cpp
+    DEPENDS rhi memory
+)
+
+cyber_add_test(
+    NAME rhi_missing_barrier
+    SOURCES tests/missing_barrier_test.cpp
+    DEPENDS rhi memory
+)
+
+cyber_add_test(
+    NAME rhi_frame_ring
+    SOURCES tests/frame_ring_test.cpp
+    DEPENDS rhi memory
+)
+
+cyber_add_test(
+    NAME rhi_retirement
+    SOURCES tests/retirement_test.cpp
+    DEPENDS rhi memory
+)
+
+cyber_add_test(
+    NAME rhi_swapchain
+    SOURCES tests/swapchain_test.cpp
+    DEPENDS rhi memory
 )

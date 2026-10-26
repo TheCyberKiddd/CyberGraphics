@@ -9,12 +9,15 @@
 #include <cyber/rhi/binding.h>
 #include <cyber/rhi/buffer.h>
 #include <cyber/rhi/capabilities.h>
+#include <cyber/rhi/command_list.h>
 #include <cyber/rhi/descriptors.h>
 #include <cyber/rhi/handle.h>
 #include <cyber/rhi/pipeline.h>
 #include <cyber/rhi/resource_state.h>
 #include <cyber/rhi/sampler.h>
 #include <cyber/rhi/shader.h>
+#include <cyber/rhi/submission.h>
+#include <cyber/rhi/swapchain.h>
 #include <cyber/rhi/texture.h>
 
 namespace cyber::rhi
@@ -181,6 +184,33 @@ struct DeviceInterface
     // Reports a pipeline's kind and description hash, or a zeroed value for a
     // stale handle.
     PipelineInfo (*pipelineInfo)(const void* internal, PipelineHandle pipeline) noexcept;
+
+    // Creates a command list for a queue class. `out` and `creation` must be
+    // non-null. A queue class the device does not have is
+    // `ErrorCode::InvalidArgument`.
+    Status<Error> (*createCommandList)(void* internal, const CommandListDesc& desc,
+                                       CommandListHandle* out,
+                                       CommandListCreation* creation) noexcept;
+    // Releases a command list and invalidates its handle.
+    Status<Error> (*destroyCommandList)(void* internal, CommandListHandle list) noexcept;
+    // Runs a batch of lists on a queue, applying its GPU waits first and
+    // reaching its signals last. A list that is not ended, or that was recorded
+    // for another queue class, is `ErrorCode::InvalidArgument`.
+    Status<Error> (*submit)(void* internal, const SubmitDesc& desc) noexcept;
+    // Reports how many submissions a queue has accepted and the highest value
+    // its last submission signalled. Zeroed for a queue class the device has no
+    // queue for.
+    SubmissionInfo (*submissionInfo)(const void* internal, QueueKind kind) noexcept;
+
+    // Creates a swapchain over `desc.surface`. `out` and `creation` must be
+    // non-null. A description no backend can present is
+    // `ErrorCode::InvalidArgument`; a present mode the adapter cannot serve is
+    // `ErrorCode::Unsupported`.
+    Status<Error> (*createSwapChain)(void* internal, const SwapChainDesc& desc,
+                                     SwapChainHandle* out, SwapChainCreation* creation) noexcept;
+    // Releases a swapchain and its images. A caller that has an image acquired
+    // may still destroy the swapchain; the image is simply never presented.
+    Status<Error> (*destroySwapChain)(void* internal, SwapChainHandle swapchain) noexcept;
 };
 
 // A graphics backend. Obtained from the backend's own entry point (for example

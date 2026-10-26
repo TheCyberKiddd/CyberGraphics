@@ -22,6 +22,9 @@ to it, and the consequences. Use one when a future reader would otherwise ask
 | [0011](0011-textures-shaders-and-golden-images.md) | Texture sampling, CPU shader interface, and golden images | accepted |
 | [0012](0012-supersampling-before-multisample-coverage.md) | Supersampling before multisample coverage | accepted |
 | [0013](0013-rhi-object-model.md) | RHI object model, handles, and the backend boundary | accepted |
+| [0014](0014-resource-model.md) | Resource model, format table, and explicit state | accepted |
+| [0015](0015-pipeline-binding-model.md) | Four binding slots, location-based vertex input, and hash-keyed pipelines | accepted |
+| [0016](0016-command-lists-and-synchronization.md) | Recorded command lists, explicit barriers, and timeline submission | accepted |
 
 Add new records as `NNNN-title.md`, starting at `0001`. Never delete an ADR;
 supersede it with a new one and update the old record's status.

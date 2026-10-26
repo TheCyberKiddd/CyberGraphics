@@ -49,6 +49,34 @@ semantic versioning once a public API exists.
   binaries; the package consumer creates a shader, a layout, a group, and a
   graphics pipeline through the exported target.
 - ADR 0015, the Phase 12 design note, and the Phase 12 report.
+- Phase 13 `cyber_rhi` command recording: `CommandList` with `Begin`/`End`/
+  `Reset`, render pass begin and end, pipeline and group binding, vertex and
+  index buffers, viewport and scissor, draws, indexed draws, indirect draws,
+  dispatches, buffer and texture copies, color and depth clears, in-list
+  barriers, push constants, and balanced debug labels.
+- `RenderPassDesc` with load and store operations, reverse-Z clear values, resolve
+  targets, read-only depth rules, and a pure validator both the RHI and the
+  backend call.
+- `SubmitDesc` with one-call submission per queue, timeline `FenceSignal` and
+  GPU-side `GpuWait` entries, and validation that refuses a deadlock expressed
+  as data.
+- `FrameRing`, a policy object that hands out frame slots and fence values and
+  waits on the slot being reused, so no resource is touched by two frames at
+  once.
+- `RetirementQueue`, deferred destruction keyed by fence value for every object
+  kind, with collection and flush paths.
+- `SwapChain` with acquire, present, resize, fifo/mailbox/immediate present modes,
+  device-owned images, and stale image handles after a resize.
+- Null-backend command recording, submission, and swapchain: a per-list shadow of
+  resource state that validates every command in order, clear messages that name
+  the missing barrier, and submission that applies waits, reaches signals, and
+  commits a list's transitions when it ends.
+- `rhi_render_pass`, `rhi_command_list`, `rhi_submit`, `rhi_missing_barrier`,
+  `rhi_frame_ring`, `rhi_retirement`, and `rhi_swapchain` test binaries; the
+  package consumer records a frame, submits it, acquires and presents an image,
+  and proves a missing barrier is caught through the installed package.
+- ADR 0016, the Phase 13 design note with the frame lifecycle diagram, and the
+  Phase 13 report.
 - Repository skeleton: `engines/`, `include/`, `tools/`, `samples/`, `tests/`,
   `docs/`, `cmake/`, `scripts/`, `assets/`, and `third_party/`.
 - Sixteen engine modules with written contracts in `engines/MODULES.md` and

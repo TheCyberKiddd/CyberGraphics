@@ -557,5 +557,260 @@ int main()
         }
     }
 
+    // Phase 13: a recorded frame through the installed package. A command list
+    // records barriers, a render pass, and a draw; a submission runs it and
+    // signals a fence; a swapchain hands out an image; the frame ring decides
+    // which value the frame must signal; the retirement queue holds a texture
+    // until that value is reached.
+    {
+        using namespace cyber::rhi;
+        using cyber::memory::Byte;
+
+        DeviceDesc deviceDesc{};
+        deviceDesc.backend = NullBackend();
+        auto createdDevice = Device::Create(deviceDesc, heap);
+        if (!createdDevice)
+        {
+            return 63;
+        }
+        Device device = std::move(createdDevice.Value());
+
+        auto createdFence = device.CreateFence(FenceDesc{});
+        if (!createdFence)
+        {
+            return 64;
+        }
+        const FenceHandle fence = createdFence.Value();
+
+        const char source[] = "void main() {}";
+        ShaderDesc shaderDesc{};
+        shaderDesc.stage = ShaderStage::Vertex;
+        shaderDesc.code =
+            Span<const Byte>(reinterpret_cast<const Byte*>(source), sizeof(source) - 1);
+        shaderDesc.entryPoint = "main";
+        auto vertexShader = device.CreateShader(shaderDesc);
+        shaderDesc.stage = ShaderStage::Pixel;
+        auto pixelShader = device.CreateShader(shaderDesc);
+        if (!vertexShader || !pixelShader)
+        {
+            return 65;
+        }
+
+        BindGroupLayoutEntry entry{};
+        entry.type = BindingType::UniformBuffer;
+        entry.visibility = ShaderStageBit(ShaderStage::Vertex);
+        BindGroupLayoutDesc groupLayoutDesc{};
+        groupLayoutDesc.entries = Span<const BindGroupLayoutEntry>(&entry, 1);
+        auto groupLayout = device.CreateBindGroupLayout(groupLayoutDesc);
+
+        PipelineLayoutDesc pipelineLayoutDesc{};
+        pipelineLayoutDesc.groups[static_cast<cyber::core::u32>(BindGroupSlot::PerMaterial)] =
+            groupLayout.Value();
+        auto pipelineLayout = device.CreatePipelineLayout(pipelineLayoutDesc);
+
+        BufferDesc uniformDesc{};
+        uniformDesc.usage = BufferUsage::Uniform;
+        uniformDesc.sizeBytes = 256;
+        auto uniforms = device.CreateBuffer(uniformDesc);
+        BindingResource binding{};
+        binding.type = BindingType::UniformBuffer;
+        binding.buffer = uniforms.Value();
+        binding.size = 256;
+        BindGroupDesc bindGroupDesc{};
+        bindGroupDesc.layout = groupLayout.Value();
+        bindGroupDesc.resources = Span<const BindingResource>(&binding, 1);
+        auto bindGroup = device.CreateBindGroup(bindGroupDesc);
+        if (!groupLayout || !pipelineLayout || !uniforms || !bindGroup)
+        {
+            return 66;
+        }
+
+        VertexBinding vertexBinding{};
+        vertexBinding.strideBytes = 12;
+        VertexAttribute attribute{};
+        attribute.format = Format::R32G32B32Float;
+        ColorAttachmentState attachment{};
+        attachment.format = Format::RGBA8Unorm;
+        GraphicsPipelineDesc pipelineDesc{};
+        pipelineDesc.layout = pipelineLayout.Value();
+        pipelineDesc.vertexShader = vertexShader.Value();
+        pipelineDesc.pixelShader = pixelShader.Value();
+        pipelineDesc.vertexLayout.bindings = Span<const VertexBinding>(&vertexBinding, 1);
+        pipelineDesc.vertexLayout.attributes = Span<const VertexAttribute>(&attribute, 1);
+        pipelineDesc.depthStencilFormat = Format::D32Float;
+        pipelineDesc.colorAttachments = Span<const ColorAttachmentState>(&attachment, 1);
+        auto pipeline = device.CreateGraphicsPipeline(pipelineDesc);
+        if (!pipeline)
+        {
+            return 67;
+        }
+
+        BufferDesc vertexDesc{};
+        vertexDesc.usage = BufferUsage::Vertex;
+        vertexDesc.sizeBytes = 256;
+        auto vertices = device.CreateBuffer(vertexDesc);
+
+        TextureDesc colorDesc{};
+        colorDesc.format = Format::RGBA8Unorm;
+        colorDesc.usage = TextureUsage::RenderTarget;
+        colorDesc.width = 64;
+        colorDesc.height = 64;
+        auto color = device.CreateTexture(colorDesc);
+        TextureViewDesc colorViewDesc{};
+        colorViewDesc.texture = color.Value();
+        colorViewDesc.format = Format::RGBA8Unorm;
+        auto colorView = device.CreateTextureView(colorViewDesc);
+
+        TextureDesc depthDesc{};
+        depthDesc.format = Format::D32Float;
+        depthDesc.usage = TextureUsage::DepthStencil;
+        depthDesc.width = 64;
+        depthDesc.height = 64;
+        auto depth = device.CreateTexture(depthDesc);
+        TextureViewDesc depthViewDesc{};
+        depthViewDesc.texture = depth.Value();
+        depthViewDesc.format = Format::D32Float;
+        depthViewDesc.range.aspect = TextureAspect::Depth;
+        auto depthView = device.CreateTextureView(depthViewDesc);
+        if (!vertices || !color || !colorView || !depth || !depthView)
+        {
+            return 68;
+        }
+
+        // The value a frame ring would use: frame 0 signals 1.
+        FrameRingDesc ringDesc{};
+        ringDesc.fence = fence;
+        ringDesc.framesInFlight = 2;
+        auto createdRing = FrameRing::Create(ringDesc);
+        if (!createdRing)
+        {
+            return 69;
+        }
+        FrameRing ring = createdRing.Value();
+        const auto frame0 = ring.BeginFrame(device, 0);
+        if (!frame0 || frame0.Value().slot != 0 || frame0.Value().signalValue != 1)
+        {
+            return 69;
+        }
+        const auto frame1 = ring.BeginFrame(device, 0);
+        if (!frame1 || frame1.Value().slot != 1 || frame1.Value().signalValue != 2)
+        {
+            return 70;
+        }
+
+        CommandListDesc listDesc{};
+        listDesc.queue = QueueKind::Graphics;
+        auto createdList = device.CreateCommandList(listDesc);
+        if (!createdList)
+        {
+            return 71;
+        }
+        CommandList list = std::move(createdList.Value());
+
+        const BufferBarrier bufferBarriers[2] = {
+            BufferBarrier{vertices.Value(), ResourceState::Undefined, ResourceState::VertexBuffer},
+            BufferBarrier{uniforms.Value(), ResourceState::Undefined,
+                          ResourceState::ConstantBuffer},
+        };
+        const TextureBarrier textureBarriers[2] = {
+            TextureBarrier{color.Value(), SubresourceRange{}, ResourceState::Undefined,
+                           ResourceState::RenderTarget},
+            TextureBarrier{depth.Value(), SubresourceRange{0, 0, 0, 0, TextureAspect::Depth},
+                           ResourceState::Undefined, ResourceState::DepthWrite},
+        };
+        if (!list.Begin() || !list.Barrier(Span<const BufferBarrier>(bufferBarriers, 2),
+                                           Span<const TextureBarrier>(textureBarriers, 2)))
+        {
+            return 72;
+        }
+
+        ColorAttachment colorAttachment{};
+        colorAttachment.view = colorView.Value();
+        RenderPassDesc passDesc{};
+        passDesc.colorAttachments = Span<const ColorAttachment>(&colorAttachment, 1);
+        passDesc.hasDepthStencil = true;
+        passDesc.depthStencil.view = depthView.Value();
+        if (!list.BeginRenderPass(passDesc) ||
+            !list.SetViewport(Viewport{0.0f, 0.0f, 64.0f, 64.0f, 0.0f, 1.0f}) ||
+            !list.SetScissor(ScissorRect{0, 0, 64, 64}) || !list.SetPipeline(pipeline.Value()) ||
+            !list.SetVertexBuffer(0, vertices.Value()) ||
+            !list.SetBindGroup(BindGroupSlot::PerMaterial, bindGroup.Value()) ||
+            !list.Draw(DrawArguments{3, 1, 0, 0}) || !list.EndRenderPass() || !list.End())
+        {
+            return 73;
+        }
+        if (list.Stats().draws != 1 || list.Stats().barriers != 4)
+        {
+            return 74;
+        }
+
+        const CommandListHandle handles[1] = {list.Handle()};
+        const FenceSignal signal{fence, 1};
+        SubmitDesc submitDesc{};
+        submitDesc.commandLists = Span<const CommandListHandle>(handles, 1);
+        submitDesc.signals = Span<const FenceSignal>(&signal, 1);
+        if (!device.Submit(submitDesc).IsOk() || device.FenceValue(fence) != 1 ||
+            !device.LastSubmission(QueueKind::Graphics).valid)
+        {
+            return 75;
+        }
+
+        // A pass over a target nobody transitioned is the bug this phase exists
+        // to catch, and the installed package must catch it too.
+        auto freshColor = device.CreateTexture(colorDesc);
+        TextureViewDesc freshViewDesc{};
+        freshViewDesc.texture = freshColor.Value();
+        freshViewDesc.format = Format::RGBA8Unorm;
+        auto freshView = device.CreateTextureView(freshViewDesc);
+        ColorAttachment freshAttachment{};
+        freshAttachment.view = freshView.Value();
+        RenderPassDesc freshPass{};
+        freshPass.colorAttachments = Span<const ColorAttachment>(&freshAttachment, 1);
+        freshPass.hasDepthStencil = true;
+        freshPass.depthStencil.view = depthView.Value();
+
+        CommandList broken = std::move(device.CreateCommandList(listDesc).Value());
+        if (!broken.Begin())
+        {
+            return 76;
+        }
+        if (broken.BeginRenderPass(freshPass).IsOk())
+        {
+            return 77;
+        }
+        broken.Reset();
+
+        // A swapchain over a caller-owned surface.
+        static int surfaceToken = 0;
+        SwapChainDesc swapDesc{};
+        swapDesc.surface.nativeWindow = &surfaceToken;
+        swapDesc.surface.width = 320;
+        swapDesc.surface.height = 200;
+        auto createdSwapChain = device.CreateSwapChain(swapDesc);
+        if (!createdSwapChain)
+        {
+            return 78;
+        }
+        SwapChain swapchain = std::move(createdSwapChain.Value());
+        auto acquired = swapchain.AcquireNextImage();
+        if (!acquired || acquired.Value().imageIndex != 0 || !swapchain.Present().IsOk() ||
+            !swapchain.Resize(640, 480).IsOk() || swapchain.Info().width != 640)
+        {
+            return 79;
+        }
+
+        // Deferred destruction: the color target is held until the fence passes.
+        RetirementQueue retired(heap);
+        if (!retired.Retire(color.Value(), fence, 1).IsOk())
+        {
+            return 80;
+        }
+        const auto collected = retired.Collect(device);
+        if (!collected || collected.Value() != 1 || device.TextureInfoOf(color.Value()).valid)
+        {
+            return 81;
+        }
+    }
+
     return 0;
 }

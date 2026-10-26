@@ -32,7 +32,7 @@ are recorded.
 - [x] **Phase 10 — RHI design** — complete; [report](reports/phase-10.md), seven test binaries against the null backend, and the interface compiles and links · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-10-rhi-design) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-10-rhi-design)
 - [x] **Phase 11 — Resources** — complete; [report](reports/phase-11.md), twelve RHI test binaries, green CI on run 40285338746, and the null backend passes creation, lifetime, and invalid-use tests · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-11-resources) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-11-resources)
 - [x] **Phase 12 — Pipelines and binding model** — complete; [report](reports/phase-12.md), sixteen RHI test binaries, green CI on run 40289190526, and every pipeline described by plain structs with invalid combinations rejected · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-12-pipelines-and-binding-model) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-12-pipelines-and-binding-model)
-- [ ] **Phase 13 — Command lists, synchronization, swapchain** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-13-command-lists-synchronization-swapchain) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-13-command-lists-synchronization-and-swapchain)
+- [x] **Phase 13 — Command lists, synchronization, swapchain** — complete; [report](reports/phase-13.md), twenty-three RHI test binaries, and the missing-barrier and frame-ring tests that the done-when line names · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-13-command-lists-synchronization-swapchain) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-13-command-lists-synchronization-and-swapchain)
 - [ ] **Phase 14 — Direct3D 12 backend** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-14-direct3d-12-backend) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-14-direct3d-12-backend)
 - [ ] **Phase 15 — GPU memory and debug tooling** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-15-gpu-memory-and-debug-tooling) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-15-gpu-memory-and-debug-tooling)
 
@@ -95,4 +95,13 @@ golden scenes, a textured-lit sample captured with 4x supersampling, and all
 five CI jobs green.
 - Phase 10: complete. The RHI object model, capabilities, conventions, backend
 boundary, and null backend; 58/58 tests in debug.
-- Next: Phase 11, resources.
+- Phase 11: complete. Resources, views, samplers, the format table, and explicit
+  state transitions, validated by the null backend.
+- Phase 12: complete. Shader modules, the four-slot binding model, pipeline
+  layouts with push constants, graphics and compute pipelines, and a hash-keyed
+  pipeline cache.
+- Phase 13: complete. Command lists, render passes, submission with timeline
+  fences, the frame ring, deferred destruction, and the swapchain. A missing
+  barrier is caught at record time with the resource named, and the frame ring
+  proves a slot is not reused before its fence.
+- Next: Phase 14, the Direct3D 12 backend.
