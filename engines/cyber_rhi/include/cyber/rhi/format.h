@@ -39,6 +39,9 @@ enum class Format : u32
     // 32-bit float color.
     R32Float,
     RG32Float,
+    // Three 32-bit floats, 12 bytes. A vertex position is the usual reason to
+    // want it; no other layout is four bytes per channel and three channels.
+    R32G32B32Float,
     RGBA32Float,
     // 32-bit unsigned integer, for ids and counters.
     R32Uint,
@@ -184,6 +187,8 @@ namespace detail
         return detail::ColorRow(4, 1, FormatComponentType::Float);
     case Format::RG32Float:
         return detail::ColorRow(8, 2, FormatComponentType::Float);
+    case Format::R32G32B32Float:
+        return detail::ColorRow(12, 3, FormatComponentType::Float);
     case Format::RGBA32Float:
         return detail::ColorRow(16, 4, FormatComponentType::Float);
     case Format::R32Uint:
@@ -252,6 +257,8 @@ namespace detail
         return "R32Float";
     case Format::RG32Float:
         return "RG32Float";
+    case Format::R32G32B32Float:
+        return "R32G32B32Float";
     case Format::RGBA32Float:
         return "RGBA32Float";
     case Format::R32Uint:

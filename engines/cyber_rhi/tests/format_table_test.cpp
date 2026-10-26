@@ -37,6 +37,7 @@ constexpr ExpectedRow kExpectedRows[] = {
     {Format::RGBA16Float, 8, 1, 4, FormatComponentType::Float, false, false, false, false},
     {Format::R32Float, 4, 1, 1, FormatComponentType::Float, false, false, false, false},
     {Format::RG32Float, 8, 1, 2, FormatComponentType::Float, false, false, false, false},
+    {Format::R32G32B32Float, 12, 1, 3, FormatComponentType::Float, false, false, false, false},
     {Format::RGBA32Float, 16, 1, 4, FormatComponentType::Float, false, false, false, false},
     {Format::R32Uint, 4, 1, 1, FormatComponentType::Uint, false, false, false, false},
     {Format::RG32Uint, 8, 1, 2, FormatComponentType::Uint, false, false, false, false},
@@ -85,7 +86,7 @@ CG_TEST(rhi_format_table_matches_the_enumeration)
         CG_EXPECT_TRUE(std::strcmp(FormatName(static_cast<Format>(index)), "unknown") != 0);
         ++realFormats;
     }
-    CG_EXPECT_EQ(realFormats, u32{28});
+    CG_EXPECT_EQ(realFormats, u32{29});
 
     // The sentinel row classifies as nothing.
     const FormatInfo sentinel = FormatInfoOf(Format::Count);
@@ -115,6 +116,7 @@ CG_TEST(rhi_format_table_matches_the_enumeration)
 CG_TEST(rhi_format_table_accessors)
 {
     CG_EXPECT_EQ(FormatBytesPerBlock(Format::RGBA32Float), u32{16});
+    CG_EXPECT_EQ(FormatBytesPerBlock(Format::R32G32B32Float), u32{12});
     CG_EXPECT_EQ(FormatBytesPerBlock(Format::BC5Unorm), u32{16});
     CG_EXPECT_EQ(FormatBytesPerBlock(Format::Count), u32{0});
     CG_EXPECT_EQ(FormatBlockWidth(Format::BC7Unorm), u32{4});

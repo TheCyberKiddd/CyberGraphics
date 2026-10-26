@@ -1,3 +1,4 @@
+#include <cyber/memory/heap_allocator.h>
 #include <cyber/rhi/rhi.h>
 #include <cyber/test/test.h>
 
@@ -32,6 +33,15 @@ CG_TEST(rhi_public_headers)
     static_assert(std::is_trivially_copyable_v<FormatInfo>);
     static_assert(std::is_trivially_copyable_v<BufferInfo>);
     static_assert(std::is_trivially_copyable_v<TextureInfo>);
+    static_assert(std::is_trivially_copyable_v<ShaderDesc>);
+    static_assert(std::is_trivially_copyable_v<BindGroupLayoutEntry>);
+    static_assert(std::is_trivially_copyable_v<BindGroupLayoutDesc>);
+    static_assert(std::is_trivially_copyable_v<BindingResource>);
+    static_assert(std::is_trivially_copyable_v<PipelineLayoutDesc>);
+    static_assert(std::is_trivially_copyable_v<GraphicsPipelineDesc>);
+    static_assert(std::is_trivially_copyable_v<ComputePipelineDesc>);
+    static_assert(sizeof(PipelineLayoutHandle) == 8);
+    static_assert(sizeof(PipelineCacheHandle) == 8);
 
     // A default device owns nothing and reports so.
     Device device;
@@ -58,6 +68,15 @@ CG_TEST(rhi_public_headers)
     CG_EXPECT_FALSE(device.TextureViewInfoOf(TextureViewHandle{}).valid);
     CG_EXPECT_EQ(device.BufferStateOf(BufferHandle{}), ResourceState::Undefined);
     CG_EXPECT_EQ(device.TextureStateOf(TextureHandle{}, 0, 0), ResourceState::Undefined);
+    cyber::memory::HeapAllocator heap;
+    CG_EXPECT_FALSE(device.CreateShader(ShaderDesc{}));
+    CG_EXPECT_FALSE(device.CreateBindGroupLayout(BindGroupLayoutDesc{}));
+    CG_EXPECT_FALSE(device.CreateBindGroup(BindGroupDesc{}));
+    CG_EXPECT_FALSE(device.CreatePipelineLayout(PipelineLayoutDesc{}));
+    CG_EXPECT_FALSE(device.CreateGraphicsPipeline(GraphicsPipelineDesc{}));
+    CG_EXPECT_FALSE(device.CreateComputePipeline(ComputePipelineDesc{}));
+    CG_EXPECT_FALSE(device.CreatePipelineCache(PipelineCacheDesc{}));
+    CG_EXPECT_FALSE(device.PipelineCacheBytes(PipelineCacheHandle{}, heap));
 
     // The null backend is always available and always the same object.
     const Backend* backend = NullBackend();

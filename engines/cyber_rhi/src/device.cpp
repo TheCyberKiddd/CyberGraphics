@@ -34,7 +34,19 @@ namespace
            interface.textureInfo != nullptr && interface.createTextureView != nullptr &&
            interface.destroyTextureView != nullptr && interface.textureViewInfo != nullptr &&
            interface.textureState != nullptr && interface.createSampler != nullptr &&
-           interface.destroySampler != nullptr && interface.transition != nullptr;
+           interface.destroySampler != nullptr && interface.transition != nullptr &&
+           interface.createShader != nullptr && interface.destroyShader != nullptr &&
+           interface.shaderInfo != nullptr && interface.createBindGroupLayout != nullptr &&
+           interface.destroyBindGroupLayout != nullptr && interface.createBindGroup != nullptr &&
+           interface.destroyBindGroup != nullptr && interface.bindGroupInfo != nullptr &&
+           interface.createPipelineLayout != nullptr &&
+           interface.destroyPipelineLayout != nullptr &&
+           interface.createGraphicsPipeline != nullptr &&
+           interface.destroyGraphicsPipeline != nullptr &&
+           interface.createComputePipeline != nullptr &&
+           interface.destroyComputePipeline != nullptr &&
+           interface.createPipelineCache != nullptr && interface.destroyPipelineCache != nullptr &&
+           interface.pipelineCacheBytes != nullptr && interface.pipelineInfo != nullptr;
 }
 
 }  // namespace
@@ -387,6 +399,274 @@ Status<Error> Device::DestroySampler(SamplerHandle sampler) noexcept
         return StatusError(core::ErrorCode::InvalidArgument, "device is empty");
     }
     return m_interface->destroySampler(m_internal, sampler);
+}
+
+Result<ShaderHandle, Error> Device::CreateShader(const ShaderDesc& desc) noexcept
+{
+    if (!IsValid() || m_interface->createShader == nullptr)
+    {
+        return Result<ShaderHandle, Error>::Err(
+            Error{core::ErrorCode::InvalidArgument, "device is empty; no shader was created"});
+    }
+
+    ShaderHandle shader;
+    const Status<Error> created = m_interface->createShader(m_internal, desc, &shader);
+    if (!created)
+    {
+        return Result<ShaderHandle, Error>::Err(created.Error());
+    }
+    if (!shader.IsValid())
+    {
+        return Result<ShaderHandle, Error>::Err(
+            Error{core::ErrorCode::Internal, "backend returned an invalid shader handle"});
+    }
+    return Result<ShaderHandle, Error>::Ok(shader);
+}
+
+Status<Error> Device::DestroyShader(ShaderHandle shader) noexcept
+{
+    if (!IsValid() || m_interface->destroyShader == nullptr)
+    {
+        return StatusError(core::ErrorCode::InvalidArgument, "device is empty");
+    }
+    return m_interface->destroyShader(m_internal, shader);
+}
+
+ShaderInfo Device::ShaderInfoOf(ShaderHandle shader) const noexcept
+{
+    if (!IsValid() || m_interface->shaderInfo == nullptr)
+    {
+        return ShaderInfo{};
+    }
+    return m_interface->shaderInfo(m_internal, shader);
+}
+
+Result<BindGroupLayoutHandle, Error>
+Device::CreateBindGroupLayout(const BindGroupLayoutDesc& desc) noexcept
+{
+    if (!IsValid() || m_interface->createBindGroupLayout == nullptr)
+    {
+        return Result<BindGroupLayoutHandle, Error>::Err(Error{
+            core::ErrorCode::InvalidArgument, "device is empty; no bind group layout was created"});
+    }
+
+    BindGroupLayoutHandle layout;
+    const Status<Error> created = m_interface->createBindGroupLayout(m_internal, desc, &layout);
+    if (!created)
+    {
+        return Result<BindGroupLayoutHandle, Error>::Err(created.Error());
+    }
+    if (!layout.IsValid())
+    {
+        return Result<BindGroupLayoutHandle, Error>::Err(
+            Error{core::ErrorCode::Internal, "backend returned an invalid layout handle"});
+    }
+    return Result<BindGroupLayoutHandle, Error>::Ok(layout);
+}
+
+Status<Error> Device::DestroyBindGroupLayout(BindGroupLayoutHandle layout) noexcept
+{
+    if (!IsValid() || m_interface->destroyBindGroupLayout == nullptr)
+    {
+        return StatusError(core::ErrorCode::InvalidArgument, "device is empty");
+    }
+    return m_interface->destroyBindGroupLayout(m_internal, layout);
+}
+
+Result<BindGroupHandle, Error> Device::CreateBindGroup(const BindGroupDesc& desc) noexcept
+{
+    if (!IsValid() || m_interface->createBindGroup == nullptr)
+    {
+        return Result<BindGroupHandle, Error>::Err(
+            Error{core::ErrorCode::InvalidArgument, "device is empty; no bind group was created"});
+    }
+
+    BindGroupHandle group;
+    const Status<Error> created = m_interface->createBindGroup(m_internal, desc, &group);
+    if (!created)
+    {
+        return Result<BindGroupHandle, Error>::Err(created.Error());
+    }
+    if (!group.IsValid())
+    {
+        return Result<BindGroupHandle, Error>::Err(
+            Error{core::ErrorCode::Internal, "backend returned an invalid group handle"});
+    }
+    return Result<BindGroupHandle, Error>::Ok(group);
+}
+
+Status<Error> Device::DestroyBindGroup(BindGroupHandle group) noexcept
+{
+    if (!IsValid() || m_interface->destroyBindGroup == nullptr)
+    {
+        return StatusError(core::ErrorCode::InvalidArgument, "device is empty");
+    }
+    return m_interface->destroyBindGroup(m_internal, group);
+}
+
+BindGroupInfo Device::BindGroupInfoOf(BindGroupHandle group) const noexcept
+{
+    if (!IsValid() || m_interface->bindGroupInfo == nullptr)
+    {
+        return BindGroupInfo{};
+    }
+    return m_interface->bindGroupInfo(m_internal, group);
+}
+
+Result<PipelineLayoutHandle, Error>
+Device::CreatePipelineLayout(const PipelineLayoutDesc& desc) noexcept
+{
+    if (!IsValid() || m_interface->createPipelineLayout == nullptr)
+    {
+        return Result<PipelineLayoutHandle, Error>::Err(Error{
+            core::ErrorCode::InvalidArgument, "device is empty; no pipeline layout was created"});
+    }
+
+    PipelineLayoutHandle layout;
+    const Status<Error> created = m_interface->createPipelineLayout(m_internal, desc, &layout);
+    if (!created)
+    {
+        return Result<PipelineLayoutHandle, Error>::Err(created.Error());
+    }
+    if (!layout.IsValid())
+    {
+        return Result<PipelineLayoutHandle, Error>::Err(
+            Error{core::ErrorCode::Internal, "backend returned an invalid pipeline layout handle"});
+    }
+    return Result<PipelineLayoutHandle, Error>::Ok(layout);
+}
+
+Status<Error> Device::DestroyPipelineLayout(PipelineLayoutHandle layout) noexcept
+{
+    if (!IsValid() || m_interface->destroyPipelineLayout == nullptr)
+    {
+        return StatusError(core::ErrorCode::InvalidArgument, "device is empty");
+    }
+    return m_interface->destroyPipelineLayout(m_internal, layout);
+}
+
+Result<PipelineHandle, Error>
+Device::CreateGraphicsPipeline(const GraphicsPipelineDesc& desc) noexcept
+{
+    if (!IsValid() || m_interface->createGraphicsPipeline == nullptr)
+    {
+        return Result<PipelineHandle, Error>::Err(
+            Error{core::ErrorCode::InvalidArgument, "device is empty; no pipeline was created"});
+    }
+
+    PipelineHandle pipeline;
+    const Status<Error> created = m_interface->createGraphicsPipeline(m_internal, desc, &pipeline);
+    if (!created)
+    {
+        return Result<PipelineHandle, Error>::Err(created.Error());
+    }
+    if (!pipeline.IsValid())
+    {
+        return Result<PipelineHandle, Error>::Err(
+            Error{core::ErrorCode::Internal, "backend returned an invalid pipeline handle"});
+    }
+    return Result<PipelineHandle, Error>::Ok(pipeline);
+}
+
+Status<Error> Device::DestroyGraphicsPipeline(PipelineHandle pipeline) noexcept
+{
+    if (!IsValid() || m_interface->destroyGraphicsPipeline == nullptr)
+    {
+        return StatusError(core::ErrorCode::InvalidArgument, "device is empty");
+    }
+    return m_interface->destroyGraphicsPipeline(m_internal, pipeline);
+}
+
+Result<PipelineHandle, Error>
+Device::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept
+{
+    if (!IsValid() || m_interface->createComputePipeline == nullptr)
+    {
+        return Result<PipelineHandle, Error>::Err(
+            Error{core::ErrorCode::InvalidArgument, "device is empty; no pipeline was created"});
+    }
+
+    PipelineHandle pipeline;
+    const Status<Error> created = m_interface->createComputePipeline(m_internal, desc, &pipeline);
+    if (!created)
+    {
+        return Result<PipelineHandle, Error>::Err(created.Error());
+    }
+    if (!pipeline.IsValid())
+    {
+        return Result<PipelineHandle, Error>::Err(
+            Error{core::ErrorCode::Internal, "backend returned an invalid pipeline handle"});
+    }
+    return Result<PipelineHandle, Error>::Ok(pipeline);
+}
+
+Status<Error> Device::DestroyComputePipeline(PipelineHandle pipeline) noexcept
+{
+    if (!IsValid() || m_interface->destroyComputePipeline == nullptr)
+    {
+        return StatusError(core::ErrorCode::InvalidArgument, "device is empty");
+    }
+    return m_interface->destroyComputePipeline(m_internal, pipeline);
+}
+
+Result<PipelineCacheHandle, Error>
+Device::CreatePipelineCache(const PipelineCacheDesc& desc) noexcept
+{
+    if (!IsValid() || m_interface->createPipelineCache == nullptr)
+    {
+        return Result<PipelineCacheHandle, Error>::Err(Error{
+            core::ErrorCode::InvalidArgument, "device is empty; no pipeline cache was created"});
+    }
+
+    PipelineCacheHandle cache;
+    const Status<Error> created = m_interface->createPipelineCache(m_internal, desc, &cache);
+    if (!created)
+    {
+        return Result<PipelineCacheHandle, Error>::Err(created.Error());
+    }
+    if (!cache.IsValid())
+    {
+        return Result<PipelineCacheHandle, Error>::Err(
+            Error{core::ErrorCode::Internal, "backend returned an invalid cache handle"});
+    }
+    return Result<PipelineCacheHandle, Error>::Ok(cache);
+}
+
+Status<Error> Device::DestroyPipelineCache(PipelineCacheHandle cache) noexcept
+{
+    if (!IsValid() || m_interface->destroyPipelineCache == nullptr)
+    {
+        return StatusError(core::ErrorCode::InvalidArgument, "device is empty");
+    }
+    return m_interface->destroyPipelineCache(m_internal, cache);
+}
+
+Result<memory::DynamicArray<memory::Byte>, Error>
+Device::PipelineCacheBytes(PipelineCacheHandle cache, memory::Allocator& allocator) const noexcept
+{
+    if (!IsValid() || m_interface->pipelineCacheBytes == nullptr)
+    {
+        return Result<memory::DynamicArray<memory::Byte>, Error>::Err(
+            Error{core::ErrorCode::InvalidArgument, "device is empty"});
+    }
+
+    memory::DynamicArray<memory::Byte> bytes(allocator);
+    const Status<Error> read =
+        m_interface->pipelineCacheBytes(m_internal, cache, allocator, &bytes);
+    if (!read)
+    {
+        return Result<memory::DynamicArray<memory::Byte>, Error>::Err(read.Error());
+    }
+    return Result<memory::DynamicArray<memory::Byte>, Error>::Ok(std::move(bytes));
+}
+
+PipelineInfo Device::PipelineInfoOf(PipelineHandle pipeline) const noexcept
+{
+    if (!IsValid() || m_interface->pipelineInfo == nullptr)
+    {
+        return PipelineInfo{};
+    }
+    return m_interface->pipelineInfo(m_internal, pipeline);
 }
 
 Status<Error> Device::Transition(memory::Span<const BufferBarrier> buffers,

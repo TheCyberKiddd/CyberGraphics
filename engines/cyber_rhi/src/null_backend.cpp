@@ -94,11 +94,60 @@ struct NullSampler
     SamplerDesc desc{};
 };
 
+// A shader module keeps the description, including the borrowed code span, and
+// the values a query reports. The caller guarantees the code outlives the
+// module, which is the contract `ShaderDesc` documents.
+struct NullShader
+{
+    ShaderInfo info{};
+};
+
+// A layout owns a copy of its entries, so a caller's stack array can die after
+// creation and a bind group can still be validated against it.
+struct NullBindGroupLayout
+{
+    BindGroupLayoutEntry* entries = nullptr;
+    u32 entryCount = 0;
+    u32 resourceCount = 0;
+};
+
+// A group owns a copy of its resources and records the layout it was made from.
+struct NullBindGroup
+{
+    BindGroupLayoutHandle layout;
+    BindingResource* resources = nullptr;
+    u32 resourceCount = 0;
+};
+
+// A pipeline layout owns its group handles and a copy of its push-constant
+// ranges.
+struct NullPipelineLayout
+{
+    BindGroupLayoutHandle groups[kBindGroupSlotCount] = {};
+    PushConstantRange* pushConstants = nullptr;
+    u32 pushConstantCount = 0;
+};
+
+struct NullPipeline
+{
+    PipelineKind kind = PipelineKind::Graphics;
+    u64 hash = 0;
+};
+
+// The null backend compiles nothing, so a cache only remembers how many seed
+// bytes it was given and always saves nothing.
+struct NullPipelineCache
+{
+    u64 seedBytes = 0;
+};
+
 struct NullDevice
 {
     explicit NullDevice(memory::Allocator& allocator) noexcept
         : allocator(&allocator), fences(allocator), freeSlots(allocator), buffers(allocator),
-          textures(allocator), views(allocator), samplers(allocator), liveViews(allocator),
+          textures(allocator), views(allocator), samplers(allocator), shaders(allocator),
+          bindGroupLayouts(allocator), bindGroups(allocator), pipelineLayouts(allocator),
+          pipelines(allocator), pipelineCaches(allocator), liveViews(allocator),
           allocations(allocator)
     {
     }
@@ -127,6 +176,12 @@ struct NullDevice
     SlotMap<NullTexture, TextureTag> textures;
     SlotMap<NullView, TextureViewTag> views;
     SlotMap<NullSampler, SamplerTag> samplers;
+    SlotMap<NullShader, ShaderTag> shaders;
+    SlotMap<NullBindGroupLayout, BindGroupLayoutTag> bindGroupLayouts;
+    SlotMap<NullBindGroup, BindGroupTag> bindGroups;
+    SlotMap<NullPipelineLayout, PipelineLayoutTag> pipelineLayouts;
+    SlotMap<NullPipeline, PipelineTag> pipelines;
+    SlotMap<NullPipelineCache, PipelineCacheTag> pipelineCaches;
     // Every live view, so destroying a texture can retire the views over it.
     memory::DynamicArray<TextureViewHandle> liveViews;
     // Host-visible bytes and per-subresource state arrays, released when the
@@ -1318,6 +1373,992 @@ Status<Error> NullDestroySampler(void* internal, SamplerHandle handle) noexcept
 }
 
 // ---------------------------------------------------------------------------
+// Shaders
+// ---------------------------------------------------------------------------
+
+[[nodiscard]] bool ValidateShaderDesc(const ShaderDesc& desc, Error* out) noexcept
+{
+    if (desc.stage >= ShaderStage::Count)
+    {
+        return Fail(out, ErrorCode::InvalidArgument, "shader stage is not a stage");
+    }
+    if (desc.format >= ShaderBytecodeFormat::Count)
+    {
+        return Fail(out, ErrorCode::InvalidArgument, "shader bytecode format is not a format");
+    }
+    if (desc.code.Data() == nullptr || desc.code.Empty())
+    {
+        return Fail(out, ErrorCode::InvalidArgument, "shader code is empty");
+    }
+    const bool sourceCode = desc.format == ShaderBytecodeFormat::HlslSource ||
+                            desc.format == ShaderBytecodeFormat::MslSource;
+    if (sourceCode && (desc.entryPoint == nullptr || desc.entryPoint[0] == '\0'))
+    {
+        return Fail(out, ErrorCode::InvalidArgument,
+                    "a source shader needs a non-empty entry point");
+    }
+    return true;
+}
+
+Status<Error> NullCreateShader(void* internal, const ShaderDesc& desc, ShaderHandle* out) noexcept
+{
+    if (internal == nullptr || out == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: shader creation needs a device and an output handle");
+    }
+
+    auto& device = *static_cast<NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    Error error{};
+    if (!ValidateShaderDesc(desc, &error))
+    {
+        return Status<Error>::Err(error);
+    }
+
+    NullShader record;
+    record.info.valid = true;
+    record.info.stage = desc.stage;
+    record.info.format = desc.format;
+    record.info.codeSize = desc.code.Size();
+    const ShaderHandle handle = device.shaders.Insert(std::move(record));
+    if (!handle.IsValid())
+    {
+        return StatusError(ErrorCode::Internal, "null backend: shader table growth failed");
+    }
+    *out = handle;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullDestroyShader(void* internal, ShaderHandle handle) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: device is null");
+    }
+    auto& device = *static_cast<NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+    if (!device.shaders.Remove(handle))
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: shader handle is stale or invalid");
+    }
+    return Status<Error>::Ok();
+}
+
+ShaderInfo NullShaderInfo(const void* internal, ShaderHandle handle) noexcept
+{
+    ShaderInfo info;
+    if (internal == nullptr)
+    {
+        return info;
+    }
+    const auto& device = *static_cast<const NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+    const NullShader* shader = device.shaders.Get(handle);
+    return shader != nullptr ? shader->info : info;
+}
+
+// ---------------------------------------------------------------------------
+// Bind groups
+// ---------------------------------------------------------------------------
+
+// Copies an array into device-owned storage so a layout or group outlives the
+// caller's stack array. Returns null for an empty source; a non-empty source
+// that cannot be allocated is a failure the caller reports as `Internal`.
+template <typename T>
+[[nodiscard]] T* CopyArray(NullDevice& device, memory::Span<const T> source) noexcept
+{
+    if (source.Empty())
+    {
+        return nullptr;
+    }
+    void* memory = device.allocator->Allocate(source.Size() * sizeof(T), alignof(T));
+    if (memory == nullptr)
+    {
+        return nullptr;
+    }
+    if (!device.allocations.TryPushBack(memory))
+    {
+        device.allocator->Deallocate(memory);
+        return nullptr;
+    }
+    T* copy = static_cast<T*>(memory);
+    for (usize index = 0; index < source.Size(); ++index)
+    {
+        copy[index] = source[index];
+    }
+    return copy;
+}
+
+[[nodiscard]] bool ValidateBindGroupLayout(const Limits& limits, const BindGroupLayoutDesc& desc,
+                                           u32* resourceCount, Error* out) noexcept
+{
+    if (desc.entries.Data() == nullptr || desc.entries.Empty())
+    {
+        return Fail(out, ErrorCode::InvalidArgument,
+                    "a bind group layout needs at least one entry");
+    }
+    if (desc.entries.Size() > limits.maxBindingsPerGroup)
+    {
+        return Fail(out, ErrorCode::OutOfRange,
+                    "bind group layout has more entries than the device allows");
+    }
+
+    u32 total = 0;
+    for (usize index = 0; index < desc.entries.Size(); ++index)
+    {
+        const BindGroupLayoutEntry& entry = desc.entries[index];
+        if (entry.type >= BindingType::Count)
+        {
+            return Fail(out, ErrorCode::InvalidArgument, "binding type is not a binding type");
+        }
+        if (entry.visibility == 0 || (entry.visibility & ~kAllShaderStages) != 0)
+        {
+            return Fail(out, ErrorCode::InvalidArgument,
+                        "binding visibility must name at least one real stage");
+        }
+        if (entry.arrayCount == 0)
+        {
+            return Fail(out, ErrorCode::InvalidArgument, "binding array count is zero");
+        }
+        if (entry.binding >= limits.maxBindingsPerGroup)
+        {
+            return Fail(out, ErrorCode::OutOfRange, "binding number exceeds the device limit");
+        }
+        if (entry.arrayCount > limits.maxBindingsPerGroup)
+        {
+            return Fail(out, ErrorCode::OutOfRange, "binding array count exceeds the device limit");
+        }
+        for (usize other = 0; other < index; ++other)
+        {
+            if (desc.entries[other].binding == entry.binding)
+            {
+                return Fail(out, ErrorCode::InvalidArgument,
+                            "bind group layout repeats a binding number");
+            }
+        }
+        total += entry.arrayCount;
+    }
+
+    if (resourceCount != nullptr)
+    {
+        *resourceCount = total;
+    }
+    return true;
+}
+
+Status<Error> NullCreateBindGroupLayout(void* internal, const BindGroupLayoutDesc& desc,
+                                        BindGroupLayoutHandle* out) noexcept
+{
+    if (internal == nullptr || out == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: layout creation needs a device and an output handle");
+    }
+
+    auto& device = *static_cast<NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    u32 resourceCount = 0;
+    Error error{};
+    if (!ValidateBindGroupLayout(device.capabilities.limits, desc, &resourceCount, &error))
+    {
+        return Status<Error>::Err(error);
+    }
+
+    NullBindGroupLayout record;
+    record.entries = CopyArray(device, desc.entries);
+    if (record.entries == nullptr)
+    {
+        return StatusError(ErrorCode::Internal, "null backend: layout entry allocation failed");
+    }
+    record.entryCount = static_cast<u32>(desc.entries.Size());
+    record.resourceCount = resourceCount;
+
+    const BindGroupLayoutHandle handle = device.bindGroupLayouts.Insert(std::move(record));
+    if (!handle.IsValid())
+    {
+        ReleaseAllocation(device, record.entries);
+        return StatusError(ErrorCode::Internal, "null backend: layout table growth failed");
+    }
+    *out = handle;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullDestroyBindGroupLayout(void* internal, BindGroupLayoutHandle handle) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: device is null");
+    }
+    auto& device = *static_cast<NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+    NullBindGroupLayout* layout = device.bindGroupLayouts.Get(handle);
+    if (layout == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: layout handle is stale or invalid");
+    }
+    BindGroupLayoutEntry* entries = layout->entries;
+    (void)device.bindGroupLayouts.Remove(handle);
+    ReleaseAllocation(device, entries);
+    return Status<Error>::Ok();
+}
+
+// Resolves a buffer binding: live buffer, the usage its type needs, an aligned
+// offset, and a non-empty range that stays inside the buffer.
+[[nodiscard]] Status<Error> ValidateBufferBinding(const NullDevice& device,
+                                                  const BindingResource& resource,
+                                                  BufferUsage requiredUsage, u32 alignment,
+                                                  const char* usageMessage) noexcept
+{
+    const NullBuffer* buffer = device.buffers.Get(resource.buffer);
+    if (buffer == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: binding names a stale buffer handle");
+    }
+    if (!HasUsage(buffer->desc.usage, requiredUsage))
+    {
+        return StatusError(ErrorCode::InvalidArgument, usageMessage);
+    }
+    if (alignment != 0 && resource.offset % alignment != 0)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: buffer binding offset is not aligned");
+    }
+    if (resource.offset >= buffer->desc.sizeBytes)
+    {
+        return StatusError(ErrorCode::OutOfRange,
+                           "null backend: buffer binding starts at or past the end");
+    }
+    const u64 rangeSize =
+        resource.size == 0 ? buffer->desc.sizeBytes - resource.offset : resource.size;
+    if (rangeSize == 0 || rangeSize > buffer->desc.sizeBytes - resource.offset)
+    {
+        return StatusError(ErrorCode::OutOfRange,
+                           "null backend: buffer binding range leaves the buffer");
+    }
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullCreateBindGroup(void* internal, const BindGroupDesc& desc,
+                                  BindGroupHandle* out) noexcept
+{
+    if (internal == nullptr || out == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: group creation needs a device and an output handle");
+    }
+
+    auto& device = *static_cast<NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    const NullBindGroupLayout* layout = device.bindGroupLayouts.Get(desc.layout);
+    if (layout == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: group layout handle is stale or invalid");
+    }
+    if (desc.resources.Size() != layout->resourceCount)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: group resource count does not match its layout");
+    }
+
+    usize resourceIndex = 0;
+    for (u32 entryIndex = 0; entryIndex < layout->entryCount; ++entryIndex)
+    {
+        const BindGroupLayoutEntry& entry = layout->entries[entryIndex];
+        for (u32 element = 0; element < entry.arrayCount; ++element, ++resourceIndex)
+        {
+            const BindingResource& resource = desc.resources[resourceIndex];
+            if (resource.type != entry.type)
+            {
+                return StatusError(ErrorCode::InvalidArgument,
+                                   "null backend: group resource type does not match its layout");
+            }
+            switch (entry.type)
+            {
+            case BindingType::UniformBuffer:
+            {
+                const Status<Error> checked = ValidateBufferBinding(
+                    device, resource, BufferUsage::Uniform,
+                    device.capabilities.limits.minUniformBufferOffsetAlignment,
+                    "null backend: a uniform binding needs a buffer with uniform usage");
+                if (!checked)
+                {
+                    return checked;
+                }
+                break;
+            }
+            case BindingType::StorageBuffer:
+            {
+                const Status<Error> checked = ValidateBufferBinding(
+                    device, resource, BufferUsage::Storage,
+                    device.capabilities.limits.minStorageBufferOffsetAlignment,
+                    "null backend: a storage binding needs a buffer with storage usage");
+                if (!checked)
+                {
+                    return checked;
+                }
+                break;
+            }
+            case BindingType::SampledTexture:
+            case BindingType::StorageTexture:
+            {
+                const NullView* view = device.views.Get(resource.textureView);
+                if (view == nullptr)
+                {
+                    return StatusError(ErrorCode::InvalidArgument,
+                                       "null backend: binding names a stale view handle");
+                }
+                const NullTexture* texture = device.textures.Get(view->texture);
+                if (texture == nullptr)
+                {
+                    return StatusError(ErrorCode::InvalidArgument,
+                                       "null backend: binding view has no live texture");
+                }
+                const TextureUsage needed = entry.type == BindingType::SampledTexture
+                                                ? TextureUsage::Sampled
+                                                : TextureUsage::Storage;
+                if (!HasUsage(texture->desc.usage, needed))
+                {
+                    return StatusError(ErrorCode::InvalidArgument,
+                                       "null backend: texture usage does not fit the binding type");
+                }
+                break;
+            }
+            case BindingType::Sampler:
+                if (device.samplers.Get(resource.sampler) == nullptr)
+                {
+                    return StatusError(ErrorCode::InvalidArgument,
+                                       "null backend: binding names a stale sampler handle");
+                }
+                break;
+            case BindingType::Count:
+                return StatusError(ErrorCode::InvalidArgument,
+                                   "null backend: binding type is not a binding type");
+            }
+        }
+    }
+
+    NullBindGroup record;
+    record.layout = desc.layout;
+    record.resources = CopyArray(device, desc.resources);
+    if (record.resources == nullptr)
+    {
+        return StatusError(ErrorCode::Internal, "null backend: group resource allocation failed");
+    }
+    record.resourceCount = static_cast<u32>(desc.resources.Size());
+
+    const BindGroupHandle handle = device.bindGroups.Insert(std::move(record));
+    if (!handle.IsValid())
+    {
+        ReleaseAllocation(device, record.resources);
+        return StatusError(ErrorCode::Internal, "null backend: group table growth failed");
+    }
+    *out = handle;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullDestroyBindGroup(void* internal, BindGroupHandle handle) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: device is null");
+    }
+    auto& device = *static_cast<NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+    NullBindGroup* group = device.bindGroups.Get(handle);
+    if (group == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: group handle is stale or invalid");
+    }
+    BindingResource* resources = group->resources;
+    (void)device.bindGroups.Remove(handle);
+    ReleaseAllocation(device, resources);
+    return Status<Error>::Ok();
+}
+
+BindGroupInfo NullBindGroupInfo(const void* internal, BindGroupHandle handle) noexcept
+{
+    BindGroupInfo info;
+    if (internal == nullptr)
+    {
+        return info;
+    }
+    const auto& device = *static_cast<const NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+    const NullBindGroup* group = device.bindGroups.Get(handle);
+    if (group == nullptr)
+    {
+        return info;
+    }
+    info.valid = true;
+    info.layout = group->layout;
+    info.resourceCount = group->resourceCount;
+    return info;
+}
+
+// ---------------------------------------------------------------------------
+// Pipeline layouts and pipelines
+// ---------------------------------------------------------------------------
+
+[[nodiscard]] bool ValidatePipelineLayout(const Capabilities& capabilities,
+                                          const NullDevice& device, const PipelineLayoutDesc& desc,
+                                          Error* out) noexcept
+{
+    u32 usedSlots = 0;
+    for (u32 slot = 0; slot < kBindGroupSlotCount; ++slot)
+    {
+        if (!desc.groups[slot].IsValid())
+        {
+            continue;
+        }
+        if (device.bindGroupLayouts.Get(desc.groups[slot]) == nullptr)
+        {
+            return Fail(out, ErrorCode::InvalidArgument,
+                        "pipeline layout names a stale group layout");
+        }
+        for (u32 other = 0; other < slot; ++other)
+        {
+            if (desc.groups[other] == desc.groups[slot])
+            {
+                return Fail(out, ErrorCode::InvalidArgument,
+                            "pipeline layout repeats a group layout");
+            }
+        }
+        ++usedSlots;
+    }
+    if (usedSlots == 0)
+    {
+        return Fail(out, ErrorCode::InvalidArgument, "pipeline layout uses no group slot");
+    }
+
+    if (desc.pushConstants.Size() > kMaxPushConstantRanges)
+    {
+        return Fail(out, ErrorCode::InvalidArgument,
+                    "pipeline layout declares too many push constant ranges");
+    }
+    for (usize index = 0; index < desc.pushConstants.Size(); ++index)
+    {
+        const PushConstantRange& range = desc.pushConstants[index];
+        if (range.stages == 0 || (range.stages & ~kAllShaderStages) != 0)
+        {
+            return Fail(out, ErrorCode::InvalidArgument,
+                        "push constant range must name at least one real stage");
+        }
+        if (range.sizeBytes == 0 || range.offsetBytes % 4 != 0 || range.sizeBytes % 4 != 0)
+        {
+            return Fail(out, ErrorCode::InvalidArgument,
+                        "push constant range is empty or not four byte aligned");
+        }
+        if (range.offsetBytes > capabilities.limits.maxPushConstantBytes ||
+            range.sizeBytes > capabilities.limits.maxPushConstantBytes - range.offsetBytes)
+        {
+            return Fail(out, ErrorCode::OutOfRange, "push constant range exceeds the device limit");
+        }
+        for (usize other = 0; other < index; ++other)
+        {
+            const PushConstantRange& previous = desc.pushConstants[other];
+            if ((previous.stages & range.stages) == 0)
+            {
+                continue;
+            }
+            const u32 previousEnd = previous.offsetBytes + previous.sizeBytes;
+            const u32 end = range.offsetBytes + range.sizeBytes;
+            if (range.offsetBytes < previousEnd && previous.offsetBytes < end)
+            {
+                return Fail(out, ErrorCode::InvalidArgument,
+                            "push constant ranges overlap for a shared stage");
+            }
+        }
+    }
+    return true;
+}
+
+Status<Error> NullCreatePipelineLayout(void* internal, const PipelineLayoutDesc& desc,
+                                       PipelineLayoutHandle* out) noexcept
+{
+    if (internal == nullptr || out == nullptr)
+    {
+        return StatusError(
+            ErrorCode::InvalidArgument,
+            "null backend: pipeline layout creation needs a device and an output handle");
+    }
+
+    auto& device = *static_cast<NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    Error error{};
+    if (!ValidatePipelineLayout(device.capabilities, device, desc, &error))
+    {
+        return Status<Error>::Err(error);
+    }
+
+    NullPipelineLayout record;
+    for (u32 slot = 0; slot < kBindGroupSlotCount; ++slot)
+    {
+        record.groups[slot] = desc.groups[slot];
+    }
+    record.pushConstants = CopyArray(device, desc.pushConstants);
+    if (!desc.pushConstants.Empty() && record.pushConstants == nullptr)
+    {
+        return StatusError(ErrorCode::Internal, "null backend: push constant allocation failed");
+    }
+    record.pushConstantCount = static_cast<u32>(desc.pushConstants.Size());
+
+    const PipelineLayoutHandle handle = device.pipelineLayouts.Insert(std::move(record));
+    if (!handle.IsValid())
+    {
+        ReleaseAllocation(device, record.pushConstants);
+        return StatusError(ErrorCode::Internal, "null backend: layout table growth failed");
+    }
+    *out = handle;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullDestroyPipelineLayout(void* internal, PipelineLayoutHandle handle) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: device is null");
+    }
+    auto& device = *static_cast<NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+    NullPipelineLayout* layout = device.pipelineLayouts.Get(handle);
+    if (layout == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: pipeline layout handle is stale or invalid");
+    }
+    PushConstantRange* ranges = layout->pushConstants;
+    (void)device.pipelineLayouts.Remove(handle);
+    ReleaseAllocation(device, ranges);
+    return Status<Error>::Ok();
+}
+
+[[nodiscard]] bool ValidateVertexLayout(const Capabilities& capabilities,
+                                        const VertexLayout& layout, Error* out) noexcept
+{
+    if (layout.bindings.Data() == nullptr || layout.bindings.Empty())
+    {
+        return Fail(out, ErrorCode::InvalidArgument, "graphics pipeline has no vertex binding");
+    }
+    if (layout.attributes.Data() == nullptr || layout.attributes.Empty())
+    {
+        return Fail(out, ErrorCode::InvalidArgument, "graphics pipeline has no vertex attribute");
+    }
+    if (layout.bindings.Size() > capabilities.limits.maxVertexBuffers)
+    {
+        return Fail(out, ErrorCode::OutOfRange,
+                    "graphics pipeline has more vertex bindings than the device allows");
+    }
+    if (layout.attributes.Size() > capabilities.limits.maxVertexAttributes)
+    {
+        return Fail(out, ErrorCode::OutOfRange,
+                    "graphics pipeline has more vertex attributes than the device allows");
+    }
+
+    for (usize index = 0; index < layout.bindings.Size(); ++index)
+    {
+        const VertexBinding& binding = layout.bindings[index];
+        if (binding.strideBytes == 0 || binding.strideBytes > kMaxVertexStrideBytes)
+        {
+            return Fail(out, ErrorCode::InvalidArgument,
+                        "vertex binding stride is zero or above 2048 bytes");
+        }
+        if (binding.rate >= VertexInputRate::Count)
+        {
+            return Fail(out, ErrorCode::InvalidArgument, "vertex input rate is not an input rate");
+        }
+    }
+
+    for (usize index = 0; index < layout.attributes.Size(); ++index)
+    {
+        const VertexAttribute& attribute = layout.attributes[index];
+        if (!IsVertexFormatSupported(attribute.format))
+        {
+            return Fail(out, ErrorCode::InvalidArgument,
+                        "vertex attribute format cannot be fetched as vertex input");
+        }
+        if (attribute.binding >= layout.bindings.Size())
+        {
+            return Fail(out, ErrorCode::InvalidArgument,
+                        "vertex attribute names a binding that does not exist");
+        }
+        const u64 end =
+            static_cast<u64>(attribute.offsetBytes) + FormatBytesPerBlock(attribute.format);
+        if (end > layout.bindings[attribute.binding].strideBytes)
+        {
+            return Fail(out, ErrorCode::InvalidArgument,
+                        "vertex attribute extends past its binding stride");
+        }
+        for (usize other = 0; other < index; ++other)
+        {
+            if (layout.attributes[other].location == attribute.location)
+            {
+                return Fail(out, ErrorCode::InvalidArgument,
+                            "vertex layout repeats an attribute location");
+            }
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] bool ValidateBlendState(Format format, const BlendState& blend, Error* out) noexcept
+{
+    if (blend.writeMask > kColorWriteAll)
+    {
+        return Fail(out, ErrorCode::InvalidArgument, "blend write mask has bits above alpha");
+    }
+    if (!blend.enabled)
+    {
+        return true;
+    }
+    if (!FormatSupportsBlending(format))
+    {
+        return Fail(out, ErrorCode::InvalidArgument,
+                    "blending is not supported by the attachment format");
+    }
+    const BlendComponent* components[2] = {&blend.color, &blend.alpha};
+    for (const BlendComponent* component : components)
+    {
+        if (component->source >= BlendFactor::Count ||
+            component->destination >= BlendFactor::Count ||
+            component->operation >= BlendOperation::Count)
+        {
+            return Fail(out, ErrorCode::InvalidArgument,
+                        "blend factor or operation is not an enumerator");
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] bool ValidateGraphicsPipelineDesc(const Capabilities& capabilities,
+                                                const NullDevice& device,
+                                                const GraphicsPipelineDesc& desc,
+                                                Error* out) noexcept
+{
+    if (device.pipelineLayouts.Get(desc.layout) == nullptr)
+    {
+        return Fail(out, ErrorCode::InvalidArgument,
+                    "graphics pipeline names a stale pipeline layout");
+    }
+    const NullShader* vertexShader = device.shaders.Get(desc.vertexShader);
+    if (vertexShader == nullptr)
+    {
+        return Fail(out, ErrorCode::InvalidArgument,
+                    "graphics pipeline names a stale vertex shader");
+    }
+    if (vertexShader->info.stage != ShaderStage::Vertex)
+    {
+        return Fail(out, ErrorCode::InvalidArgument,
+                    "graphics pipeline vertex shader is not a vertex stage");
+    }
+    const NullShader* pixelShader = device.shaders.Get(desc.pixelShader);
+    if (pixelShader == nullptr)
+    {
+        return Fail(out, ErrorCode::InvalidArgument,
+                    "graphics pipeline names a stale pixel shader");
+    }
+    if (pixelShader->info.stage != ShaderStage::Pixel)
+    {
+        return Fail(out, ErrorCode::InvalidArgument,
+                    "graphics pipeline pixel shader is not a pixel stage");
+    }
+    if (desc.cache.IsValid() && device.pipelineCaches.Get(desc.cache) == nullptr)
+    {
+        return Fail(out, ErrorCode::InvalidArgument, "graphics pipeline names a stale cache");
+    }
+    if (!ValidateVertexLayout(capabilities, desc.vertexLayout, out))
+    {
+        return false;
+    }
+    if (desc.topology >= PrimitiveTopology::Count || desc.rasterizer.cullMode >= CullMode::Count ||
+        desc.rasterizer.frontFace >= FrontFace::Count ||
+        desc.rasterizer.polygonMode >= PolygonMode::Count)
+    {
+        return Fail(out, ErrorCode::InvalidArgument, "rasterizer or topology state is invalid");
+    }
+    if (desc.multisample.sampleCount != 1 && desc.multisample.sampleCount != 2 &&
+        desc.multisample.sampleCount != 4 && desc.multisample.sampleCount != 8)
+    {
+        return Fail(out, ErrorCode::InvalidArgument, "pipeline sample count must be 1, 2, 4, or 8");
+    }
+    if (desc.multisample.alphaToCoverage && desc.multisample.sampleCount == 1)
+    {
+        return Fail(out, ErrorCode::InvalidArgument,
+                    "alpha to coverage needs more than one sample");
+    }
+    if (desc.depthStencil.depthCompare >= CompareFunction::Count)
+    {
+        return Fail(out, ErrorCode::InvalidArgument, "depth comparison is not a comparison");
+    }
+    if (desc.depthStencil.stencilEnabled &&
+        (desc.depthStencil.front.compare >= CompareFunction::Count ||
+         desc.depthStencil.back.compare >= CompareFunction::Count ||
+         desc.depthStencil.front.failOp >= StencilOperation::Count ||
+         desc.depthStencil.front.depthFailOp >= StencilOperation::Count ||
+         desc.depthStencil.front.passOp >= StencilOperation::Count ||
+         desc.depthStencil.back.failOp >= StencilOperation::Count ||
+         desc.depthStencil.back.depthFailOp >= StencilOperation::Count ||
+         desc.depthStencil.back.passOp >= StencilOperation::Count))
+    {
+        return Fail(out, ErrorCode::InvalidArgument, "stencil state has an invalid enumerator");
+    }
+
+    const bool needsDepth = desc.depthStencil.depthTestEnabled ||
+                            desc.depthStencil.depthWriteEnabled || desc.depthStencil.stencilEnabled;
+    if (needsDepth && desc.depthStencilFormat == Format::Count)
+    {
+        return Fail(out, ErrorCode::InvalidArgument,
+                    "pipeline has depth state but no depth attachment format");
+    }
+    if (desc.depthStencilFormat != Format::Count)
+    {
+        if (!IsDepthFormat(desc.depthStencilFormat))
+        {
+            return Fail(out, ErrorCode::InvalidArgument,
+                        "depth attachment format is not a depth format");
+        }
+        if (desc.depthStencil.stencilEnabled && !IsStencilFormat(desc.depthStencilFormat))
+        {
+            return Fail(out, ErrorCode::InvalidArgument,
+                        "stencil state needs a depth format with stencil");
+        }
+        if (desc.multisample.sampleCount > 1 && !FormatSupportsMultisample(desc.depthStencilFormat))
+        {
+            return Fail(out, ErrorCode::InvalidArgument,
+                        "depth attachment format cannot be multisampled");
+        }
+    }
+
+    if (desc.colorAttachments.Data() == nullptr || desc.colorAttachments.Empty())
+    {
+        return Fail(out, ErrorCode::InvalidArgument, "graphics pipeline has no color attachment");
+    }
+    if (desc.colorAttachments.Size() > kMaxColorAttachments ||
+        desc.colorAttachments.Size() > capabilities.limits.maxColorAttachments)
+    {
+        return Fail(out, ErrorCode::OutOfRange,
+                    "graphics pipeline has more color attachments than the device allows");
+    }
+    for (usize index = 0; index < desc.colorAttachments.Size(); ++index)
+    {
+        const ColorAttachmentState& attachment = desc.colorAttachments[index];
+        if (!FormatSupportsRenderTarget(attachment.format))
+        {
+            return Fail(out, ErrorCode::InvalidArgument,
+                        "color attachment format cannot be a render target");
+        }
+        if (desc.multisample.sampleCount > 1 && !FormatSupportsMultisample(attachment.format))
+        {
+            return Fail(out, ErrorCode::InvalidArgument,
+                        "color attachment format cannot be multisampled");
+        }
+        if (!ValidateBlendState(attachment.format, attachment.blend, out))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] bool ValidateComputePipelineDesc(const Capabilities& capabilities,
+                                               const NullDevice& device,
+                                               const ComputePipelineDesc& desc, Error* out) noexcept
+{
+    if (!capabilities.features.Has(Feature::Compute))
+    {
+        return Fail(out, ErrorCode::Unsupported, "compute pipelines are not supported");
+    }
+    if (device.pipelineLayouts.Get(desc.layout) == nullptr)
+    {
+        return Fail(out, ErrorCode::InvalidArgument,
+                    "compute pipeline names a stale pipeline layout");
+    }
+    const NullShader* shader = device.shaders.Get(desc.computeShader);
+    if (shader == nullptr)
+    {
+        return Fail(out, ErrorCode::InvalidArgument,
+                    "compute pipeline names a stale compute shader");
+    }
+    if (shader->info.stage != ShaderStage::Compute)
+    {
+        return Fail(out, ErrorCode::InvalidArgument,
+                    "compute pipeline shader is not a compute stage");
+    }
+    if (desc.cache.IsValid() && device.pipelineCaches.Get(desc.cache) == nullptr)
+    {
+        return Fail(out, ErrorCode::InvalidArgument, "compute pipeline names a stale cache");
+    }
+    return true;
+}
+
+Status<Error> NullCreateGraphicsPipeline(void* internal, const GraphicsPipelineDesc& desc,
+                                         PipelineHandle* out) noexcept
+{
+    if (internal == nullptr || out == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: pipeline creation needs a device and an output handle");
+    }
+    auto& device = *static_cast<NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    Error error{};
+    if (!ValidateGraphicsPipelineDesc(device.capabilities, device, desc, &error))
+    {
+        return Status<Error>::Err(error);
+    }
+
+    NullPipeline record;
+    record.kind = PipelineKind::Graphics;
+    record.hash = HashGraphicsPipelineDesc(desc);
+    const PipelineHandle handle = device.pipelines.Insert(std::move(record));
+    if (!handle.IsValid())
+    {
+        return StatusError(ErrorCode::Internal, "null backend: pipeline table growth failed");
+    }
+    *out = handle;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullCreateComputePipeline(void* internal, const ComputePipelineDesc& desc,
+                                        PipelineHandle* out) noexcept
+{
+    if (internal == nullptr || out == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: pipeline creation needs a device and an output handle");
+    }
+    auto& device = *static_cast<NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    Error error{};
+    if (!ValidateComputePipelineDesc(device.capabilities, device, desc, &error))
+    {
+        return Status<Error>::Err(error);
+    }
+
+    NullPipeline record;
+    record.kind = PipelineKind::Compute;
+    record.hash = HashComputePipelineDesc(desc);
+    const PipelineHandle handle = device.pipelines.Insert(std::move(record));
+    if (!handle.IsValid())
+    {
+        return StatusError(ErrorCode::Internal, "null backend: pipeline table growth failed");
+    }
+    *out = handle;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullDestroyPipeline(void* internal, PipelineHandle handle) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: device is null");
+    }
+    auto& device = *static_cast<NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+    if (!device.pipelines.Remove(handle))
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: pipeline handle is stale or invalid");
+    }
+    return Status<Error>::Ok();
+}
+
+PipelineInfo NullPipelineInfo(const void* internal, PipelineHandle handle) noexcept
+{
+    PipelineInfo info;
+    if (internal == nullptr)
+    {
+        return info;
+    }
+    const auto& device = *static_cast<const NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+    const NullPipeline* pipeline = device.pipelines.Get(handle);
+    if (pipeline == nullptr)
+    {
+        return info;
+    }
+    info.valid = true;
+    info.kind = pipeline->kind;
+    info.hash = pipeline->hash;
+    return info;
+}
+
+Status<Error> NullCreatePipelineCache(void* internal, const PipelineCacheDesc& desc,
+                                      PipelineCacheHandle* out) noexcept
+{
+    if (internal == nullptr || out == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: cache creation needs a device and an output handle");
+    }
+    if (desc.initialData.Data() == nullptr && !desc.initialData.Empty())
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: cache seed bytes are null");
+    }
+
+    auto& device = *static_cast<NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    NullPipelineCache record;
+    record.seedBytes = desc.initialData.Size();
+    const PipelineCacheHandle handle = device.pipelineCaches.Insert(std::move(record));
+    if (!handle.IsValid())
+    {
+        return StatusError(ErrorCode::Internal, "null backend: cache table growth failed");
+    }
+    *out = handle;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullDestroyPipelineCache(void* internal, PipelineCacheHandle handle) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: device is null");
+    }
+    auto& device = *static_cast<NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+    if (!device.pipelineCaches.Remove(handle))
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: cache handle is stale or invalid");
+    }
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullPipelineCacheBytes(const void* internal, PipelineCacheHandle handle,
+                                     memory::Allocator& allocator,
+                                     memory::DynamicArray<memory::Byte>* out) noexcept
+{
+    (void)allocator;
+    if (internal == nullptr || out == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: device is null");
+    }
+    const auto& device = *static_cast<const NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+    if (device.pipelineCaches.Get(handle) == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: cache handle is stale or invalid");
+    }
+    // Nothing is compiled here, so there is nothing to serialize. Saving an
+    // empty cache is a success, which is what every backend must tolerate.
+    return Status<Error>::Ok();
+}
+
+// ---------------------------------------------------------------------------
 // Barriers
 // ---------------------------------------------------------------------------
 
@@ -1586,6 +2627,24 @@ void NullDestroyDevice(void* internal) noexcept
         interface.createSampler = &NullCreateSampler;
         interface.destroySampler = &NullDestroySampler;
         interface.transition = &NullTransition;
+        interface.createShader = &NullCreateShader;
+        interface.destroyShader = &NullDestroyShader;
+        interface.shaderInfo = &NullShaderInfo;
+        interface.createBindGroupLayout = &NullCreateBindGroupLayout;
+        interface.destroyBindGroupLayout = &NullDestroyBindGroupLayout;
+        interface.createBindGroup = &NullCreateBindGroup;
+        interface.destroyBindGroup = &NullDestroyBindGroup;
+        interface.bindGroupInfo = &NullBindGroupInfo;
+        interface.createPipelineLayout = &NullCreatePipelineLayout;
+        interface.destroyPipelineLayout = &NullDestroyPipelineLayout;
+        interface.createGraphicsPipeline = &NullCreateGraphicsPipeline;
+        interface.destroyGraphicsPipeline = &NullDestroyPipeline;
+        interface.createComputePipeline = &NullCreateComputePipeline;
+        interface.destroyComputePipeline = &NullDestroyPipeline;
+        interface.createPipelineCache = &NullCreatePipelineCache;
+        interface.destroyPipelineCache = &NullDestroyPipelineCache;
+        interface.pipelineCacheBytes = &NullPipelineCacheBytes;
+        interface.pipelineInfo = &NullPipelineInfo;
         return interface;
     }();
     return &kInterface;
