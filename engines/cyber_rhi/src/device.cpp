@@ -46,7 +46,37 @@ namespace
            interface.createComputePipeline != nullptr &&
            interface.destroyComputePipeline != nullptr &&
            interface.createPipelineCache != nullptr && interface.destroyPipelineCache != nullptr &&
-           interface.pipelineCacheBytes != nullptr && interface.pipelineInfo != nullptr;
+           interface.pipelineCacheBytes != nullptr && interface.pipelineInfo != nullptr &&
+           interface.createCommandList != nullptr && interface.destroyCommandList != nullptr &&
+           interface.submit != nullptr && interface.submissionInfo != nullptr &&
+           interface.createSwapChain != nullptr && interface.destroySwapChain != nullptr;
+}
+
+// A list table is checked once, at creation, for the same reason the device table
+// is: every recording call would otherwise have to test its own entry again.
+[[nodiscard]] bool CommandListInterfaceIsComplete(const CommandListInterface& interface) noexcept
+{
+    return interface.begin != nullptr && interface.end != nullptr && interface.reset != nullptr &&
+           interface.beginRenderPass != nullptr && interface.endRenderPass != nullptr &&
+           interface.setPipeline != nullptr && interface.setBindGroup != nullptr &&
+           interface.setVertexBuffer != nullptr && interface.setIndexBuffer != nullptr &&
+           interface.setViewport != nullptr && interface.setScissor != nullptr &&
+           interface.draw != nullptr && interface.drawIndexed != nullptr &&
+           interface.drawIndirect != nullptr && interface.drawIndexedIndirect != nullptr &&
+           interface.dispatch != nullptr && interface.dispatchIndirect != nullptr &&
+           interface.copyBuffer != nullptr && interface.copyBufferToTexture != nullptr &&
+           interface.copyTextureToBuffer != nullptr && interface.copyTexture != nullptr &&
+           interface.clearColorTexture != nullptr &&
+           interface.clearDepthStencilTexture != nullptr && interface.barrier != nullptr &&
+           interface.pushConstants != nullptr && interface.beginDebugLabel != nullptr &&
+           interface.endDebugLabel != nullptr && interface.currentRenderPass != nullptr &&
+           interface.stats != nullptr;
+}
+
+[[nodiscard]] bool SwapChainInterfaceIsComplete(const SwapChainInterface& interface) noexcept
+{
+    return interface.acquireNextImage != nullptr && interface.present != nullptr &&
+           interface.resize != nullptr && interface.info != nullptr;
 }
 
 }  // namespace
@@ -686,6 +716,117 @@ Status<Error> Device::WaitIdle() noexcept
         return StatusError(core::ErrorCode::InvalidArgument, "device is empty");
     }
     return m_interface->waitIdle(m_internal);
+}
+
+Result<CommandList, Error> Device::CreateCommandList(const CommandListDesc& desc) noexcept
+{
+    if (!IsValid() || m_interface->createCommandList == nullptr)
+    {
+        return Result<CommandList, Error>::Err(Error{
+            core::ErrorCode::InvalidArgument, "device is empty; no command list was created"});
+    }
+    if (static_cast<u32>(desc.queue) >= kQueueKindCount)
+    {
+        return Result<CommandList, Error>::Err(Error{
+            core::ErrorCode::InvalidArgument, "command list names a queue class that is not one"});
+    }
+
+    CommandListHandle handle;
+    CommandListCreation creation;
+    const Status<Error> created =
+        m_interface->createCommandList(m_internal, desc, &handle, &creation);
+    if (!created)
+    {
+        return Result<CommandList, Error>::Err(created.Error());
+    }
+    if (!handle.IsValid() || creation.interface == nullptr || creation.internal == nullptr)
+    {
+        (void)m_interface->destroyCommandList(m_internal, handle);
+        return Result<CommandList, Error>::Err(
+            Error{core::ErrorCode::Internal, "backend returned an incomplete command list"});
+    }
+    if (!CommandListInterfaceIsComplete(*creation.interface))
+    {
+        (void)m_interface->destroyCommandList(m_internal, handle);
+        return Result<CommandList, Error>::Err(Error{
+            core::ErrorCode::Internal, "backend returned a command list with an incomplete table"});
+    }
+
+    CommandList list;
+    list.m_device = m_interface;
+    list.m_deviceInternal = m_internal;
+    list.m_interface = creation.interface;
+    list.m_internal = creation.internal;
+    list.m_handle = handle;
+    list.m_state = CommandListState::Initial;
+    list.m_queue = desc.queue;
+    return Result<CommandList, Error>::Ok(std::move(list));
+}
+
+Status<Error> Device::Submit(const SubmitDesc& desc) noexcept
+{
+    if (!IsValid() || m_interface->submit == nullptr)
+    {
+        return StatusError(core::ErrorCode::InvalidArgument, "device is empty");
+    }
+    const Status<Error> valid = ValidateSubmitDesc(desc);
+    if (!valid)
+    {
+        return valid;
+    }
+    return m_interface->submit(m_internal, desc);
+}
+
+SubmissionInfo Device::LastSubmission(QueueKind kind) const noexcept
+{
+    if (!IsValid() || m_interface->submissionInfo == nullptr)
+    {
+        return SubmissionInfo{};
+    }
+    return m_interface->submissionInfo(m_internal, kind);
+}
+
+Result<SwapChain, Error> Device::CreateSwapChain(const SwapChainDesc& desc) noexcept
+{
+    if (!IsValid() || m_interface->createSwapChain == nullptr)
+    {
+        return Result<SwapChain, Error>::Err(
+            Error{core::ErrorCode::InvalidArgument, "device is empty; no swapchain was created"});
+    }
+    const Status<Error> valid = ValidateSwapChainDesc(desc);
+    if (!valid)
+    {
+        return Result<SwapChain, Error>::Err(valid.Error());
+    }
+
+    SwapChainHandle handle;
+    SwapChainCreation creation;
+    const Status<Error> created =
+        m_interface->createSwapChain(m_internal, desc, &handle, &creation);
+    if (!created)
+    {
+        return Result<SwapChain, Error>::Err(created.Error());
+    }
+    if (!handle.IsValid() || creation.interface == nullptr || creation.internal == nullptr)
+    {
+        (void)m_interface->destroySwapChain(m_internal, handle);
+        return Result<SwapChain, Error>::Err(
+            Error{core::ErrorCode::Internal, "backend returned an incomplete swapchain"});
+    }
+    if (!SwapChainInterfaceIsComplete(*creation.interface))
+    {
+        (void)m_interface->destroySwapChain(m_internal, handle);
+        return Result<SwapChain, Error>::Err(Error{
+            core::ErrorCode::Internal, "backend returned a swapchain with an incomplete table"});
+    }
+
+    SwapChain swapchain;
+    swapchain.m_device = m_interface;
+    swapchain.m_deviceInternal = m_internal;
+    swapchain.m_interface = creation.interface;
+    swapchain.m_internal = creation.internal;
+    swapchain.m_handle = handle;
+    return Result<SwapChain, Error>::Ok(std::move(swapchain));
 }
 
 void Device::Release() noexcept

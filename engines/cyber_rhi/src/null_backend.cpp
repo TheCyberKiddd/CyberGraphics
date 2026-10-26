@@ -17,11 +17,16 @@
 #include <cyber/rhi/backend.h>
 #include <cyber/rhi/buffer.h>
 #include <cyber/rhi/capabilities.h>
+#include <cyber/rhi/command_list.h>
 #include <cyber/rhi/descriptors.h>
 #include <cyber/rhi/device.h>
 #include <cyber/rhi/handle.h>
+#include <cyber/rhi/pipeline.h>
+#include <cyber/rhi/render_pass.h>
 #include <cyber/rhi/resource_state.h>
 #include <cyber/rhi/sampler.h>
+#include <cyber/rhi/submission.h>
+#include <cyber/rhi/swapchain.h>
 #include <cyber/rhi/texture.h>
 
 #include <chrono>
@@ -128,10 +133,20 @@ struct NullPipelineLayout
     u32 pushConstantCount = 0;
 };
 
+// A pipeline records what a later command has to validate against: its layout,
+// how many vertex bindings a draw must satisfy, and the attachment formats a
+// render pass must match. Nothing is compiled here, so what is kept is exactly
+// the state a real pipeline would encode.
 struct NullPipeline
 {
     PipelineKind kind = PipelineKind::Graphics;
     u64 hash = 0;
+    PipelineLayoutHandle layout;
+    u32 vertexBindingCount = 0;
+    u32 colorAttachmentCount = 0;
+    Format colorFormats[kMaxColorAttachments] = {};
+    u32 sampleCount = 1;
+    Format depthStencilFormat = Format::Count;
 };
 
 // The null backend compiles nothing, so a cache only remembers how many seed
@@ -141,14 +156,103 @@ struct NullPipelineCache
     u64 seedBytes = 0;
 };
 
+// Vertex binding slots a list tracks. Matches `Limits::maxVertexBuffers` in
+// `MakeNullCapabilities`; the two must agree or a pipeline could declare a
+// binding the list has no room to remember.
+inline constexpr u32 kNullMaxVertexBuffers = 16;
+
+// Distinct subresources one command list tracks. Recording fails with
+// `ErrorCode::OutOfRange` past this rather than silently dropping a check: a
+// list that touches more than this many resources is a list that should be
+// split, and a validation backend that lies is worse than one with a budget.
+inline constexpr u32 kMaxListTrackedStates = 512;
+
+// What a tracked entry refers to. Buffers have a single state; a texture has one
+// per `(mip, layer)`.
+struct NullTrackedState
+{
+    u32 index = 0;
+    u32 generation = 0;
+    u32 mipLevel = 0;
+    u32 arrayLayer = 0;
+    ResourceState state = ResourceState::Undefined;
+    // 0 is a buffer, 1 is a texture.
+    u8 kind = 0;
+};
+
+struct NullDevice;
+
+// A recorded list.
+//
+// The state a real backend keeps in a native command buffer lives here as the
+// things validation needs: what is bound, whether a pass is open, the viewport,
+// and the resource states the list expects. Nothing is executed on submission
+// because there is nothing to execute; the value of this record is the rules it
+// enforces while a caller records.
+//
+// The record lives in its own allocation, not inside the device's table, because
+// the pointer handed to the command list interface must survive another list
+// being created. It is owned by the device's allocation list like every other
+// backend allocation, so a device teardown cannot leak it.
+struct NullCommandList
+{
+    // Device this list validates against. Set at creation; the list never
+    // outlives its device.
+    NullDevice* device = nullptr;
+    CommandListDesc desc{};
+    CommandListState state = CommandListState::Initial;
+
+    PipelineHandle pipeline;
+    PipelineKind pipelineKind = PipelineKind::Count;
+    u32 pipelineVertexBindings = 0;
+
+    BufferHandle vertexBuffers[kNullMaxVertexBuffers];
+    u64 vertexOffsets[kNullMaxVertexBuffers] = {};
+    bool vertexBound[kNullMaxVertexBuffers] = {};
+
+    BufferHandle indexBuffer;
+    u64 indexOffset = 0;
+    IndexFormat indexFormat = IndexFormat::Uint32;
+
+    BindGroupHandle groups[kBindGroupSlotCount];
+
+    bool passOpen = false;
+    RenderPassInfo pass{};
+
+    bool viewportSet = false;
+    Viewport viewport{};
+    bool scissorSet = false;
+    ScissorRect scissor{};
+
+    u32 debugLabelDepth = 0;
+    CommandListStats stats{};
+
+    NullTrackedState tracked[kMaxListTrackedStates];
+    u32 trackedCount = 0;
+};
+
+// A swapchain and the images it owns. The images live in the device's texture
+// table like every other texture, so a stale image handle fails to resolve after
+// a resize instead of aliasing a new image.
+struct NullSwapChain
+{
+    // Device the images live on. Set at creation; a swapchain never outlives it.
+    NullDevice* device = nullptr;
+    SwapChainDesc desc{};
+    TextureHandle images[kMaxSwapChainImages];
+    TextureViewHandle views[kMaxSwapChainImages];
+    u32 currentImage = 0;
+    bool acquired = false;
+};
+
 struct NullDevice
 {
     explicit NullDevice(memory::Allocator& allocator) noexcept
         : allocator(&allocator), fences(allocator), freeSlots(allocator), buffers(allocator),
           textures(allocator), views(allocator), samplers(allocator), shaders(allocator),
           bindGroupLayouts(allocator), bindGroups(allocator), pipelineLayouts(allocator),
-          pipelines(allocator), pipelineCaches(allocator), liveViews(allocator),
-          allocations(allocator)
+          pipelines(allocator), pipelineCaches(allocator), commandLists(allocator),
+          swapChains(allocator), liveViews(allocator), allocations(allocator)
     {
     }
 
@@ -182,6 +286,14 @@ struct NullDevice
     SlotMap<NullPipelineLayout, PipelineLayoutTag> pipelineLayouts;
     SlotMap<NullPipeline, PipelineTag> pipelines;
     SlotMap<NullPipelineCache, PipelineCacheTag> pipelineCaches;
+    // Command lists and swapchains are held by pointer because their records are
+    // allocated individually: the pointer a list's function table carries must
+    // not move when another list is created.
+    SlotMap<NullCommandList*, CommandListTag> commandLists;
+    SlotMap<NullSwapChain*, SwapChainTag> swapChains;
+    // What each queue was last told to do. A query, not a control: submission
+    // applies its effects immediately in this backend.
+    SubmissionInfo lastSubmission[kQueueKindCount] = {};
     // Every live view, so destroying a texture can retire the views over it.
     memory::DynamicArray<TextureViewHandle> liveViews;
     // Host-visible bytes and per-subresource state arrays, released when the
@@ -281,7 +393,8 @@ void CopyName(char (&destination)[kAdapterNameBytes], const char* source) noexce
     // branch is exercised by the D3D12 backend's conformance tests in Phase 14.
     capabilities.features = Features::Of(Feature::Compute) | Feature::IndirectDraw |
                             Feature::TimelineFences | Feature::DebugMarkers |
-                            Feature::StorageTextures | Feature::AnisotropicFiltering;
+                            Feature::StorageTextures | Feature::AnisotropicFiltering |
+                            Feature::SwapchainTearing;
     return capabilities;
 }
 
@@ -1081,18 +1194,13 @@ ResourceState NullBufferState(const void* internal, BufferHandle handle) noexcep
 // Textures and views
 // ---------------------------------------------------------------------------
 
-Status<Error> NullCreateTexture(void* internal, const TextureDesc& desc,
-                                TextureHandle* out) noexcept
+// Creates a texture with the device lock already held, so a swapchain can create
+// its images without re-entering the mutex. Validation, allocation, and the
+// per-subresource state array all happen here; `NullCreateTexture` is the public
+// entry point around it.
+[[nodiscard]] Status<Error> CreateTextureLocked(NullDevice& device, const TextureDesc& desc,
+                                                TextureHandle* out) noexcept
 {
-    if (internal == nullptr || out == nullptr)
-    {
-        return StatusError(ErrorCode::InvalidArgument,
-                           "null backend: texture creation needs a device and an output handle");
-    }
-
-    auto& device = *static_cast<NullDevice*>(internal);
-    const std::lock_guard<std::mutex> lock(device.mutex);
-
     Error error{};
     if (!ValidateTextureDesc(device.capabilities, desc, &error))
     {
@@ -1128,6 +1236,20 @@ Status<Error> NullCreateTexture(void* internal, const TextureDesc& desc,
     }
     *out = handle;
     return Status<Error>::Ok();
+}
+
+Status<Error> NullCreateTexture(void* internal, const TextureDesc& desc,
+                                TextureHandle* out) noexcept
+{
+    if (internal == nullptr || out == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: texture creation needs a device and an output handle");
+    }
+
+    auto& device = *static_cast<NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+    return CreateTextureLocked(device, desc, out);
 }
 
 // Retires every live view of `texture`. Called with the device lock held.
@@ -1200,18 +1322,11 @@ TextureInfo NullTextureInfo(const void* internal, TextureHandle handle) noexcept
     return info;
 }
 
-Status<Error> NullCreateTextureView(void* internal, const TextureViewDesc& desc,
-                                    TextureViewHandle* out) noexcept
+// Creates a view with the device lock already held, so a swapchain can build its
+// views without re-entering the mutex.
+[[nodiscard]] Status<Error> CreateViewLocked(NullDevice& device, const TextureViewDesc& desc,
+                                             TextureViewHandle* out) noexcept
 {
-    if (internal == nullptr || out == nullptr)
-    {
-        return StatusError(ErrorCode::InvalidArgument,
-                           "null backend: view creation needs a device and an output handle");
-    }
-
-    auto& device = *static_cast<NullDevice*>(internal);
-    const std::lock_guard<std::mutex> lock(device.mutex);
-
     const NullTexture* texture = device.textures.Get(desc.texture);
     if (texture == nullptr)
     {
@@ -1255,6 +1370,20 @@ Status<Error> NullCreateTextureView(void* internal, const TextureViewDesc& desc,
     }
     *out = handle;
     return Status<Error>::Ok();
+}
+
+Status<Error> NullCreateTextureView(void* internal, const TextureViewDesc& desc,
+                                    TextureViewHandle* out) noexcept
+{
+    if (internal == nullptr || out == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: view creation needs a device and an output handle");
+    }
+
+    auto& device = *static_cast<NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+    return CreateViewLocked(device, desc, out);
 }
 
 Status<Error> NullDestroyTextureView(void* internal, TextureViewHandle handle) noexcept
@@ -2220,6 +2349,15 @@ Status<Error> NullCreateGraphicsPipeline(void* internal, const GraphicsPipelineD
     NullPipeline record;
     record.kind = PipelineKind::Graphics;
     record.hash = HashGraphicsPipelineDesc(desc);
+    record.layout = desc.layout;
+    record.vertexBindingCount = static_cast<u32>(desc.vertexLayout.bindings.Size());
+    record.colorAttachmentCount = static_cast<u32>(desc.colorAttachments.Size());
+    for (usize index = 0; index < desc.colorAttachments.Size(); ++index)
+    {
+        record.colorFormats[index] = desc.colorAttachments[index].format;
+    }
+    record.sampleCount = desc.multisample.sampleCount;
+    record.depthStencilFormat = desc.depthStencilFormat;
     const PipelineHandle handle = device.pipelines.Insert(std::move(record));
     if (!handle.IsValid())
     {
@@ -2249,6 +2387,7 @@ Status<Error> NullCreateComputePipeline(void* internal, const ComputePipelineDes
     NullPipeline record;
     record.kind = PipelineKind::Compute;
     record.hash = HashComputePipelineDesc(desc);
+    record.layout = desc.layout;
     const PipelineHandle handle = device.pipelines.Insert(std::move(record));
     if (!handle.IsValid())
     {
@@ -2536,6 +2675,2643 @@ Status<Error> NullTransition(void* internal, memory::Span<const BufferBarrier> b
 }
 
 // ---------------------------------------------------------------------------
+// Command lists: state tracking
+// ---------------------------------------------------------------------------
+
+// True when `current` is one of the states `required` names. A read-write
+// requirement (`ShaderRead | ShaderWrite`) is satisfied by either side, because
+// a storage buffer a shader reads is a different binding from one it writes and
+// the state vocabulary cannot tell them apart at the barrier level.
+[[nodiscard]] bool StateAllows(ResourceState current, ResourceState required) noexcept
+{
+    return (ResourceStateBits(current) & ResourceStateBits(required)) != 0;
+}
+
+// Resets everything a recording leaves behind, keeping the list's description.
+// A fresh recording must not inherit a bound pipeline from the destroyed one,
+// and clearing the shadow is what makes a re-recorded list start from the
+// device's real state again.
+void ClearRecording(NullCommandList& list) noexcept
+{
+    list.pipeline = PipelineHandle{};
+    list.pipelineKind = PipelineKind::Count;
+    list.pipelineVertexBindings = 0;
+    for (u32 index = 0; index < kNullMaxVertexBuffers; ++index)
+    {
+        list.vertexBuffers[index] = BufferHandle{};
+        list.vertexOffsets[index] = 0;
+        list.vertexBound[index] = false;
+    }
+    list.indexBuffer = BufferHandle{};
+    list.indexOffset = 0;
+    list.indexFormat = IndexFormat::Uint32;
+    for (u32 slot = 0; slot < kBindGroupSlotCount; ++slot)
+    {
+        list.groups[slot] = BindGroupHandle{};
+    }
+    list.passOpen = false;
+    list.pass = RenderPassInfo{};
+    list.viewportSet = false;
+    list.viewport = Viewport{};
+    list.scissorSet = false;
+    list.scissor = ScissorRect{};
+    list.debugLabelDepth = 0;
+    list.stats = CommandListStats{};
+    list.trackedCount = 0;
+}
+
+[[nodiscard]] NullTrackedState* FindTracked(NullCommandList& list, u8 kind, u32 index,
+                                            u32 generation, u32 mipLevel, u32 arrayLayer) noexcept
+{
+    for (u32 entry = 0; entry < list.trackedCount; ++entry)
+    {
+        NullTrackedState& tracked = list.tracked[entry];
+        if (tracked.kind == kind && tracked.index == index && tracked.generation == generation &&
+            tracked.mipLevel == mipLevel && tracked.arrayLayer == arrayLayer)
+        {
+            return &tracked;
+        }
+    }
+    return nullptr;
+}
+
+// Adds a tracked entry, or reports that the list has run out of room. The budget
+// exists because tracking is a fixed array: an unbounded list would have to
+// allocate while recording, and the module's budget forbids that on a hot path.
+[[nodiscard]] Status<Error> AddTracked(NullCommandList& list, u8 kind, u32 index, u32 generation,
+                                       u32 mipLevel, u32 arrayLayer, ResourceState state) noexcept
+{
+    if (list.trackedCount == kMaxListTrackedStates)
+    {
+        return StatusError(ErrorCode::OutOfRange,
+                           "null backend: a command list tracks more distinct subresources than "
+                           "kMaxListTrackedStates; split the list");
+    }
+    NullTrackedState& tracked = list.tracked[list.trackedCount];
+    tracked.kind = kind;
+    tracked.index = index;
+    tracked.generation = generation;
+    tracked.mipLevel = mipLevel;
+    tracked.arrayLayer = arrayLayer;
+    tracked.state = state;
+    ++list.trackedCount;
+    return Status<Error>::Ok();
+}
+
+// The state this list believes a buffer is in, seeding the shadow from the
+// device on first touch. Seeding is what lets a barrier batch recorded in one
+// list follow the state a previous, already ended, list left behind.
+[[nodiscard]] Status<Error> TrackedBufferState(NullDevice& device, NullCommandList& list,
+                                               BufferHandle buffer, ResourceState* out) noexcept
+{
+    const NullBuffer* record = device.buffers.Get(buffer);
+    if (record == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: buffer handle is stale or invalid");
+    }
+    NullTrackedState* tracked = FindTracked(list, 0, buffer.index, buffer.generation, 0, 0);
+    if (tracked != nullptr)
+    {
+        *out = tracked->state;
+        return Status<Error>::Ok();
+    }
+    const Status<Error> added =
+        AddTracked(list, 0, buffer.index, buffer.generation, 0, 0, record->state);
+    if (!added)
+    {
+        return added;
+    }
+    *out = record->state;
+    return Status<Error>::Ok();
+}
+
+// The state this list believes one texture subresource is in, seeded from the
+// device on first touch like `TrackedBufferState`.
+[[nodiscard]] Status<Error> TrackedTextureState(NullDevice& device, NullCommandList& list,
+                                                TextureHandle texture, u32 mipLevel, u32 arrayLayer,
+                                                ResourceState* out) noexcept
+{
+    const NullTexture* record = device.textures.Get(texture);
+    if (record == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: texture handle is stale or invalid");
+    }
+    if (mipLevel >= record->desc.mipLevels || arrayLayer >= record->desc.arrayLayers)
+    {
+        return StatusError(ErrorCode::OutOfRange,
+                           "null backend: subresource index leaves the texture");
+    }
+    NullTrackedState* tracked =
+        FindTracked(list, 1, texture.index, texture.generation, mipLevel, arrayLayer);
+    if (tracked != nullptr)
+    {
+        *out = tracked->state;
+        return Status<Error>::Ok();
+    }
+    const ResourceState current =
+        record->states[static_cast<usize>(mipLevel) * record->desc.arrayLayers + arrayLayer];
+    const Status<Error> added =
+        AddTracked(list, 1, texture.index, texture.generation, mipLevel, arrayLayer, current);
+    if (!added)
+    {
+        return added;
+    }
+    *out = current;
+    return Status<Error>::Ok();
+}
+
+[[nodiscard]] Status<Error> SetTrackedBuffer(NullCommandList& list, BufferHandle buffer,
+                                             ResourceState state) noexcept
+{
+    NullTrackedState* tracked = FindTracked(list, 0, buffer.index, buffer.generation, 0, 0);
+    if (tracked == nullptr)
+    {
+        return AddTracked(list, 0, buffer.index, buffer.generation, 0, 0, state);
+    }
+    tracked->state = state;
+    return Status<Error>::Ok();
+}
+
+[[nodiscard]] Status<Error> SetTrackedTexture(NullCommandList& list, TextureHandle texture,
+                                              u32 mipLevel, u32 arrayLayer,
+                                              ResourceState state) noexcept
+{
+    NullTrackedState* tracked =
+        FindTracked(list, 1, texture.index, texture.generation, mipLevel, arrayLayer);
+    if (tracked == nullptr)
+    {
+        return AddTracked(list, 1, texture.index, texture.generation, mipLevel, arrayLayer, state);
+    }
+    tracked->state = state;
+    return Status<Error>::Ok();
+}
+
+// Requires a buffer to be in a state one of whose bits is `required`. The message
+// says what the command wanted and that a barrier is missing, because that is
+// the one thing a caller can act on.
+[[nodiscard]] Status<Error> RequireBufferState(NullDevice& device, NullCommandList& list,
+                                               BufferHandle buffer, ResourceState required,
+                                               const char* message) noexcept
+{
+    ResourceState current = ResourceState::Undefined;
+    const Status<Error> tracked = TrackedBufferState(device, list, buffer, &current);
+    if (!tracked)
+    {
+        return tracked;
+    }
+    if (!StateAllows(current, required))
+    {
+        return StatusError(ErrorCode::InvalidArgument, message);
+    }
+    return Status<Error>::Ok();
+}
+
+// Requires every subresource a view covers to be in a state `required` accepts.
+[[nodiscard]] Status<Error> RequireViewState(NullDevice& device, NullCommandList& list,
+                                             TextureViewHandle view, ResourceState required,
+                                             const char* message) noexcept
+{
+    const NullView* record = device.views.Get(view);
+    if (record == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: view handle is stale or invalid");
+    }
+    const NullTexture* texture = device.textures.Get(record->texture);
+    if (texture == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: view's texture is stale or invalid");
+    }
+    const u32 baseMip = record->desc.range.baseMipLevel;
+    const u32 mipCount = record->desc.range.mipLevelCount;
+    const u32 baseLayer = record->desc.range.baseArrayLayer;
+    const u32 layerCount = record->desc.range.layerCount;
+    for (u32 layer = baseLayer; layer < baseLayer + layerCount; ++layer)
+    {
+        for (u32 mip = baseMip; mip < baseMip + mipCount; ++mip)
+        {
+            ResourceState current = ResourceState::Undefined;
+            const Status<Error> tracked =
+                TrackedTextureState(device, list, record->texture, mip, layer, &current);
+            if (!tracked)
+            {
+                return tracked;
+            }
+            if (!StateAllows(current, required))
+            {
+                return StatusError(ErrorCode::InvalidArgument, message);
+            }
+        }
+    }
+    return Status<Error>::Ok();
+}
+
+// Message for a pipeline layout slot that has no group bound. One string per
+// slot, so the error names the slot rather than saying "some slot": a caller
+// binding per-material data wants to know that per-material is what is missing.
+[[nodiscard]] const char* MissingGroupMessage(BindGroupSlot slot) noexcept
+{
+    switch (slot)
+    {
+    case BindGroupSlot::PerFrame:
+        return "null backend: the pipeline layout uses the per-frame slot and no "
+               "per-frame group is bound";
+    case BindGroupSlot::PerView:
+        return "null backend: the pipeline layout uses the per-view slot and no "
+               "per-view group is bound";
+    case BindGroupSlot::PerMaterial:
+        return "null backend: the pipeline layout uses the per-material slot and no "
+               "per-material group is bound";
+    case BindGroupSlot::PerDraw:
+        return "null backend: the pipeline layout uses the per-draw slot and no "
+               "per-draw group is bound";
+    case BindGroupSlot::Count:
+        break;
+    }
+    return "null backend: a group slot has no group bound";
+}
+
+// Checks that every slot the pipeline layout uses has a bound group, and that
+// every resource in those groups is in a state its binding can read.
+[[nodiscard]] Status<Error> RequireBoundGroups(NullDevice& device, NullCommandList& list) noexcept
+{
+    const NullPipeline* pipeline = device.pipelines.Get(list.pipeline);
+    if (pipeline == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: no pipeline is bound; nothing can draw");
+    }
+    const NullPipelineLayout* layout = device.pipelineLayouts.Get(pipeline->layout);
+    if (layout == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: bound pipeline's layout is stale");
+    }
+
+    for (u32 slotIndex = 0; slotIndex < kBindGroupSlotCount; ++slotIndex)
+    {
+        const BindGroupLayoutHandle declared = layout->groups[slotIndex];
+        if (!declared.IsValid())
+        {
+            continue;
+        }
+        const BindGroupHandle bound = list.groups[slotIndex];
+        if (!bound.IsValid())
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               MissingGroupMessage(static_cast<BindGroupSlot>(slotIndex)));
+        }
+        const NullBindGroup* group = device.bindGroups.Get(bound);
+        if (group == nullptr)
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: a bound group handle is stale");
+        }
+        const NullBindGroupLayout* groupLayout = device.bindGroupLayouts.Get(group->layout);
+        if (groupLayout == nullptr)
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: a bound group's layout is stale");
+        }
+
+        usize resourceIndex = 0;
+        for (u32 entryIndex = 0; entryIndex < groupLayout->entryCount; ++entryIndex)
+        {
+            const BindGroupLayoutEntry& entry = groupLayout->entries[entryIndex];
+            for (u32 element = 0; element < entry.arrayCount; ++element, ++resourceIndex)
+            {
+                // Creation validated the count, so this cannot read past the end,
+                // but a defensive stop keeps a corrupt record from walking memory.
+                if (resourceIndex >= group->resourceCount)
+                {
+                    return StatusError(ErrorCode::Internal,
+                                       "null backend: a group holds fewer resources than its "
+                                       "layout declares");
+                }
+                const BindingResource& resource = group->resources[resourceIndex];
+                switch (entry.type)
+                {
+                case BindingType::UniformBuffer:
+                {
+                    const Status<Error> checked = RequireBufferState(
+                        device, list, resource.buffer, ResourceState::ConstantBuffer,
+                        "null backend: missing barrier: a uniform buffer bound to the draw is "
+                        "not in constant_buffer state");
+                    if (!checked)
+                    {
+                        return checked;
+                    }
+                    break;
+                }
+                case BindingType::StorageBuffer:
+                {
+                    const Status<Error> checked = RequireBufferState(
+                        device, list, resource.buffer,
+                        ResourceState::ShaderRead | ResourceState::ShaderWrite,
+                        "null backend: missing barrier: a storage buffer bound to the draw is "
+                        "not in shader_read or shader_write state");
+                    if (!checked)
+                    {
+                        return checked;
+                    }
+                    break;
+                }
+                case BindingType::SampledTexture:
+                {
+                    const Status<Error> checked = RequireViewState(
+                        device, list, resource.textureView, ResourceState::ShaderRead,
+                        "null backend: missing barrier: a sampled texture bound to the draw is "
+                        "not in shader_read state");
+                    if (!checked)
+                    {
+                        return checked;
+                    }
+                    break;
+                }
+                case BindingType::StorageTexture:
+                {
+                    const Status<Error> checked = RequireViewState(
+                        device, list, resource.textureView, ResourceState::ShaderWrite,
+                        "null backend: missing barrier: a storage texture bound to the draw is "
+                        "not in shader_write state");
+                    if (!checked)
+                    {
+                        return checked;
+                    }
+                    break;
+                }
+                case BindingType::Sampler:
+                case BindingType::Count:
+                    break;
+                }
+            }
+        }
+    }
+    return Status<Error>::Ok();
+}
+
+// ---------------------------------------------------------------------------
+// Command lists: recording
+// ---------------------------------------------------------------------------
+
+[[nodiscard]] NullCommandList* ResolveCommandList(NullDevice& device,
+                                                  CommandListHandle handle) noexcept
+{
+    NullCommandList** slot = device.commandLists.Get(handle);
+    return slot != nullptr ? *slot : nullptr;
+}
+
+[[nodiscard]] Status<Error> RequireRecording(NullCommandList& list) noexcept
+{
+    if (list.state != CommandListState::Recording)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: the command list is not recording");
+    }
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullCmdBegin(void* internal) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: list is null");
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    if (list.state == CommandListState::Recording)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: the command list is already recording");
+    }
+    ClearRecording(list);
+    list.state = CommandListState::Recording;
+    return Status<Error>::Ok();
+}
+
+// Applies what the list recorded to the device's tracked state. This is the
+// null backend's stand-in for execution: a real backend reaches these states
+// when the list runs, so doing it at `End` keeps the state a caller can observe
+// in step with the recording that produced it.
+void CommitTrackedStates(NullDevice& device, const NullCommandList& list) noexcept
+{
+    for (u32 entry = 0; entry < list.trackedCount; ++entry)
+    {
+        const NullTrackedState& tracked = list.tracked[entry];
+        if (tracked.kind == 0)
+        {
+            BufferHandle handle;
+            handle.index = tracked.index;
+            handle.generation = tracked.generation;
+            NullBuffer* buffer = device.buffers.Get(handle);
+            if (buffer != nullptr)
+            {
+                buffer->state = tracked.state;
+            }
+            continue;
+        }
+        TextureHandle handle;
+        handle.index = tracked.index;
+        handle.generation = tracked.generation;
+        NullTexture* texture = device.textures.Get(handle);
+        if (texture == nullptr || tracked.mipLevel >= texture->desc.mipLevels ||
+            tracked.arrayLayer >= texture->desc.arrayLayers)
+        {
+            continue;
+        }
+        texture->states[static_cast<usize>(tracked.mipLevel) * texture->desc.arrayLayers +
+                        tracked.arrayLayer] = tracked.state;
+    }
+}
+
+Status<Error> NullCmdEnd(void* internal) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: list is null");
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    const Status<Error> recording = RequireRecording(list);
+    if (!recording)
+    {
+        return recording;
+    }
+    if (list.passOpen)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a render pass is still open at the end of the list");
+    }
+    if (list.debugLabelDepth != 0)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a debug label was left open at the end of the list");
+    }
+    list.state = CommandListState::Ended;
+
+    // A finished list's transitions become the device's tracked state. A real
+    // backend reaches them when the list runs; this one has no timeline, so
+    // `End` is the honest point to commit them.
+    NullDevice& device = *list.device;
+    const std::lock_guard<std::mutex> lock(device.mutex);
+    CommitTrackedStates(device, list);
+    return Status<Error>::Ok();
+}
+
+void NullCmdReset(void* internal) noexcept
+{
+    if (internal == nullptr)
+    {
+        return;
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    ClearRecording(list);
+    list.state = CommandListState::Initial;
+}
+
+// Resolves an attachment view to its texture, requiring the usage and format the
+// pass is about to impose on it.
+[[nodiscard]] Status<Error> ResolveAttachment(NullDevice& device, TextureViewHandle view,
+                                              TextureUsage requiredUsage, bool wantDepth,
+                                              const NullView** viewOut,
+                                              const NullTexture** textureOut) noexcept
+{
+    const NullView* viewRecord = device.views.Get(view);
+    if (viewRecord == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a render pass attachment view is stale or invalid");
+    }
+    const NullTexture* texture = device.textures.Get(viewRecord->texture);
+    if (texture == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a render pass attachment view has no live texture");
+    }
+    if (!HasUsage(texture->desc.usage, requiredUsage))
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           wantDepth ? "null backend: a depth attachment's texture lacks "
+                                       "depth-stencil usage"
+                                     : "null backend: a color attachment's texture lacks "
+                                       "render-target usage");
+    }
+    if (wantDepth && !IsDepthFormat(texture->desc.format))
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a depth attachment's texture is not a depth format");
+    }
+    if (!wantDepth && IsDepthFormat(texture->desc.format))
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a color attachment's texture is a depth format");
+    }
+    *viewOut = viewRecord;
+    *textureOut = texture;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullCmdBeginRenderPass(void* internal, const RenderPassDesc& desc) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: list is null");
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    const Status<Error> recording = RequireRecording(list);
+    if (!recording)
+    {
+        return recording;
+    }
+    if (list.passOpen)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a render pass is already open");
+    }
+    // The RHI layer checks the structure; a backend is reachable only through
+    // it, so this only has to defend against an empty pass.
+    if (desc.colorAttachments.Empty() && !desc.hasDepthStencil)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a render pass needs at least one attachment");
+    }
+
+    NullDevice& device = *list.device;
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    RenderPassInfo pass;
+    pass.colorAttachmentCount = static_cast<u32>(desc.colorAttachments.Size());
+
+    for (usize index = 0; index < desc.colorAttachments.Size(); ++index)
+    {
+        const ColorAttachment& attachment = desc.colorAttachments[index];
+        const NullView* viewRecord = nullptr;
+        const NullTexture* texture = nullptr;
+        const Status<Error> resolved = ResolveAttachment(
+            device, attachment.view, TextureUsage::RenderTarget, false, &viewRecord, &texture);
+        if (!resolved)
+        {
+            return resolved;
+        }
+        if (viewRecord->desc.dimension != TextureDimension::Dim2D)
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: a render pass attachment must be a 2d view");
+        }
+        if (viewRecord->desc.range.baseMipLevel != 0 || viewRecord->desc.range.mipLevelCount != 1)
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: a render pass attachment must cover one mip level");
+        }
+        if (index == 0)
+        {
+            pass.width = texture->desc.width;
+            pass.height = texture->desc.height;
+            pass.sampleCount = texture->desc.sampleCount;
+        }
+        else
+        {
+            if (texture->desc.width != pass.width || texture->desc.height != pass.height)
+            {
+                return StatusError(ErrorCode::InvalidArgument,
+                                   "null backend: a render pass's color attachments disagree on "
+                                   "extent");
+            }
+            if (texture->desc.sampleCount != pass.sampleCount)
+            {
+                return StatusError(ErrorCode::InvalidArgument,
+                                   "null backend: a render pass's color attachments disagree on "
+                                   "sample count");
+            }
+        }
+
+        pass.colorFormats[index] = texture->desc.format;
+
+        if (attachment.resolveView.IsValid())
+        {
+            const NullView* resolveView = nullptr;
+            const NullTexture* resolveTexture = nullptr;
+            const Status<Error> resolveStatus =
+                ResolveAttachment(device, attachment.resolveView, TextureUsage::RenderTarget, false,
+                                  &resolveView, &resolveTexture);
+            if (!resolveStatus)
+            {
+                return resolveStatus;
+            }
+            if (resolveTexture->desc.sampleCount != 1)
+            {
+                return StatusError(ErrorCode::InvalidArgument,
+                                   "null backend: a resolve target must have exactly one sample");
+            }
+            if (resolveTexture->desc.format != texture->desc.format ||
+                resolveTexture->desc.width != texture->desc.width ||
+                resolveTexture->desc.height != texture->desc.height)
+            {
+                return StatusError(ErrorCode::InvalidArgument,
+                                   "null backend: a resolve target must match its attachment's "
+                                   "format and extent");
+            }
+        }
+
+        const Status<Error> state = RequireViewState(
+            device, list, attachment.view, ResourceState::RenderTarget,
+            "null backend: missing barrier: a color attachment is not in render_target state");
+        if (!state)
+        {
+            return state;
+        }
+    }
+
+    if (desc.hasDepthStencil)
+    {
+        const DepthStencilAttachment& attachment = desc.depthStencil;
+        const NullView* viewRecord = nullptr;
+        const NullTexture* texture = nullptr;
+        const Status<Error> resolved = ResolveAttachment(
+            device, attachment.view, TextureUsage::DepthStencil, true, &viewRecord, &texture);
+        if (!resolved)
+        {
+            return resolved;
+        }
+        if (viewRecord->desc.dimension != TextureDimension::Dim2D)
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: a depth attachment must be a 2d view");
+        }
+        if (pass.colorAttachmentCount == 0)
+        {
+            pass.width = texture->desc.width;
+            pass.height = texture->desc.height;
+            pass.sampleCount = texture->desc.sampleCount;
+        }
+        else if (texture->desc.width != pass.width || texture->desc.height != pass.height)
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: a depth attachment does not match the pass extent");
+        }
+        else if (texture->desc.sampleCount != pass.sampleCount)
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: a depth attachment does not match the pass sample "
+                               "count");
+        }
+        if (!IsStencilFormat(texture->desc.format) &&
+            (attachment.stencilLoadOp != LoadOp::DontCare ||
+             attachment.stencilStoreOp != StoreOp::DontCare))
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: a depth format without stencil cannot load or store "
+                               "stencil");
+        }
+        pass.hasDepthStencil = true;
+        pass.depthStencilFormat = texture->desc.format;
+
+        const ResourceState required =
+            attachment.readOnly ? ResourceState::DepthRead : ResourceState::DepthWrite;
+        const Status<Error> state = RequireViewState(
+            device, list, attachment.view, required,
+            attachment.readOnly
+                ? "null backend: missing barrier: a read-only depth attachment is not in "
+                  "depth_read state"
+                : "null backend: missing barrier: a depth attachment is not in depth_write "
+                  "state");
+        if (!state)
+        {
+            return state;
+        }
+    }
+
+    pass.valid = true;
+    list.pass = pass;
+    list.passOpen = true;
+    ++list.stats.renderPasses;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullCmdEndRenderPass(void* internal) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: list is null");
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    const Status<Error> recording = RequireRecording(list);
+    if (!recording)
+    {
+        return recording;
+    }
+    if (!list.passOpen)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: no render pass is open to end");
+    }
+    list.passOpen = false;
+    list.pass = RenderPassInfo{};
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullCmdSetPipeline(void* internal, PipelineHandle handle) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: list is null");
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    const Status<Error> recording = RequireRecording(list);
+    if (!recording)
+    {
+        return recording;
+    }
+    NullDevice& device = *list.device;
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    const NullPipeline* pipeline = device.pipelines.Get(handle);
+    if (pipeline == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: pipeline handle is stale or invalid");
+    }
+
+    if (pipeline->kind == PipelineKind::Graphics)
+    {
+        if (!list.passOpen)
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: a graphics pipeline needs an open render pass");
+        }
+        if (pipeline->colorAttachmentCount != list.pass.colorAttachmentCount)
+        {
+            return StatusError(
+                ErrorCode::InvalidArgument,
+                "null backend: a graphics pipeline declares a different number of color "
+                "attachments than the render pass has");
+        }
+        for (u32 index = 0; index < pipeline->colorAttachmentCount; ++index)
+        {
+            if (pipeline->colorFormats[index] != list.pass.colorFormats[index])
+            {
+                return StatusError(
+                    ErrorCode::InvalidArgument,
+                    "null backend: a graphics pipeline's color attachment format does not match "
+                    "the render pass");
+            }
+        }
+        if (pipeline->depthStencilFormat != list.pass.depthStencilFormat)
+        {
+            return StatusError(
+                ErrorCode::InvalidArgument,
+                "null backend: a graphics pipeline's depth attachment format does not match the "
+                "render pass");
+        }
+        if (pipeline->sampleCount != list.pass.sampleCount)
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: a graphics pipeline's sample count does not match "
+                               "the render pass");
+        }
+    }
+    else if (list.passOpen)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a compute pipeline cannot be bound inside a render "
+                           "pass");
+    }
+
+    list.pipeline = handle;
+    list.pipelineKind = pipeline->kind;
+    list.pipelineVertexBindings = pipeline->vertexBindingCount;
+    ++list.stats.pipelineChanges;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullCmdSetBindGroup(void* internal, BindGroupSlot slot,
+                                  BindGroupHandle group) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: list is null");
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    const Status<Error> recording = RequireRecording(list);
+    if (!recording)
+    {
+        return recording;
+    }
+    const u32 slotIndex = static_cast<u32>(slot);
+    if (slotIndex >= kBindGroupSlotCount)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: bind group slot is not a slot");
+    }
+
+    NullDevice& device = *list.device;
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    // Unbinding a slot is legal and simply makes the next draw that needs it
+    // fail with the message that names the slot.
+    if (!group.IsValid())
+    {
+        list.groups[slotIndex] = BindGroupHandle{};
+        return Status<Error>::Ok();
+    }
+
+    const NullPipeline* pipeline = device.pipelines.Get(list.pipeline);
+    if (pipeline == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: no pipeline is bound; a group has nothing to bind to");
+    }
+    const NullPipelineLayout* layout = device.pipelineLayouts.Get(pipeline->layout);
+    if (layout == nullptr)
+    {
+        return StatusError(ErrorCode::Internal, "null backend: bound pipeline's layout is stale");
+    }
+    if (!layout->groups[slotIndex].IsValid())
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: the bound pipeline layout does not use that bind "
+                           "group slot");
+    }
+    const NullBindGroup* record = device.bindGroups.Get(group);
+    if (record == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: bind group handle is stale or invalid");
+    }
+    if (record->layout != layout->groups[slotIndex])
+    {
+        return StatusError(
+            ErrorCode::InvalidArgument,
+            "null backend: the bind group's layout is not the one the pipeline layout "
+            "declares for that slot");
+    }
+
+    list.groups[slotIndex] = group;
+    ++list.stats.bindGroupChanges;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullCmdSetVertexBuffer(void* internal, u32 binding, BufferHandle buffer,
+                                     u64 offsetBytes) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: list is null");
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    const Status<Error> recording = RequireRecording(list);
+    if (!recording)
+    {
+        return recording;
+    }
+    if (list.pipelineKind != PipelineKind::Graphics)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a vertex buffer needs a bound graphics pipeline");
+    }
+    if (binding >= list.pipelineVertexBindings)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: vertex binding index is above what the pipeline "
+                           "declares");
+    }
+
+    NullDevice& device = *list.device;
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    const NullBuffer* record = device.buffers.Get(buffer);
+    if (record == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: vertex buffer handle is stale or invalid");
+    }
+    if (!HasUsage(record->desc.usage, BufferUsage::Vertex))
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a vertex buffer needs a buffer with vertex usage");
+    }
+    if (offsetBytes >= record->desc.sizeBytes)
+    {
+        return StatusError(ErrorCode::OutOfRange,
+                           "null backend: vertex buffer offset is at or past the end");
+    }
+    const Status<Error> state = RequireBufferState(
+        device, list, buffer, ResourceState::VertexBuffer,
+        "null backend: missing barrier: a vertex buffer is not in vertex_buffer state");
+    if (!state)
+    {
+        return state;
+    }
+
+    list.vertexBuffers[binding] = buffer;
+    list.vertexOffsets[binding] = offsetBytes;
+    list.vertexBound[binding] = true;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullCmdSetIndexBuffer(void* internal, BufferHandle buffer, u64 offsetBytes,
+                                    IndexFormat format) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: list is null");
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    const Status<Error> recording = RequireRecording(list);
+    if (!recording)
+    {
+        return recording;
+    }
+    if (list.pipelineKind != PipelineKind::Graphics)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: an index buffer needs a bound graphics pipeline");
+    }
+    const u32 indexBytes = IndexFormatBytes(format);
+    if (indexBytes == 0)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: index format is not an index format");
+    }
+
+    NullDevice& device = *list.device;
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    const NullBuffer* record = device.buffers.Get(buffer);
+    if (record == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: index buffer handle is stale or invalid");
+    }
+    if (!HasUsage(record->desc.usage, BufferUsage::Index))
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: an index buffer needs a buffer with index usage");
+    }
+    if (offsetBytes % indexBytes != 0)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: index buffer offset is not a multiple of the index "
+                           "size");
+    }
+    if (offsetBytes >= record->desc.sizeBytes)
+    {
+        return StatusError(ErrorCode::OutOfRange,
+                           "null backend: index buffer offset is at or past the end");
+    }
+    const Status<Error> state = RequireBufferState(
+        device, list, buffer, ResourceState::IndexBuffer,
+        "null backend: missing barrier: the index buffer is not in index_buffer state");
+    if (!state)
+    {
+        return state;
+    }
+
+    list.indexBuffer = buffer;
+    list.indexOffset = offsetBytes;
+    list.indexFormat = format;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullCmdSetViewport(void* internal, const Viewport& viewport) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: list is null");
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    const Status<Error> recording = RequireRecording(list);
+    if (!recording)
+    {
+        return recording;
+    }
+    if (!list.passOpen)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a viewport needs an open render pass");
+    }
+    // A viewport may not exceed the pass extent. It may be smaller, which is how
+    // a split-screen or a debug inset is drawn.
+    const float width = static_cast<float>(list.pass.width);
+    const float height = static_cast<float>(list.pass.height);
+    if (viewport.x < -0.5f || viewport.y < -0.5f || viewport.x + viewport.width > width + 0.5f ||
+        viewport.y + viewport.height > height + 0.5f)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a viewport leaves the render pass extent");
+    }
+    list.viewport = viewport;
+    list.viewportSet = true;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullCmdSetScissor(void* internal, const ScissorRect& scissor) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: list is null");
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    const Status<Error> recording = RequireRecording(list);
+    if (!recording)
+    {
+        return recording;
+    }
+    if (!list.passOpen)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a scissor rectangle needs an open render pass");
+    }
+    if (scissor.x > list.pass.width || scissor.y > list.pass.height ||
+        static_cast<u64>(scissor.x) + scissor.width > list.pass.width ||
+        static_cast<u64>(scissor.y) + scissor.height > list.pass.height)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a scissor rectangle leaves the render pass extent");
+    }
+    list.scissor = scissor;
+    list.scissorSet = true;
+    return Status<Error>::Ok();
+}
+
+// Everything a draw needs before it can be accepted: an open pass, a graphics
+// pipeline, a viewport and scissor, every vertex binding the pipeline declares,
+// and a complete and readable set of bind groups.
+[[nodiscard]] Status<Error> RequireDrawState(NullDevice& device, NullCommandList& list) noexcept
+{
+    if (!list.passOpen)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a draw needs an open render pass");
+    }
+    if (list.pipelineKind != PipelineKind::Graphics)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a draw needs a bound graphics pipeline");
+    }
+    if (!list.viewportSet)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a draw needs a viewport set in this pass");
+    }
+    if (!list.scissorSet)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a draw needs a scissor rectangle set in this pass");
+    }
+    for (u32 binding = 0; binding < list.pipelineVertexBindings; ++binding)
+    {
+        if (!list.vertexBound[binding])
+        {
+            return StatusError(
+                ErrorCode::InvalidArgument,
+                "null backend: no vertex buffer is bound to a binding the pipeline declares");
+        }
+        const Status<Error> state = RequireBufferState(
+            device, list, list.vertexBuffers[binding], ResourceState::VertexBuffer,
+            "null backend: missing barrier: a vertex buffer is not in vertex_buffer state");
+        if (!state)
+        {
+            return state;
+        }
+    }
+    return RequireBoundGroups(device, list);
+}
+
+Status<Error> NullCmdDraw(void* internal, const DrawArguments& arguments) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: list is null");
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    const Status<Error> recording = RequireRecording(list);
+    if (!recording)
+    {
+        return recording;
+    }
+    NullDevice& device = *list.device;
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    const Status<Error> ready = RequireDrawState(device, list);
+    if (!ready)
+    {
+        return ready;
+    }
+    (void)arguments;
+    ++list.stats.draws;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullCmdDrawIndexed(void* internal, const DrawIndexedArguments& arguments) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: list is null");
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    const Status<Error> recording = RequireRecording(list);
+    if (!recording)
+    {
+        return recording;
+    }
+    NullDevice& device = *list.device;
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    const Status<Error> ready = RequireDrawState(device, list);
+    if (!ready)
+    {
+        return ready;
+    }
+    if (!list.indexBuffer.IsValid())
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: an indexed draw needs a bound index buffer");
+    }
+    const NullBuffer* indexBuffer = device.buffers.Get(list.indexBuffer);
+    if (indexBuffer == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: index buffer handle is stale or invalid");
+    }
+    const u64 indexBytes = IndexFormatBytes(list.indexFormat);
+    const u64 lastIndex = static_cast<u64>(arguments.firstIndex) + arguments.indexCount;
+    if (list.indexOffset + lastIndex * indexBytes > indexBuffer->desc.sizeBytes)
+    {
+        return StatusError(ErrorCode::OutOfRange,
+                           "null backend: the draw's index range leaves the index buffer");
+    }
+    const Status<Error> state = RequireBufferState(
+        device, list, list.indexBuffer, ResourceState::IndexBuffer,
+        "null backend: missing barrier: the index buffer is not in index_buffer state");
+    if (!state)
+    {
+        return state;
+    }
+    ++list.stats.draws;
+    return Status<Error>::Ok();
+}
+
+// Requires an indirect argument buffer in the state a draw or dispatch reads it
+// from, with the whole argument range inside it.
+[[nodiscard]] Status<Error> RequireIndirectBuffer(NullDevice& device, NullCommandList& list,
+                                                  BufferHandle arguments, u64 offsetBytes,
+                                                  u32 count, u32 strideBytes) noexcept
+{
+    if (!device.capabilities.features.Has(Feature::IndirectDraw))
+    {
+        return StatusError(ErrorCode::Unsupported,
+                           "null backend: indirect arguments need Feature::IndirectDraw");
+    }
+    const NullBuffer* record = device.buffers.Get(arguments);
+    if (record == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: indirect argument buffer handle is stale or invalid");
+    }
+    if (!HasUsage(record->desc.usage, BufferUsage::Indirect))
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: indirect arguments need a buffer with indirect usage");
+    }
+    const u64 needed = offsetBytes + static_cast<u64>(strideBytes) * count;
+    if (needed > record->desc.sizeBytes)
+    {
+        return StatusError(ErrorCode::OutOfRange,
+                           "null backend: the indirect argument range leaves the buffer");
+    }
+    return RequireBufferState(
+        device, list, arguments, ResourceState::IndirectArgument,
+        "null backend: missing barrier: the indirect argument buffer is not in "
+        "indirect_argument state");
+}
+
+Status<Error> NullCmdDrawIndirect(void* internal, BufferHandle arguments, u64 offsetBytes,
+                                  u32 drawCount, u32 strideBytes) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: list is null");
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    const Status<Error> recording = RequireRecording(list);
+    if (!recording)
+    {
+        return recording;
+    }
+    NullDevice& device = *list.device;
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    const Status<Error> ready = RequireDrawState(device, list);
+    if (!ready)
+    {
+        return ready;
+    }
+    const Status<Error> indirect =
+        RequireIndirectBuffer(device, list, arguments, offsetBytes, drawCount, strideBytes);
+    if (!indirect)
+    {
+        return indirect;
+    }
+    ++list.stats.draws;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullCmdDrawIndexedIndirect(void* internal, BufferHandle arguments, u64 offsetBytes,
+                                         u32 drawCount, u32 strideBytes) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: list is null");
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    const Status<Error> recording = RequireRecording(list);
+    if (!recording)
+    {
+        return recording;
+    }
+    NullDevice& device = *list.device;
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    const Status<Error> ready = RequireDrawState(device, list);
+    if (!ready)
+    {
+        return ready;
+    }
+    if (!list.indexBuffer.IsValid())
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: an indexed draw needs a bound index buffer");
+    }
+    const Status<Error> indirect =
+        RequireIndirectBuffer(device, list, arguments, offsetBytes, drawCount, strideBytes);
+    if (!indirect)
+    {
+        return indirect;
+    }
+    ++list.stats.draws;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullCmdDispatch(void* internal, const DispatchArguments& arguments) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: list is null");
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    const Status<Error> recording = RequireRecording(list);
+    if (!recording)
+    {
+        return recording;
+    }
+    NullDevice& device = *list.device;
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    if (!device.capabilities.features.Has(Feature::Compute))
+    {
+        return StatusError(ErrorCode::Unsupported,
+                           "null backend: dispatches need Feature::Compute");
+    }
+    if (list.passOpen)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a dispatch cannot run inside a render pass");
+    }
+    if (list.pipelineKind != PipelineKind::Compute)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a dispatch needs a bound compute pipeline");
+    }
+    const Status<Error> groups = RequireBoundGroups(device, list);
+    if (!groups)
+    {
+        return groups;
+    }
+    (void)arguments;
+    ++list.stats.dispatches;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullCmdDispatchIndirect(void* internal, BufferHandle arguments,
+                                      u64 offsetBytes) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: list is null");
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    const Status<Error> recording = RequireRecording(list);
+    if (!recording)
+    {
+        return recording;
+    }
+    NullDevice& device = *list.device;
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    if (!device.capabilities.features.Has(Feature::Compute))
+    {
+        return StatusError(ErrorCode::Unsupported,
+                           "null backend: dispatches need Feature::Compute");
+    }
+    if (list.passOpen)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a dispatch cannot run inside a render pass");
+    }
+    if (list.pipelineKind != PipelineKind::Compute)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a dispatch needs a bound compute pipeline");
+    }
+    const Status<Error> groups = RequireBoundGroups(device, list);
+    if (!groups)
+    {
+        return groups;
+    }
+    const Status<Error> indirect = RequireIndirectBuffer(device, list, arguments, offsetBytes, 1,
+                                                         kIndirectDispatchStrideBytes);
+    if (!indirect)
+    {
+        return indirect;
+    }
+    ++list.stats.dispatches;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullCmdCopyBuffer(void* internal, const BufferCopy& copy) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: list is null");
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    const Status<Error> recording = RequireRecording(list);
+    if (!recording)
+    {
+        return recording;
+    }
+    NullDevice& device = *list.device;
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    const NullBuffer* source = device.buffers.Get(copy.source);
+    if (source == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: copy source buffer is stale or invalid");
+    }
+    const NullBuffer* destination = device.buffers.Get(copy.destination);
+    if (destination == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: copy destination buffer is stale or invalid");
+    }
+    if (!HasUsage(source->desc.usage, BufferUsage::CopySource))
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a copy source buffer needs copy-source usage");
+    }
+    if (!HasUsage(destination->desc.usage, BufferUsage::CopyDestination))
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a copy destination buffer needs copy-destination usage");
+    }
+    if (copy.sourceOffset > source->desc.sizeBytes ||
+        copy.sizeBytes > source->desc.sizeBytes - copy.sourceOffset)
+    {
+        return StatusError(ErrorCode::OutOfRange,
+                           "null backend: the copy source range leaves the buffer");
+    }
+    if (copy.destinationOffset > destination->desc.sizeBytes ||
+        copy.sizeBytes > destination->desc.sizeBytes - copy.destinationOffset)
+    {
+        return StatusError(ErrorCode::OutOfRange,
+                           "null backend: the copy destination range leaves the buffer");
+    }
+
+    const Status<Error> sourceState = RequireBufferState(
+        device, list, copy.source, ResourceState::CopySource,
+        "null backend: missing barrier: the copy source buffer is not in copy_source state");
+    if (!sourceState)
+    {
+        return sourceState;
+    }
+    const Status<Error> destinationState =
+        RequireBufferState(device, list, copy.destination, ResourceState::CopyDestination,
+                           "null backend: missing barrier: the copy destination buffer is not in "
+                           "copy_destination state");
+    if (!destinationState)
+    {
+        return destinationState;
+    }
+    ++list.stats.copies;
+    return Status<Error>::Ok();
+}
+
+// Bytes one row of `width` texels needs, and the pitch rules a buffer-texture
+// copy must satisfy. Returns false for a format that cannot be copied this way.
+[[nodiscard]] bool ComputeCopyLayout(const FormatInfo& info, const BufferTextureCopy& copy,
+                                     u32* rowBytesOut, u32* rowPitchOut, u32* depthPitchOut,
+                                     u64* requiredBytesOut) noexcept
+{
+    if (info.bytesPerBlock == 0 || info.blockWidth == 0 || info.blockHeight == 0)
+    {
+        return false;
+    }
+    const u32 blocksWide = (copy.width + info.blockWidth - 1) / info.blockWidth;
+    const u32 rowBytes = blocksWide * info.bytesPerBlock;
+    const u32 rowPitch = copy.bufferRowPitch != 0 ? copy.bufferRowPitch : rowBytes;
+    const u32 depthPitch =
+        copy.bufferDepthPitch != 0 ? copy.bufferDepthPitch : rowPitch * copy.height;
+    const u64 required = copy.bufferOffset + static_cast<u64>(depthPitch) * (copy.depth - 1) +
+                         static_cast<u64>(rowPitch) * (copy.height - 1) + rowBytes;
+    *rowBytesOut = rowBytes;
+    *rowPitchOut = rowPitch;
+    *depthPitchOut = depthPitch;
+    *requiredBytesOut = required;
+    return true;
+}
+
+// Validates the parts of a buffer-texture copy that do not depend on direction:
+// the region, block alignment, pitch, and the buffer range.
+[[nodiscard]] Status<Error> ValidateBufferTextureCopyRegion(const BufferTextureCopy& copy,
+                                                            const NullBuffer* buffer,
+                                                            const NullTexture* texture) noexcept
+{
+    const FormatInfo info = FormatInfoOf(texture->desc.format);
+    if (info.bytesPerBlock == 0)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a copy's texture format is not a format");
+    }
+    if (copy.mipLevel >= texture->desc.mipLevels || copy.arrayLayer >= texture->desc.arrayLayers)
+    {
+        return StatusError(ErrorCode::OutOfRange,
+                           "null backend: a copy names a mip or layer the texture does not "
+                           "have");
+    }
+    const u32 mipWidth = texture->desc.width >> copy.mipLevel;
+    const u32 mipHeight = texture->desc.height >> copy.mipLevel;
+    const u32 mipDepth = texture->desc.depth >> copy.mipLevel;
+    if (copy.x > mipWidth || copy.width > mipWidth - copy.x || copy.y > mipHeight ||
+        copy.height > mipHeight - copy.y || copy.z > mipDepth || copy.depth > mipDepth - copy.z)
+    {
+        return StatusError(ErrorCode::OutOfRange,
+                           "null backend: a copy region leaves its mip level");
+    }
+    if (info.blockWidth > 1 || info.blockHeight > 1)
+    {
+        if (copy.x % info.blockWidth != 0 || copy.y % info.blockHeight != 0)
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: a copy origin is not on a texel block boundary");
+        }
+        if (copy.width % info.blockWidth != 0 || copy.height % info.blockHeight != 0)
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: a copy extent is not a whole number of texel "
+                               "blocks");
+        }
+    }
+    if (copy.bufferOffset % info.bytesPerBlock != 0)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a copy's buffer offset is not block aligned");
+    }
+    if (copy.bufferRowPitch != 0 && copy.bufferRowPitch % info.bytesPerBlock != 0)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a copy's row pitch is not a multiple of the block "
+                           "size");
+    }
+
+    u32 rowBytes = 0;
+    u32 rowPitch = 0;
+    u32 depthPitch = 0;
+    u64 required = 0;
+    if (!ComputeCopyLayout(info, copy, &rowBytes, &rowPitch, &depthPitch, &required))
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a copy's texture format cannot be copied through a "
+                           "buffer");
+    }
+    if (copy.bufferRowPitch != 0 && copy.bufferRowPitch < rowBytes)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a copy's row pitch is smaller than one row");
+    }
+    if (copy.bufferDepthPitch != 0 &&
+        copy.bufferDepthPitch < static_cast<u64>(rowPitch) * copy.height)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a copy's depth pitch is smaller than its rows");
+    }
+    if (required > buffer->desc.sizeBytes)
+    {
+        return StatusError(ErrorCode::OutOfRange,
+                           "null backend: the copy's buffer range leaves the buffer");
+    }
+    return Status<Error>::Ok();
+}
+
+Status<Error> CopyBufferTexture(NullCommandList& list, const BufferTextureCopy& copy,
+                                bool bufferToTexture) noexcept
+{
+    NullDevice& device = *list.device;
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    const NullBuffer* buffer = device.buffers.Get(copy.buffer);
+    if (buffer == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: copy buffer is stale or invalid");
+    }
+    const NullTexture* texture = device.textures.Get(copy.texture);
+    if (texture == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: copy texture is stale or invalid");
+    }
+    const BufferUsage bufferUsage =
+        bufferToTexture ? BufferUsage::CopySource : BufferUsage::CopyDestination;
+    const TextureUsage textureUsage =
+        bufferToTexture ? TextureUsage::CopyDestination : TextureUsage::CopySource;
+    if (!HasUsage(buffer->desc.usage, bufferUsage))
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: the copy buffer lacks the usage its direction needs");
+    }
+    if (!HasUsage(texture->desc.usage, textureUsage))
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: the copy texture lacks the usage its direction needs");
+    }
+    const Status<Error> region = ValidateBufferTextureCopyRegion(copy, buffer, texture);
+    if (!region)
+    {
+        return region;
+    }
+
+    const ResourceState bufferStateRequired =
+        bufferToTexture ? ResourceState::CopySource : ResourceState::CopyDestination;
+    const Status<Error> bufferState = RequireBufferState(
+        device, list, copy.buffer, bufferStateRequired,
+        "null backend: missing barrier: the copy buffer is not in the state its direction "
+        "needs");
+    if (!bufferState)
+    {
+        return bufferState;
+    }
+
+    ResourceState current = ResourceState::Undefined;
+    const Status<Error> tracked =
+        TrackedTextureState(device, list, copy.texture, copy.mipLevel, copy.arrayLayer, &current);
+    if (!tracked)
+    {
+        return tracked;
+    }
+    const ResourceState textureStateRequired =
+        bufferToTexture ? ResourceState::CopyDestination : ResourceState::CopySource;
+    if (!StateAllows(current, textureStateRequired))
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           bufferToTexture
+                               ? "null backend: missing barrier: the copy destination texture "
+                                 "is not in copy_destination state"
+                               : "null backend: missing barrier: the copy source texture is "
+                                 "not in copy_source state");
+    }
+    ++list.stats.copies;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullCmdCopyBufferToTexture(void* internal, const BufferTextureCopy& copy) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: list is null");
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    const Status<Error> recording = RequireRecording(list);
+    if (!recording)
+    {
+        return recording;
+    }
+    return CopyBufferTexture(list, copy, true);
+}
+
+Status<Error> NullCmdCopyTextureToBuffer(void* internal, const BufferTextureCopy& copy) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: list is null");
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    const Status<Error> recording = RequireRecording(list);
+    if (!recording)
+    {
+        return recording;
+    }
+    return CopyBufferTexture(list, copy, false);
+}
+
+Status<Error> NullCmdCopyTexture(void* internal, const TextureCopy& copy) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: list is null");
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    const Status<Error> recording = RequireRecording(list);
+    if (!recording)
+    {
+        return recording;
+    }
+    NullDevice& device = *list.device;
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    const NullTexture* source = device.textures.Get(copy.source);
+    if (source == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: copy source texture is stale or invalid");
+    }
+    const NullTexture* destination = device.textures.Get(copy.destination);
+    if (destination == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: copy destination texture is stale or invalid");
+    }
+    if (source->desc.format != destination->desc.format)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a texture copy needs matching formats");
+    }
+    if (source->desc.sampleCount != 1 || destination->desc.sampleCount != 1)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a texture copy needs single-sampled textures");
+    }
+    if (!HasUsage(source->desc.usage, TextureUsage::CopySource))
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a copy source texture needs copy-source usage");
+    }
+    if (!HasUsage(destination->desc.usage, TextureUsage::CopyDestination))
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a copy destination texture needs copy-destination "
+                           "usage");
+    }
+    if (copy.sourceMipLevel >= source->desc.mipLevels ||
+        copy.sourceArrayLayer >= source->desc.arrayLayers ||
+        copy.destinationMipLevel >= destination->desc.mipLevels ||
+        copy.destinationArrayLayer >= destination->desc.arrayLayers)
+    {
+        return StatusError(ErrorCode::OutOfRange,
+                           "null backend: a texture copy names a mip or layer that does not "
+                           "exist");
+    }
+    const u32 sourceWidth = source->desc.width >> copy.sourceMipLevel;
+    const u32 sourceHeight = source->desc.height >> copy.sourceMipLevel;
+    const u32 sourceDepth = source->desc.depth >> copy.sourceMipLevel;
+    const u32 destinationWidth = destination->desc.width >> copy.destinationMipLevel;
+    const u32 destinationHeight = destination->desc.height >> copy.destinationMipLevel;
+    const u32 destinationDepth = destination->desc.depth >> copy.destinationMipLevel;
+    if (copy.width > sourceWidth || copy.height > sourceHeight || copy.depth > sourceDepth ||
+        copy.width > destinationWidth || copy.height > destinationHeight ||
+        copy.depth > destinationDepth)
+    {
+        return StatusError(ErrorCode::OutOfRange,
+                           "null backend: a texture copy extent leaves a mip level");
+    }
+
+    ResourceState state = ResourceState::Undefined;
+    const Status<Error> sourceTracked = TrackedTextureState(
+        device, list, copy.source, copy.sourceMipLevel, copy.sourceArrayLayer, &state);
+    if (!sourceTracked)
+    {
+        return sourceTracked;
+    }
+    if (!StateAllows(state, ResourceState::CopySource))
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: missing barrier: the copy source texture is not in "
+                           "copy_source state");
+    }
+    const Status<Error> destinationTracked =
+        TrackedTextureState(device, list, copy.destination, copy.destinationMipLevel,
+                            copy.destinationArrayLayer, &state);
+    if (!destinationTracked)
+    {
+        return destinationTracked;
+    }
+    if (!StateAllows(state, ResourceState::CopyDestination))
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: missing barrier: the copy destination texture is not "
+                           "in copy_destination state");
+    }
+    ++list.stats.copies;
+    return Status<Error>::Ok();
+}
+
+// Shared body of the two clear commands.
+[[nodiscard]] Status<Error> ClearTexture(NullCommandList& list, TextureHandle texture,
+                                         const SubresourceRange& range, bool depth) noexcept
+{
+    NullDevice& device = *list.device;
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    const NullTexture* record = device.textures.Get(texture);
+    if (record == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: clear texture handle is stale or invalid");
+    }
+    if (depth)
+    {
+        if (!HasUsage(record->desc.usage, TextureUsage::DepthStencil))
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: a depth clear needs a texture with "
+                               "depth-stencil usage");
+        }
+        if (!IsDepthFormat(record->desc.format))
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: a depth clear needs a depth format");
+        }
+    }
+    else
+    {
+        if (!HasUsage(record->desc.usage, TextureUsage::RenderTarget))
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: a color clear needs a texture with render-target "
+                               "usage");
+        }
+        if (IsDepthFormat(record->desc.format))
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: a color clear needs a color format");
+        }
+    }
+
+    TextureInfo info;
+    info.valid = true;
+    info.dimension = record->desc.dimension;
+    info.format = record->desc.format;
+    info.width = record->desc.width;
+    info.height = record->desc.height;
+    info.arrayLayers = record->desc.arrayLayers;
+    info.mipLevels = record->desc.mipLevels;
+    // A depth texture has no color channels, so the default range (which is the
+    // color aspect) has to be read as the depth aspect rather than rejected. Every
+    // API's clear view does the same.
+    SubresourceRange effective = range;
+    if (depth && effective.aspect == TextureAspect::Color)
+    {
+        effective.aspect = IsStencilFormat(record->desc.format) ? TextureAspect::DepthStencil
+                                                                : TextureAspect::Depth;
+    }
+    const ResolvedRange resolved = ResolveSubresourceRange(info, effective);
+    if (!resolved.valid)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a clear range leaves the texture");
+    }
+
+    const ResourceState required = depth ? ResourceState::DepthWrite : ResourceState::RenderTarget;
+    for (u32 layer = resolved.baseArrayLayer; layer < resolved.baseArrayLayer + resolved.layerCount;
+         ++layer)
+    {
+        for (u32 mip = resolved.baseMipLevel; mip < resolved.baseMipLevel + resolved.mipLevelCount;
+             ++mip)
+        {
+            ResourceState current = ResourceState::Undefined;
+            const Status<Error> tracked =
+                TrackedTextureState(device, list, texture, mip, layer, &current);
+            if (!tracked)
+            {
+                return tracked;
+            }
+            if (!StateAllows(current, required))
+            {
+                return StatusError(ErrorCode::InvalidArgument,
+                                   depth ? "null backend: missing barrier: a cleared depth "
+                                           "texture is not in depth_write state"
+                                         : "null backend: missing barrier: a cleared color "
+                                           "texture is not in render_target state");
+            }
+        }
+    }
+    ++list.stats.clears;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullCmdClearColorTexture(void* internal, TextureHandle texture,
+                                       const ClearColorValue& value,
+                                       const SubresourceRange& range) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: list is null");
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    const Status<Error> recording = RequireRecording(list);
+    if (!recording)
+    {
+        return recording;
+    }
+    if (!value.IsFinite())
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a clear value has a NaN or infinite component");
+    }
+    return ClearTexture(list, texture, range, false);
+}
+
+Status<Error> NullCmdClearDepthStencilTexture(void* internal, TextureHandle texture,
+                                              const ClearDepthStencilValue& value,
+                                              const SubresourceRange& range) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: list is null");
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    const Status<Error> recording = RequireRecording(list);
+    if (!recording)
+    {
+        return recording;
+    }
+    if (!value.IsValid())
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a depth clear value is outside 0..1 or not finite");
+    }
+    return ClearTexture(list, texture, range, true);
+}
+
+Status<Error> NullCmdBarrier(void* internal, memory::Span<const BufferBarrier> buffers,
+                             memory::Span<const TextureBarrier> textures) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: list is null");
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    const Status<Error> recording = RequireRecording(list);
+    if (!recording)
+    {
+        return recording;
+    }
+    NullDevice& device = *list.device;
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    // Validate every barrier against this list's view of state before applying
+    // any, exactly as `Device::Transition` does against the device's.
+    for (usize index = 0; index < buffers.Size(); ++index)
+    {
+        const BufferBarrier& barrier = buffers[index];
+        if (device.buffers.Get(barrier.buffer) == nullptr)
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: barrier names a stale buffer handle");
+        }
+        if (!IsValidStateSet(barrier.to) || !IsBufferResourceState(barrier.to))
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: a buffer barrier target is not a buffer state");
+        }
+        ResourceState current = ResourceState::Undefined;
+        const Status<Error> tracked = TrackedBufferState(device, list, barrier.buffer, &current);
+        if (!tracked)
+        {
+            return tracked;
+        }
+        if (barrier.from != ResourceState::Undefined && barrier.from != current)
+        {
+            return StatusError(
+                ErrorCode::InvalidArgument,
+                "null backend: a buffer barrier's source does not match the state the list "
+                "recorded; a barrier is missing or duplicated");
+        }
+    }
+
+    for (usize index = 0; index < textures.Size(); ++index)
+    {
+        const TextureBarrier& barrier = textures[index];
+        const NullTexture* record = device.textures.Get(barrier.texture);
+        if (record == nullptr)
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: barrier names a stale texture handle");
+        }
+        if (!IsValidStateSet(barrier.to) || !IsTextureResourceState(barrier.to))
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: a texture barrier target is not a texture state");
+        }
+        TextureInfo info;
+        info.valid = true;
+        info.dimension = record->desc.dimension;
+        info.format = record->desc.format;
+        info.width = record->desc.width;
+        info.height = record->desc.height;
+        info.arrayLayers = record->desc.arrayLayers;
+        info.mipLevels = record->desc.mipLevels;
+        const ResolvedRange resolved = ResolveSubresourceRange(info, barrier.range);
+        if (!resolved.valid)
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: a texture barrier range leaves the texture");
+        }
+        if (barrier.from != ResourceState::Undefined)
+        {
+            for (u32 layer = resolved.baseArrayLayer;
+                 layer < resolved.baseArrayLayer + resolved.layerCount; ++layer)
+            {
+                for (u32 mip = resolved.baseMipLevel;
+                     mip < resolved.baseMipLevel + resolved.mipLevelCount; ++mip)
+                {
+                    ResourceState current = ResourceState::Undefined;
+                    const Status<Error> tracked =
+                        TrackedTextureState(device, list, barrier.texture, mip, layer, &current);
+                    if (!tracked)
+                    {
+                        return tracked;
+                    }
+                    if (current != barrier.from)
+                    {
+                        return StatusError(
+                            ErrorCode::InvalidArgument,
+                            "null backend: a texture barrier's source does not match the state "
+                            "the list recorded; a barrier is missing or duplicated");
+                    }
+                }
+            }
+        }
+    }
+
+    for (usize index = 0; index < buffers.Size(); ++index)
+    {
+        const Status<Error> applied =
+            SetTrackedBuffer(list, buffers[index].buffer, buffers[index].to);
+        if (!applied)
+        {
+            return applied;
+        }
+    }
+    for (usize index = 0; index < textures.Size(); ++index)
+    {
+        const TextureBarrier& barrier = textures[index];
+        const NullTexture* record = device.textures.Get(barrier.texture);
+        if (record == nullptr)
+        {
+            continue;
+        }
+        TextureInfo info;
+        info.valid = true;
+        info.dimension = record->desc.dimension;
+        info.format = record->desc.format;
+        info.width = record->desc.width;
+        info.height = record->desc.height;
+        info.arrayLayers = record->desc.arrayLayers;
+        info.mipLevels = record->desc.mipLevels;
+        const ResolvedRange resolved = ResolveSubresourceRange(info, barrier.range);
+        if (!resolved.valid)
+        {
+            continue;
+        }
+        for (u32 layer = resolved.baseArrayLayer;
+             layer < resolved.baseArrayLayer + resolved.layerCount; ++layer)
+        {
+            for (u32 mip = resolved.baseMipLevel;
+                 mip < resolved.baseMipLevel + resolved.mipLevelCount; ++mip)
+            {
+                const Status<Error> applied =
+                    SetTrackedTexture(list, barrier.texture, mip, layer, barrier.to);
+                if (!applied)
+                {
+                    return applied;
+                }
+            }
+        }
+    }
+
+    list.stats.barriers += static_cast<u32>(buffers.Size() + textures.Size());
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullCmdPushConstants(void* internal, ShaderStageMask stages, u32 offsetBytes,
+                                   memory::Span<const memory::Byte> data) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: list is null");
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    const Status<Error> recording = RequireRecording(list);
+    if (!recording)
+    {
+        return recording;
+    }
+    if (stages == 0 || (stages & ~kAllShaderStages) != 0)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: push constants need at least one real stage");
+    }
+    NullDevice& device = *list.device;
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    const NullPipeline* pipeline = device.pipelines.Get(list.pipeline);
+    if (pipeline == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: no pipeline is bound; push constants have no layout");
+    }
+    const NullPipelineLayout* layout = device.pipelineLayouts.Get(pipeline->layout);
+    if (layout == nullptr)
+    {
+        return StatusError(ErrorCode::Internal, "null backend: bound pipeline's layout is stale");
+    }
+    const u32 end = offsetBytes + static_cast<u32>(data.Size());
+    if (end < offsetBytes)
+    {
+        return StatusError(ErrorCode::OutOfRange, "null backend: a push constant range overflows");
+    }
+    for (u32 index = 0; index < layout->pushConstantCount; ++index)
+    {
+        const PushConstantRange& range = layout->pushConstants[index];
+        if ((range.stages & stages) == stages && offsetBytes >= range.offsetBytes &&
+            end <= range.offsetBytes + range.sizeBytes)
+        {
+            ++list.stats.pushConstants;
+            return Status<Error>::Ok();
+        }
+    }
+    return StatusError(ErrorCode::InvalidArgument,
+                       "null backend: the push constant range is not covered by a range of the "
+                       "bound pipeline layout");
+}
+
+Status<Error> NullCmdBeginDebugLabel(void* internal, const char* label) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: list is null");
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    const Status<Error> recording = RequireRecording(list);
+    if (!recording)
+    {
+        return recording;
+    }
+    if (label == nullptr || label[0] == '\0')
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a debug label needs a non-empty name");
+    }
+    ++list.debugLabelDepth;
+    ++list.stats.debugLabels;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullCmdEndDebugLabel(void* internal) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: list is null");
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    const Status<Error> recording = RequireRecording(list);
+    if (!recording)
+    {
+        return recording;
+    }
+    if (list.debugLabelDepth == 0)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: no debug label is open to close");
+    }
+    --list.debugLabelDepth;
+    return Status<Error>::Ok();
+}
+
+RenderPassInfo NullCmdCurrentRenderPass(const void* internal) noexcept
+{
+    if (internal == nullptr)
+    {
+        return RenderPassInfo{};
+    }
+    const auto& list = *static_cast<const NullCommandList*>(internal);
+    return list.passOpen ? list.pass : RenderPassInfo{};
+}
+
+CommandListStats NullCmdStats(const void* internal) noexcept
+{
+    if (internal == nullptr)
+    {
+        return CommandListStats{};
+    }
+    return static_cast<const NullCommandList*>(internal)->stats;
+}
+
+[[nodiscard]] const CommandListInterface* NullCommandListInterface() noexcept;
+[[nodiscard]] const SwapChainInterface* NullSwapChainInterface() noexcept;
+
+Status<Error> NullCreateCommandList(void* internal, const CommandListDesc& desc,
+                                    CommandListHandle* out, CommandListCreation* creation) noexcept
+{
+    if (internal == nullptr || out == nullptr || creation == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: list creation needs a device, an output handle, and a "
+                           "creation record");
+    }
+
+    auto& device = *static_cast<NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    const u32 queueIndex = static_cast<u32>(desc.queue);
+    if (queueIndex >= kQueueKindCount)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: command list queue class is not a queue class");
+    }
+    if (!device.queues[queueIndex].IsValid())
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: the device has no queue of that class");
+    }
+
+    // The record is allocated on its own so the pointer the interface receives
+    // stays valid while other lists are created.
+    void* memory = device.allocator->Allocate(sizeof(NullCommandList), alignof(NullCommandList));
+    if (memory == nullptr)
+    {
+        return StatusError(ErrorCode::Internal, "null backend: command list allocation failed");
+    }
+    auto* record = new (memory) NullCommandList();
+    record->device = &device;
+    record->desc = desc;
+    record->state = CommandListState::Initial;
+
+    NullCommandList* pointer = record;
+    const CommandListHandle handle = device.commandLists.Insert(pointer);
+    if (!handle.IsValid())
+    {
+        record->~NullCommandList();
+        device.allocator->Deallocate(record);
+        return StatusError(ErrorCode::Internal, "null backend: command list table growth failed");
+    }
+    if (!device.allocations.TryPushBack(memory))
+    {
+        (void)device.commandLists.Remove(handle);
+        record->~NullCommandList();
+        device.allocator->Deallocate(record);
+        return StatusError(ErrorCode::Internal,
+                           "null backend: command list allocation list growth failed");
+    }
+
+    *out = handle;
+    creation->interface = NullCommandListInterface();
+    creation->internal = record;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullDestroyCommandList(void* internal, CommandListHandle handle) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: device is null");
+    }
+    auto& device = *static_cast<NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+    NullCommandList** slot = device.commandLists.Get(handle);
+    if (slot == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: command list handle is stale or invalid");
+    }
+    NullCommandList* record = *slot;
+    (void)device.commandLists.Remove(handle);
+    if (record != nullptr)
+    {
+        record->~NullCommandList();
+        ReleaseAllocation(device, record);
+    }
+    return Status<Error>::Ok();
+}
+
+// ---------------------------------------------------------------------------
+// Submission
+// ---------------------------------------------------------------------------
+
+Status<Error> NullSubmit(void* internal, const SubmitDesc& desc) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: device is null");
+    }
+    auto& device = *static_cast<NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    const u32 queueIndex = static_cast<u32>(desc.queue);
+    if (queueIndex >= kQueueKindCount || !device.queues[queueIndex].IsValid())
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: the device has no queue of that class");
+    }
+
+    // Validate the whole batch before any fence moves: a submission that fails
+    // must leave the device exactly as it was, or a caller cannot retry it.
+    for (usize index = 0; index < desc.commandLists.Size(); ++index)
+    {
+        const NullCommandList* list = ResolveCommandList(device, desc.commandLists[index]);
+        if (list == nullptr)
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: a submitted command list handle is stale or "
+                               "invalid");
+        }
+        if (list->state == CommandListState::Recording)
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: a submitted command list is still recording");
+        }
+        if (list->state != CommandListState::Ended)
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: a submitted command list has not ended");
+        }
+        if (static_cast<u32>(list->desc.queue) != queueIndex)
+        {
+            return StatusError(
+                ErrorCode::InvalidArgument,
+                "null backend: a submitted command list was recorded for another queue class");
+        }
+    }
+
+    for (usize index = 0; index < desc.gpuWaits.Size(); ++index)
+    {
+        const GpuWait& wait = desc.gpuWaits[index];
+        const NullFenceSlot* slot = ResolveFence(device, wait.fence);
+        if (slot == nullptr)
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: a submission waits on a stale fence handle");
+        }
+        // The null backend finishes work inside `Submit`, so a wait is either
+        // already satisfied or it can never become satisfied. Reporting that is
+        // better than blocking a test forever on work that was never submitted.
+        if (slot->value < wait.value)
+        {
+            return StatusError(
+                ErrorCode::NotFound,
+                "null backend: a submission waits on a fence value that has not been "
+                "signalled");
+        }
+    }
+
+    SubmissionInfo info;
+    info.valid = true;
+    info.queue = desc.queue;
+    info.commandListCount = static_cast<u32>(desc.commandLists.Size());
+    for (usize index = 0; index < desc.commandLists.Size(); ++index)
+    {
+        const NullCommandList* list = ResolveCommandList(device, desc.commandLists[index]);
+        if (list != nullptr)
+        {
+            info.barrierCount += list->stats.barriers;
+        }
+    }
+
+    for (usize index = 0; index < desc.signals.Size(); ++index)
+    {
+        const FenceSignal& signal = desc.signals[index];
+        NullFenceSlot* slot = ResolveFence(device, signal.fence);
+        if (slot == nullptr)
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: a submission signals a stale fence handle");
+        }
+        if (signal.value > slot->value)
+        {
+            slot->value = signal.value;
+        }
+        if (signal.value > info.signalledValue)
+        {
+            info.signalledValue = signal.value;
+        }
+    }
+    device.lastSubmission[queueIndex] = info;
+    device.condition.notify_all();
+    return Status<Error>::Ok();
+}
+
+SubmissionInfo NullSubmissionInfo(const void* internal, QueueKind kind) noexcept
+{
+    if (internal == nullptr)
+    {
+        return SubmissionInfo{};
+    }
+    const u32 index = static_cast<u32>(kind);
+    if (index >= kQueueKindCount)
+    {
+        return SubmissionInfo{};
+    }
+    const auto& device = *static_cast<const NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+    return device.lastSubmission[index];
+}
+
+// ---------------------------------------------------------------------------
+// Swapchains
+// ---------------------------------------------------------------------------
+
+// Releases the images a swapchain owns. Called with the device lock held.
+void DestroySwapChainImages(NullDevice& device, NullSwapChain& swapchain) noexcept
+{
+    for (u32 index = 0; index < swapchain.desc.imageCount; ++index)
+    {
+        if (swapchain.images[index].IsValid())
+        {
+            NullTexture* texture = device.textures.Get(swapchain.images[index]);
+            ResourceState* states = texture != nullptr ? texture->states : nullptr;
+            // Retiring the views first keeps the live-view list honest and makes
+            // every handle a caller kept over an old image stop resolving.
+            RetireViewsOf(device, swapchain.images[index]);
+            (void)device.textures.Remove(swapchain.images[index]);
+            ReleaseAllocation(device, states);
+        }
+        swapchain.images[index] = TextureHandle{};
+        swapchain.views[index] = TextureViewHandle{};
+    }
+}
+
+// Creates `imageCount` images and a color view over each. Called with the device
+// lock held, from creation and from resize.
+[[nodiscard]] Status<Error> CreateSwapChainImages(NullDevice& device, NullSwapChain& swapchain,
+                                                  u32 width, u32 height) noexcept
+{
+    for (u32 index = 0; index < swapchain.desc.imageCount; ++index)
+    {
+        TextureDesc textureDesc{};
+        textureDesc.dimension = TextureDimension::Dim2D;
+        textureDesc.format = swapchain.desc.format;
+        textureDesc.usage = TextureUsage::RenderTarget | TextureUsage::CopySource;
+        textureDesc.width = width;
+        textureDesc.height = height;
+        textureDesc.depth = 1;
+        textureDesc.arrayLayers = 1;
+        textureDesc.mipLevels = 1;
+        textureDesc.sampleCount = 1;
+        textureDesc.label = swapchain.desc.label;
+
+        const Status<Error> created =
+            CreateTextureLocked(device, textureDesc, &swapchain.images[index]);
+        if (!created)
+        {
+            DestroySwapChainImages(device, swapchain);
+            return created;
+        }
+
+        TextureViewDesc viewDesc{};
+        viewDesc.texture = swapchain.images[index];
+        viewDesc.format = swapchain.desc.format;
+        viewDesc.dimension = TextureDimension::Dim2D;
+        viewDesc.label = swapchain.desc.label;
+        const Status<Error> viewed = CreateViewLocked(device, viewDesc, &swapchain.views[index]);
+        if (!viewed)
+        {
+            DestroySwapChainImages(device, swapchain);
+            return viewed;
+        }
+    }
+    swapchain.desc.surface.width = width;
+    swapchain.desc.surface.height = height;
+    swapchain.currentImage = 0;
+    swapchain.acquired = false;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullCreateSwapChain(void* internal, const SwapChainDesc& desc, SwapChainHandle* out,
+                                  SwapChainCreation* creation) noexcept
+{
+    if (internal == nullptr || out == nullptr || creation == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: swapchain creation needs a device, an output handle, "
+                           "and a creation record");
+    }
+
+    auto& device = *static_cast<NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    if (desc.presentMode == PresentMode::Immediate &&
+        !device.capabilities.features.Has(Feature::SwapchainTearing))
+    {
+        return StatusError(ErrorCode::Unsupported,
+                           "null backend: immediate present needs Feature::SwapchainTearing");
+    }
+    // Mailbox needs a third image: one displayed, one pending, one being drawn.
+    // With two, presenting would have to wait for the image being displayed.
+    if (desc.presentMode == PresentMode::Mailbox && desc.imageCount < 3)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a mailbox swapchain needs at least three images");
+    }
+    if (desc.surface.width > device.capabilities.limits.maxTexture2D ||
+        desc.surface.height > device.capabilities.limits.maxTexture2D)
+    {
+        return StatusError(ErrorCode::OutOfRange,
+                           "null backend: a swapchain surface exceeds the device texture limit");
+    }
+
+    void* memory = device.allocator->Allocate(sizeof(NullSwapChain), alignof(NullSwapChain));
+    if (memory == nullptr)
+    {
+        return StatusError(ErrorCode::Internal, "null backend: swapchain allocation failed");
+    }
+    auto* record = new (memory) NullSwapChain();
+    record->device = &device;
+    record->desc = desc;
+
+    const Status<Error> images =
+        CreateSwapChainImages(device, *record, desc.surface.width, desc.surface.height);
+    if (!images)
+    {
+        record->~NullSwapChain();
+        device.allocator->Deallocate(record);
+        return images;
+    }
+
+    NullSwapChain* pointer = record;
+    const SwapChainHandle handle = device.swapChains.Insert(pointer);
+    if (!handle.IsValid())
+    {
+        DestroySwapChainImages(device, *record);
+        record->~NullSwapChain();
+        device.allocator->Deallocate(record);
+        return StatusError(ErrorCode::Internal, "null backend: swapchain table growth failed");
+    }
+    if (!device.allocations.TryPushBack(memory))
+    {
+        (void)device.swapChains.Remove(handle);
+        DestroySwapChainImages(device, *record);
+        record->~NullSwapChain();
+        device.allocator->Deallocate(record);
+        return StatusError(ErrorCode::Internal,
+                           "null backend: swapchain allocation list growth failed");
+    }
+
+    *out = handle;
+    creation->interface = NullSwapChainInterface();
+    creation->internal = record;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullDestroySwapChain(void* internal, SwapChainHandle handle) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: device is null");
+    }
+    auto& device = *static_cast<NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+    NullSwapChain** slot = device.swapChains.Get(handle);
+    if (slot == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: swapchain handle is stale or invalid");
+    }
+    NullSwapChain* record = *slot;
+    (void)device.swapChains.Remove(handle);
+    if (record != nullptr)
+    {
+        DestroySwapChainImages(device, *record);
+        record->~NullSwapChain();
+        ReleaseAllocation(device, record);
+    }
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullAcquireNextImage(void* internal, SwapChainFrame* out) noexcept
+{
+    if (internal == nullptr || out == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: swapchain is null");
+    }
+    auto& swapchain = *static_cast<NullSwapChain*>(internal);
+    NullDevice& device = *swapchain.device;
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    if (swapchain.acquired)
+    {
+        return StatusError(ErrorCode::AlreadyExists,
+                           "null backend: the swapchain already has an image acquired; present "
+                           "it first");
+    }
+    SwapChainFrame frame;
+    frame.valid = true;
+    frame.imageIndex = swapchain.currentImage;
+    frame.texture = swapchain.images[swapchain.currentImage];
+    frame.view = swapchain.views[swapchain.currentImage];
+    if (!frame.texture.IsValid() || !frame.view.IsValid())
+    {
+        return StatusError(ErrorCode::Internal,
+                           "null backend: a swapchain image handle is missing");
+    }
+    swapchain.acquired = true;
+    *out = frame;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullPresentImage(void* internal) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: swapchain is null");
+    }
+    auto& swapchain = *static_cast<NullSwapChain*>(internal);
+    NullDevice& device = *swapchain.device;
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    if (!swapchain.acquired)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: no swapchain image is acquired to present");
+    }
+
+    // Presenting hands the image to the display engine, which is what the
+    // `Present` state records. A caller that wants to draw into it again must
+    // transition it back.
+    NullTexture* texture = device.textures.Get(swapchain.images[swapchain.currentImage]);
+    if (texture != nullptr)
+    {
+        const u64 subresources =
+            static_cast<u64>(texture->desc.mipLevels) * texture->desc.arrayLayers;
+        for (u64 index = 0; index < subresources; ++index)
+        {
+            texture->states[index] = ResourceState::Present;
+        }
+    }
+
+    swapchain.acquired = false;
+    swapchain.currentImage = (swapchain.currentImage + 1) % swapchain.desc.imageCount;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullResizeSwapChain(void* internal, u32 width, u32 height) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: swapchain is null");
+    }
+    auto& swapchain = *static_cast<NullSwapChain*>(internal);
+    NullDevice& device = *swapchain.device;
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    if (width == 0 || height == 0)
+    {
+        return StatusError(ErrorCode::OutOfRange,
+                           "null backend: a swapchain extent must be non-zero");
+    }
+    if (width > device.capabilities.limits.maxTexture2D ||
+        height > device.capabilities.limits.maxTexture2D)
+    {
+        return StatusError(ErrorCode::OutOfRange,
+                           "null backend: a swapchain extent exceeds the device texture limit");
+    }
+
+    DestroySwapChainImages(device, swapchain);
+    return CreateSwapChainImages(device, swapchain, width, height);
+}
+
+SwapChainInfo NullSwapChainInfo(const void* internal) noexcept
+{
+    SwapChainInfo info;
+    if (internal == nullptr)
+    {
+        return info;
+    }
+    const auto& swapchain = *static_cast<const NullSwapChain*>(internal);
+    info.valid = true;
+    info.format = swapchain.desc.format;
+    info.width = swapchain.desc.surface.width;
+    info.height = swapchain.desc.surface.height;
+    info.imageCount = swapchain.desc.imageCount;
+    info.currentImage = swapchain.currentImage;
+    info.presentMode = swapchain.desc.presentMode;
+    info.acquired = swapchain.acquired;
+    return info;
+}
+
+// ---------------------------------------------------------------------------
 // Device
 // ---------------------------------------------------------------------------
 
@@ -2645,6 +5421,65 @@ void NullDestroyDevice(void* internal) noexcept
         interface.destroyPipelineCache = &NullDestroyPipelineCache;
         interface.pipelineCacheBytes = &NullPipelineCacheBytes;
         interface.pipelineInfo = &NullPipelineInfo;
+        interface.createCommandList = &NullCreateCommandList;
+        interface.destroyCommandList = &NullDestroyCommandList;
+        interface.submit = &NullSubmit;
+        interface.submissionInfo = &NullSubmissionInfo;
+        interface.createSwapChain = &NullCreateSwapChain;
+        interface.destroySwapChain = &NullDestroySwapChain;
+        return interface;
+    }();
+    return &kInterface;
+}
+
+[[nodiscard]] const CommandListInterface* NullCommandListInterface() noexcept
+{
+    static const CommandListInterface kInterface = []
+    {
+        CommandListInterface interface{};
+        interface.begin = &NullCmdBegin;
+        interface.end = &NullCmdEnd;
+        interface.reset = &NullCmdReset;
+        interface.beginRenderPass = &NullCmdBeginRenderPass;
+        interface.endRenderPass = &NullCmdEndRenderPass;
+        interface.setPipeline = &NullCmdSetPipeline;
+        interface.setBindGroup = &NullCmdSetBindGroup;
+        interface.setVertexBuffer = &NullCmdSetVertexBuffer;
+        interface.setIndexBuffer = &NullCmdSetIndexBuffer;
+        interface.setViewport = &NullCmdSetViewport;
+        interface.setScissor = &NullCmdSetScissor;
+        interface.draw = &NullCmdDraw;
+        interface.drawIndexed = &NullCmdDrawIndexed;
+        interface.drawIndirect = &NullCmdDrawIndirect;
+        interface.drawIndexedIndirect = &NullCmdDrawIndexedIndirect;
+        interface.dispatch = &NullCmdDispatch;
+        interface.dispatchIndirect = &NullCmdDispatchIndirect;
+        interface.copyBuffer = &NullCmdCopyBuffer;
+        interface.copyBufferToTexture = &NullCmdCopyBufferToTexture;
+        interface.copyTextureToBuffer = &NullCmdCopyTextureToBuffer;
+        interface.copyTexture = &NullCmdCopyTexture;
+        interface.clearColorTexture = &NullCmdClearColorTexture;
+        interface.clearDepthStencilTexture = &NullCmdClearDepthStencilTexture;
+        interface.barrier = &NullCmdBarrier;
+        interface.pushConstants = &NullCmdPushConstants;
+        interface.beginDebugLabel = &NullCmdBeginDebugLabel;
+        interface.endDebugLabel = &NullCmdEndDebugLabel;
+        interface.currentRenderPass = &NullCmdCurrentRenderPass;
+        interface.stats = &NullCmdStats;
+        return interface;
+    }();
+    return &kInterface;
+}
+
+[[nodiscard]] const SwapChainInterface* NullSwapChainInterface() noexcept
+{
+    static const SwapChainInterface kInterface = []
+    {
+        SwapChainInterface interface{};
+        interface.acquireNextImage = &NullAcquireNextImage;
+        interface.present = &NullPresentImage;
+        interface.resize = &NullResizeSwapChain;
+        interface.info = &NullSwapChainInfo;
         return interface;
     }();
     return &kInterface;

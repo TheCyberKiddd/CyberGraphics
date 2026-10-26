@@ -93,7 +93,15 @@ tests pass in debug; the design is ADR 0013.
   descriptions, a hash-keyed pipeline cache, and the validation that rejects
   every impossible combination. 67 tests pass in every preset; the design is
   ADR 0015.
-- Next: Phase 13 (command lists, synchronization, and the swapchain).
+- Phase 13: command lists, synchronization, and the swapchain. `cyber_rhi`
+  adds recorded lists with a checked state machine, explicit render passes,
+  buffers and textures copy and clear, push constants, debug labels, one-call
+  submission with timeline waits and signals, a frame ring, a retirement queue,
+  and swapchains with acquire, present, resize, and present modes. The null
+  backend tracks state per list and per subresource, so a missing barrier is a
+  record-time error that names the resource. 74 tests pass in every preset; the
+  design is ADR 0016.
+- Next: Phase 14 (the Direct3D 12 backend).
 
 See [engines/MODULES.md](engines/MODULES.md) for the module index and
 [docs/architecture/overview.md](docs/architecture/overview.md) for the design.

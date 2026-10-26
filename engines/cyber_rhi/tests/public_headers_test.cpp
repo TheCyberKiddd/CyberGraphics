@@ -5,6 +5,8 @@
 #include <type_traits>
 
 using namespace cyber::rhi;
+using cyber::core::u32;
+using cyber::core::u64;
 
 CG_TEST(rhi_public_headers)
 {
@@ -88,4 +90,50 @@ CG_TEST(rhi_public_headers)
     CG_EXPECT_TRUE(backend->createDevice != nullptr);
     CG_EXPECT_TRUE(backend->destroyDevice != nullptr);
     CG_EXPECT_TRUE(backend->enumerateAdapters != nullptr);
+
+    // Phase 13 objects are move-only, exactly as the device is, because each owns
+    // a slot the device must release exactly once.
+    static_assert(!std::is_copy_constructible_v<CommandList>);
+    static_assert(!std::is_copy_assignable_v<CommandList>);
+    static_assert(std::is_move_constructible_v<CommandList>);
+    static_assert(std::is_move_assignable_v<CommandList>);
+    static_assert(!std::is_copy_constructible_v<SwapChain>);
+    static_assert(std::is_move_constructible_v<SwapChain>);
+    static_assert(std::is_trivially_copyable_v<FrameSlot>);
+    static_assert(std::is_trivially_copyable_v<SwapChainInfo>);
+    static_assert(std::is_trivially_copyable_v<SubmitDesc>);
+    static_assert(std::is_trivially_copyable_v<RenderPassInfo>);
+    static_assert(std::is_trivially_copyable_v<CommandListStats>);
+    static_assert(std::is_trivially_copyable_v<Viewport>);
+    static_assert(std::is_trivially_copyable_v<DrawIndexedArguments>);
+    static_assert(std::is_trivially_copyable_v<RetireEntry>);
+    static_assert(sizeof(CommandListHandle) == 8);
+    static_assert(sizeof(SwapChainHandle) == 8);
+
+    // An empty list and an empty swapchain report so and reject every call.
+    CommandList list;
+    CG_EXPECT_FALSE(list.IsValid());
+    CG_EXPECT_EQ(list.State(), CommandListState::Initial);
+    CG_EXPECT_EQ(list.Queue(), QueueKind::Graphics);
+    CG_EXPECT_FALSE(list.CurrentRenderPass().valid);
+    CG_EXPECT_EQ(list.Stats().draws, u32{0});
+    CG_EXPECT_FALSE(list.Begin());
+    CG_EXPECT_FALSE(list.End());
+    list.Reset();
+
+    SwapChain swapchain;
+    CG_EXPECT_FALSE(swapchain.IsValid());
+    CG_EXPECT_FALSE(swapchain.Info().valid);
+    CG_EXPECT_FALSE(swapchain.Present());
+
+    FrameRing ring;
+    CG_EXPECT_FALSE(ring.IsValid());
+    CG_EXPECT_EQ(ring.FramesInFlight(), u32{0});
+    CG_EXPECT_EQ(ring.SignalValueForFrame(0), u64{0});
+
+    // The description validators are pure and safe to call without a device.
+    CG_EXPECT_FALSE(ValidateRenderPassDesc(RenderPassDesc{}));
+    CG_EXPECT_FALSE(ValidateSubmitDesc(SubmitDesc{}));
+    CG_EXPECT_FALSE(ValidateSwapChainDesc(SwapChainDesc{}));
+    CG_EXPECT_FALSE(ValidateDrawArguments(DrawArguments{}));
 }

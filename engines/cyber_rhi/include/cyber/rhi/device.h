@@ -9,12 +9,15 @@
 #include <cyber/rhi/binding.h>
 #include <cyber/rhi/buffer.h>
 #include <cyber/rhi/capabilities.h>
+#include <cyber/rhi/command_list.h>
 #include <cyber/rhi/descriptors.h>
 #include <cyber/rhi/handle.h>
 #include <cyber/rhi/pipeline.h>
 #include <cyber/rhi/resource_state.h>
 #include <cyber/rhi/sampler.h>
 #include <cyber/rhi/shader.h>
+#include <cyber/rhi/submission.h>
+#include <cyber/rhi/swapchain.h>
 #include <cyber/rhi/texture.h>
 
 namespace cyber::rhi
@@ -45,12 +48,13 @@ using cyber::core::u64;
 // - A moved-from device is empty: it has no capabilities, returns invalid queue
 //   handles, and rejects every call.
 //
-// Threading rules: `Capabilities`, `Queue`, fence create/signal/wait/value, and
-// every resource create, destroy, write, read, query, and transition are safe to
-// call from any thread. The device does its own locking; a backend whose native
-// API needs external synchronization implements it internally. Recording a
-// command list is not safe from two threads and does not need to be — Phase 13
-// gives each recording thread its own list.
+// Threading rules: `Capabilities`, `Queue`, fence create/signal/wait/value,
+// `Submit`, and every resource create, destroy, write, read, query, and
+// transition are safe to call from any thread. The device does its own locking;
+// a backend whose native API needs external synchronization implements it
+// internally. Recording a command list is not safe from two threads and does not
+// need to be: each recording thread owns its own list, which is the model Phase
+// 21 builds on.
 class Device
 {
 public:
@@ -125,9 +129,9 @@ public:
     [[nodiscard]] Result<BufferHandle, Error> CreateBuffer(const BufferDesc& desc) noexcept;
 
     // Destroys a buffer and invalidates its handle. A stale handle is
-    // `ErrorCode::InvalidArgument`. Phase 11 has no submission, so the storage
-    // is released immediately; Phase 13 retires it once the timeline passes the
-    // last use.
+    // `ErrorCode::InvalidArgument`. The storage is released immediately, so a
+    // caller must not destroy a buffer a submission still reads; the retirement
+    // queue in `retirement.h` exists to hold it until the timeline passes.
     [[nodiscard]] Status<Error> DestroyBuffer(BufferHandle buffer) noexcept;
 
     // Size, stride, and usage of a live buffer. A stale handle returns a value
@@ -289,11 +293,49 @@ public:
     [[nodiscard]] Status<Error> Transition(memory::Span<const BufferBarrier> buffers,
                                            memory::Span<const TextureBarrier> textures) noexcept;
 
-    // Blocks until the device has finished all submitted work. Phase 11 submits
-    // nothing, so this is a drain point rather than a synchronization tool; from
-    // Phase 13 it also retires objects awaiting GPU completion. Returns
-    // `ErrorCode::InvalidArgument` for an empty device.
+    // Blocks until the device has finished all submitted work, and is the only
+    // point at which a caller may destroy an object a submission used without
+    // retiring it first. Returns `ErrorCode::InvalidArgument` for an empty
+    // device.
     [[nodiscard]] Status<Error> WaitIdle() noexcept;
+
+    // Creates a command list recorded for `desc.queue`. The returned list owns
+    // its slot: destroying it releases the slot, so there is no destroy call to
+    // forget and no way to destroy a list twice.
+    //
+    // Returns `ErrorCode::InvalidArgument` for an empty device, for a queue
+    // class this device has no queue for, and for a backend whose command list
+    // table is incomplete; `ErrorCode::Internal` when the backend cannot create
+    // the list.
+    [[nodiscard]] Result<CommandList, Error>
+    CreateCommandList(const CommandListDesc& desc) noexcept;
+
+    // Runs a batch of recorded lists on one queue.
+    //
+    // The lists run in order; the queue first waits for every GPU-side wait to be
+    // satisfied, then reaches every signal when the last list has finished. The
+    // call itself does not wait for the GPU, so a caller records the next frame
+    // while this one runs, bounded by its frame ring.
+    //
+    // Returns `ErrorCode::InvalidArgument` for a malformed batch, a stale list
+    // handle, a list that has not ended, or a list recorded for another queue
+    // class; `ErrorCode::Unsupported` when the backend cannot signal or wait on
+    // fences at all; `ErrorCode::Internal` when the backend cannot submit.
+    [[nodiscard]] Status<Error> Submit(const SubmitDesc& desc) noexcept;
+
+    // What the last submission on `kind` did. A queue the device does not have,
+    // or a device with no submissions yet, reports a value with `valid` false.
+    [[nodiscard]] SubmissionInfo LastSubmission(QueueKind kind) const noexcept;
+
+    // Creates a swapchain over a surface the caller owns.
+    //
+    // The surface must outlive the swapchain, and the swapchain owns its images:
+    // `SwapChain::Resize` replaces them and invalidates every handle a caller
+    // kept. Returns `ErrorCode::InvalidArgument` for a malformed description or
+    // an empty device, `ErrorCode::Unsupported` for a present mode the adapter
+    // cannot serve, and `ErrorCode::OutOfRange` for an extent above the device
+    // limit.
+    [[nodiscard]] Result<SwapChain, Error> CreateSwapChain(const SwapChainDesc& desc) noexcept;
 
 private:
     void Release() noexcept;

@@ -32,8 +32,14 @@ private headers.
 | `binding.h` | `BindGroupSlot`, `BindingType`, group layout and group descriptors, `PipelineLayoutDesc`, `PushConstantRange`. |
 | `pipeline.h` | Vertex layout, topology, rasterizer, blend, multisample, depth-stencil state, `GraphicsPipelineDesc`, `ComputePipelineDesc`, `PipelineCacheDesc`, and the stable description hashes. |
 | `resource_state.h` | `ResourceState` and its set rules, `BufferBarrier`, `TextureBarrier`, `ResolveSubresourceRange`. |
-| `backend.h` | `Backend`, `DeviceInterface` (device, fence, resource, and barrier entries), `DeviceCreation`, `EnumerateAdapters`, `NullBackend`. |
-| `device.h` | `Device`: queues, timeline fences, buffers, textures, views, samplers, host access, state queries, transitions, and `WaitIdle`. |
+| `render_pass.h` | `LoadOp`, `StoreOp`, clear values, color and depth attachments, `RenderPassDesc`, `RenderPassInfo`, and the structural validator. |
+| `command_list.h` | Draw, dispatch, and copy arguments, index formats, viewport and scissor, `CommandListDesc`, the recording state machine, `CommandListStats`, `CommandListInterface`, and `CommandList`. |
+| `submission.h` | `FenceSignal`, `GpuWait`, `SubmitDesc`, `SubmissionInfo`, and the submission validator. |
+| `swapchain.h` | `PresentMode`, `SwapChainDesc`, `SwapChainFrame`, `SwapChainInfo`, `SwapChainInterface`, and `SwapChain`. |
+| `frame_ring.h` | `FrameRingDesc`, `FrameSlot`, and `FrameRing`: frames in flight over one timeline. |
+| `retirement.h` | `RetireKind`, `RetireEntry`, and `RetirementQueue`: destruction keyed by fence value. |
+| `backend.h` | `Backend`, `DeviceInterface` (device, fence, resource, barrier, command list, submission, and swapchain entries), `DeviceCreation`, `EnumerateAdapters`, `NullBackend`. |
+| `device.h` | `Device`: queues, timeline fences, buffers, textures, views, samplers, host access, state queries, transitions, command lists, submission, swapchains, and `WaitIdle`. |
 | `rhi.h` | Umbrella include. |
 
 ## Dependencies
@@ -73,6 +79,12 @@ Phase 12 adds `rhi_shader`, `rhi_binding`, `rhi_pipeline`, and
 `rhi_pipeline_hash`: stage and bytecode validation, layout and group matching,
 push-constant ranges, every graphics and compute state rule, and stable hashes.
 
+Phase 13 adds `rhi_render_pass`, `rhi_command_list`, `rhi_submit`,
+`rhi_missing_barrier`, `rhi_frame_ring`, `rhi_retirement`, and `rhi_swapchain`:
+the recording state machine, every command's rules, batch submission, present and
+resize, retirements that wait for a fence, and the two tests the done-when line
+names.
+
 ## Budgets
 
 CPU submission cost measured. No per-draw heap allocation.
@@ -88,12 +100,22 @@ Phase 12 is complete: shader modules, the four-slot binding model, pipeline
 layouts with push constants, graphics and compute pipelines, and a hash-keyed
 pipeline cache, all validated by the null backend.
 
+Phase 13 is complete: command lists, render passes, submission with timeline
+fences, the frame ring, the retirement queue, and the swapchain. The null backend
+validates every recorded command against a per-list shadow of resource state, so
+a missing barrier is a record-time error naming the resource.
+
 ## Notes
 
 - State is tracked per `(mip, array layer)`, not per aspect: D3D12 cannot express
   a per-aspect barrier, and Vulkan's second layout is derived from one state in
   Phase 34.
-- Destruction is immediate in Phase 11 because nothing is submitted; Phase 13
-  adds retirement queues without changing the public API.
+- Destruction is immediate: `Destroy*` releases storage when it is called. The
+  retirement queue in `retirement.h` is the caller's policy for holding an object
+  until its fence passes, and it lives above the backend on purpose.
+- The null backend commits a list's transitions when the list ends rather than
+  when it is submitted, because it has no execution timeline. A real backend
+  reaches them when the list runs; Phase 14 records the difference in its
+  conformance notes.
 - Error messages are static strings until Phase 15 provides an error sink that
   can format a value without allocating.
