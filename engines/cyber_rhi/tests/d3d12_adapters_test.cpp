@@ -82,12 +82,18 @@ CG_TEST(d3d12_backend_enumerates_a_hardware_adapter)
     // putting it last means "first adapter" is a real GPU on a real machine.
     CG_EXPECT_EQ(adapters[count - 1].vendorId, kMicrosoftVendorId);
 
-    // A hardware adapter before it, when the machine has one, carries a
-    // non-Microsoft vendor id and reports memory.
-    if (count > 1)
+    // A CI runner with no GPU still enumerates Microsoft's Basic Render Driver
+    // ahead of WARP, so "index 0 is hardware" is not an invariant. What is one:
+    // an adapter from a real vendor reports device-local memory, and a Microsoft
+    // one does not claim to.
+    for (u32 index = 0; index < count; ++index)
     {
-        CG_EXPECT_NE(adapters[0].vendorId, kMicrosoftVendorId);
-        CG_EXPECT_TRUE(adapters[0].dedicatedVideoMemoryBytes > 0);
+        const bool fromMicrosoft = adapters[index].vendorId == kMicrosoftVendorId;
+        if (!fromMicrosoft)
+        {
+            CG_EXPECT_TRUE(adapters[index].vendorId != 0);
+            CG_EXPECT_TRUE(adapters[index].dedicatedVideoMemoryBytes > 0);
+        }
     }
 }
 
