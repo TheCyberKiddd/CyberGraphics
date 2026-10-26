@@ -49,6 +49,12 @@ struct BindGroupLayoutTag
 struct BindGroupTag
 {
 };
+struct PipelineLayoutTag
+{
+};
+struct PipelineCacheTag
+{
+};
 struct FenceTag
 {
 };
@@ -78,6 +84,12 @@ using BindGroupLayoutHandle = memory::Handle<BindGroupLayoutTag>;
 // A group of resources bound together at one slot, matching a layout
 // (Phase 12).
 using BindGroupHandle = memory::Handle<BindGroupTag>;
+// The binding layout of a pipeline: a group per slot and push-constant ranges
+// (Phase 12).
+using PipelineLayoutHandle = memory::Handle<PipelineLayoutTag>;
+// Compiled pipeline state saved between runs, keyed by a description hash
+// (Phase 12).
+using PipelineCacheHandle = memory::Handle<PipelineCacheTag>;
 // A monotonic 64-bit timeline the CPU and GPU can wait on.
 using FenceHandle = memory::Handle<FenceTag>;
 // A ring of presentable images owned by the device and backed by a surface the

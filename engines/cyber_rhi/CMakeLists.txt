@@ -1,10 +1,12 @@
 set(CYBER_RHI_SOURCES
     src/device.cpp
     src/null_backend.cpp
+    src/pipeline.cpp
 )
 
 set(CYBER_RHI_HEADERS
     include/cyber/rhi/backend.h
+    include/cyber/rhi/binding.h
     include/cyber/rhi/buffer.h
     include/cyber/rhi/capabilities.h
     include/cyber/rhi/conventions.h
@@ -12,9 +14,11 @@ set(CYBER_RHI_HEADERS
     include/cyber/rhi/device.h
     include/cyber/rhi/format.h
     include/cyber/rhi/handle.h
+    include/cyber/rhi/pipeline.h
     include/cyber/rhi/resource_state.h
     include/cyber/rhi/rhi.h
     include/cyber/rhi/sampler.h
+    include/cyber/rhi/shader.h
     include/cyber/rhi/texture.h
 )
 
@@ -96,4 +100,28 @@ cyber_add_test(
     NAME rhi_resource_state
     SOURCES tests/resource_state_test.cpp
     DEPENDS rhi memory
+)
+
+cyber_add_test(
+    NAME rhi_shader
+    SOURCES tests/shader_test.cpp
+    DEPENDS rhi memory
+)
+
+cyber_add_test(
+    NAME rhi_binding
+    SOURCES tests/binding_test.cpp
+    DEPENDS rhi memory
+)
+
+cyber_add_test(
+    NAME rhi_pipeline
+    SOURCES tests/pipeline_test.cpp
+    DEPENDS rhi memory
+)
+
+cyber_add_test(
+    NAME rhi_pipeline_hash
+    SOURCES tests/pipeline_hash_test.cpp
+    DEPENDS rhi
 )

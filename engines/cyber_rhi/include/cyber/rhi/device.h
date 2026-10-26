@@ -6,12 +6,15 @@
 #include <cyber/memory/allocator.h>
 #include <cyber/memory/span.h>
 #include <cyber/rhi/backend.h>
+#include <cyber/rhi/binding.h>
 #include <cyber/rhi/buffer.h>
 #include <cyber/rhi/capabilities.h>
 #include <cyber/rhi/descriptors.h>
 #include <cyber/rhi/handle.h>
+#include <cyber/rhi/pipeline.h>
 #include <cyber/rhi/resource_state.h>
 #include <cyber/rhi/sampler.h>
+#include <cyber/rhi/shader.h>
 #include <cyber/rhi/texture.h>
 
 namespace cyber::rhi
@@ -193,6 +196,90 @@ public:
 
     // Destroys a sampler and invalidates its handle.
     [[nodiscard]] Status<Error> DestroySampler(SamplerHandle sampler) noexcept;
+
+    // Creates a shader module. Returns `ErrorCode::InvalidArgument` for an
+    // unknown stage or bytecode format, an empty code blob, or a source format
+    // with no entry point.
+    [[nodiscard]] Result<ShaderHandle, Error> CreateShader(const ShaderDesc& desc) noexcept;
+
+    // Destroys a shader module. Pipelines already created from it stay valid.
+    [[nodiscard]] Status<Error> DestroyShader(ShaderHandle shader) noexcept;
+
+    // Stage, format, and code size of a live shader module. A stale handle
+    // returns a value with `valid` false.
+    [[nodiscard]] ShaderInfo ShaderInfoOf(ShaderHandle shader) const noexcept;
+
+    // Creates a bind group layout. Returns `ErrorCode::InvalidArgument` for an
+    // empty layout, a duplicate or out-of-range binding, an unknown type, an
+    // empty visibility mask, or a zero array count.
+    [[nodiscard]] Result<BindGroupLayoutHandle, Error>
+    CreateBindGroupLayout(const BindGroupLayoutDesc& desc) noexcept;
+
+    // Destroys a bind group layout. Groups created from it copy what they need
+    // and stay valid.
+    [[nodiscard]] Status<Error> DestroyBindGroupLayout(BindGroupLayoutHandle layout) noexcept;
+
+    // Creates a bind group from a live layout and resources that match it
+    // position for position. Returns `ErrorCode::InvalidArgument` for a stale
+    // layout, a resource count mismatch, a type mismatch, a range outside its
+    // buffer, a misaligned range, a resource whose usage does not fit the
+    // binding, or a stale resource handle.
+    [[nodiscard]] Result<BindGroupHandle, Error>
+    CreateBindGroup(const BindGroupDesc& desc) noexcept;
+
+    // Destroys a bind group.
+    [[nodiscard]] Status<Error> DestroyBindGroup(BindGroupHandle group) noexcept;
+
+    // Layout and resource count of a live bind group. A stale handle returns a
+    // value with `valid` false.
+    [[nodiscard]] BindGroupInfo BindGroupInfoOf(BindGroupHandle group) const noexcept;
+
+    // Creates a pipeline layout. Returns `ErrorCode::InvalidArgument` for no
+    // used slot, a stale group layout, a duplicate group layout, a push-constant
+    // range that overflows or overlaps another for a shared stage, or more than
+    // `kMaxPushConstantRanges` ranges.
+    [[nodiscard]] Result<PipelineLayoutHandle, Error>
+    CreatePipelineLayout(const PipelineLayoutDesc& desc) noexcept;
+
+    // Destroys a pipeline layout. Pipelines created from it stay valid.
+    [[nodiscard]] Status<Error> DestroyPipelineLayout(PipelineLayoutHandle layout) noexcept;
+
+    // Creates a graphics pipeline. Every state rule is validated and reported
+    // with `ErrorCode::InvalidArgument`; a description the adapter cannot serve
+    // reports `ErrorCode::Unsupported`. The optional cache is consulted but does
+    // not change the identity of the returned handle.
+    [[nodiscard]] Result<PipelineHandle, Error>
+    CreateGraphicsPipeline(const GraphicsPipelineDesc& desc) noexcept;
+
+    // Destroys a graphics pipeline.
+    [[nodiscard]] Status<Error> DestroyGraphicsPipeline(PipelineHandle pipeline) noexcept;
+
+    // Creates a compute pipeline. `ErrorCode::Unsupported` when
+    // `Feature::Compute` is absent.
+    [[nodiscard]] Result<PipelineHandle, Error>
+    CreateComputePipeline(const ComputePipelineDesc& desc) noexcept;
+
+    // Destroys a compute pipeline.
+    [[nodiscard]] Status<Error> DestroyComputePipeline(PipelineHandle pipeline) noexcept;
+
+    // Creates a pipeline cache, optionally seeded with bytes a previous run
+    // saved through `PipelineCacheBytes`.
+    [[nodiscard]] Result<PipelineCacheHandle, Error>
+    CreatePipelineCache(const PipelineCacheDesc& desc) noexcept;
+
+    // Destroys a pipeline cache. Pipelines created with it stay valid.
+    [[nodiscard]] Status<Error> DestroyPipelineCache(PipelineCacheHandle cache) noexcept;
+
+    // Returns the cache's saved bytes, allocated from `allocator`. A backend
+    // with nothing to save returns an empty array, which is a valid result, not
+    // an error. This is a diagnostic and persistence path: it may stall a GPU
+    // backend and must not be called per frame.
+    [[nodiscard]] Result<memory::DynamicArray<memory::Byte>, Error>
+    PipelineCacheBytes(PipelineCacheHandle cache, memory::Allocator& allocator) const noexcept;
+
+    // Kind and description hash of a live pipeline. A stale handle returns a
+    // value with `valid` false.
+    [[nodiscard]] PipelineInfo PipelineInfoOf(PipelineHandle pipeline) const noexcept;
 
     // Transitions every barrier in both spans and records the new state. Every
     // barrier is validated before any is applied: a batch with one bad barrier

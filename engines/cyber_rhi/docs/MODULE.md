@@ -28,6 +28,9 @@ private headers.
 | `buffer.h` | `BufferUsage`, `BufferDesc`, `BufferInfo`, and usage set helpers. |
 | `texture.h` | `TextureDimension`, `TextureUsage`, `TextureAspect`, `SubresourceRange`, `TextureDesc`, `TextureViewDesc`, `TextureInfo`, `TextureViewInfo`, `MaxMipLevels`, `TextureByteSize`. |
 | `sampler.h` | `FilterMode`, `AddressMode`, `BorderColor`, `CompareFunction`, `SamplerDesc`. |
+| `shader.h` | `ShaderStage`, `ShaderStageMask`, `ShaderBytecodeFormat`, `ShaderDesc`, `ShaderInfo`. |
+| `binding.h` | `BindGroupSlot`, `BindingType`, group layout and group descriptors, `PipelineLayoutDesc`, `PushConstantRange`. |
+| `pipeline.h` | Vertex layout, topology, rasterizer, blend, multisample, depth-stencil state, `GraphicsPipelineDesc`, `ComputePipelineDesc`, `PipelineCacheDesc`, and the stable description hashes. |
 | `resource_state.h` | `ResourceState` and its set rules, `BufferBarrier`, `TextureBarrier`, `ResolveSubresourceRange`. |
 | `backend.h` | `Backend`, `DeviceInterface` (device, fence, resource, and barrier entries), `DeviceCreation`, `EnumerateAdapters`, `NullBackend`. |
 | `device.h` | `Device`: queues, timeline fences, buffers, textures, views, samplers, host access, state queries, transitions, and `WaitIdle`. |
@@ -66,6 +69,10 @@ and `rhi_resource_state`. Every rule a real backend must enforce — descriptor
 shape, limits, capability, format compatibility, host visibility, state
 matching, and stale handles — has a case that fails if the rule is removed.
 
+Phase 12 adds `rhi_shader`, `rhi_binding`, `rhi_pipeline`, and
+`rhi_pipeline_hash`: stage and bytecode validation, layout and group matching,
+push-constant ranges, every graphics and compute state rule, and stable hashes.
+
 ## Budgets
 
 CPU submission cost measured. No per-draw heap allocation.
@@ -76,6 +83,10 @@ Phases 10, 11, 12, 13, 14, 15, 34, 35.
 
 Phase 11 is complete: resources, views, samplers, the format table, and the
 resource state model, validated by the null backend.
+
+Phase 12 is complete: shader modules, the four-slot binding model, pipeline
+layouts with push constants, graphics and compute pipelines, and a hash-keyed
+pipeline cache, all validated by the null backend.
 
 ## Notes
 

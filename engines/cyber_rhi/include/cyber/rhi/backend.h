@@ -4,13 +4,17 @@
 #include <cyber/core/result.h>
 #include <cyber/core/types.h>
 #include <cyber/memory/allocator.h>
+#include <cyber/memory/dynamic_array.h>
 #include <cyber/memory/span.h>
+#include <cyber/rhi/binding.h>
 #include <cyber/rhi/buffer.h>
 #include <cyber/rhi/capabilities.h>
 #include <cyber/rhi/descriptors.h>
 #include <cyber/rhi/handle.h>
+#include <cyber/rhi/pipeline.h>
 #include <cyber/rhi/resource_state.h>
 #include <cyber/rhi/sampler.h>
+#include <cyber/rhi/shader.h>
 #include <cyber/rhi/texture.h>
 
 namespace cyber::rhi
@@ -123,6 +127,60 @@ struct DeviceInterface
     // barrier changes nothing and reports `ErrorCode::InvalidArgument`.
     Status<Error> (*transition)(void* internal, memory::Span<const BufferBarrier> buffers,
                                 memory::Span<const TextureBarrier> textures) noexcept;
+
+    // Creates a shader module and writes its handle to `out`, which must be
+    // non-null.
+    Status<Error> (*createShader)(void* internal, const ShaderDesc& desc,
+                                  ShaderHandle* out) noexcept;
+    // Releases a shader module. A stale handle is `ErrorCode::InvalidArgument`.
+    Status<Error> (*destroyShader)(void* internal, ShaderHandle shader) noexcept;
+    // Reports a module's stage, format, and code size, or a zeroed value for a
+    // stale handle.
+    ShaderInfo (*shaderInfo)(const void* internal, ShaderHandle shader) noexcept;
+    // Creates a bind group layout.
+    Status<Error> (*createBindGroupLayout)(void* internal, const BindGroupLayoutDesc& desc,
+                                           BindGroupLayoutHandle* out) noexcept;
+    // Releases a bind group layout. Groups created from it stay valid: a group
+    // copies what it needs when it is created.
+    Status<Error> (*destroyBindGroupLayout)(void* internal, BindGroupLayoutHandle layout) noexcept;
+    // Creates a bind group from a live layout and matching resources.
+    Status<Error> (*createBindGroup)(void* internal, const BindGroupDesc& desc,
+                                     BindGroupHandle* out) noexcept;
+    // Releases a bind group.
+    Status<Error> (*destroyBindGroup)(void* internal, BindGroupHandle group) noexcept;
+    // Reports a group's layout and resource count, or a zeroed value for a stale
+    // handle.
+    BindGroupInfo (*bindGroupInfo)(const void* internal, BindGroupHandle group) noexcept;
+    // Creates a pipeline layout from live group layouts.
+    Status<Error> (*createPipelineLayout)(void* internal, const PipelineLayoutDesc& desc,
+                                          PipelineLayoutHandle* out) noexcept;
+    // Releases a pipeline layout. Pipelines created from it stay valid.
+    Status<Error> (*destroyPipelineLayout)(void* internal, PipelineLayoutHandle layout) noexcept;
+    // Creates a graphics pipeline from a complete description.
+    Status<Error> (*createGraphicsPipeline)(void* internal, const GraphicsPipelineDesc& desc,
+                                            PipelineHandle* out) noexcept;
+    // Releases a graphics pipeline.
+    Status<Error> (*destroyGraphicsPipeline)(void* internal, PipelineHandle pipeline) noexcept;
+    // Creates a compute pipeline.
+    Status<Error> (*createComputePipeline)(void* internal, const ComputePipelineDesc& desc,
+                                           PipelineHandle* out) noexcept;
+    // Releases a compute pipeline.
+    Status<Error> (*destroyComputePipeline)(void* internal, PipelineHandle pipeline) noexcept;
+    // Creates an empty pipeline cache, optionally seeded with data a previous
+    // run saved. Bytes that are not understood are ignored, as D3D12 and Vulkan
+    // both require.
+    Status<Error> (*createPipelineCache)(void* internal, const PipelineCacheDesc& desc,
+                                         PipelineCacheHandle* out) noexcept;
+    // Releases a pipeline cache.
+    Status<Error> (*destroyPipelineCache)(void* internal, PipelineCacheHandle cache) noexcept;
+    // Appends the cache's saved bytes to `out`, which must be non-null and is
+    // used for the allocation. A backend with nothing to save appends nothing.
+    Status<Error> (*pipelineCacheBytes)(const void* internal, PipelineCacheHandle cache,
+                                        memory::Allocator& allocator,
+                                        memory::DynamicArray<memory::Byte>* out) noexcept;
+    // Reports a pipeline's kind and description hash, or a zeroed value for a
+    // stale handle.
+    PipelineInfo (*pipelineInfo)(const void* internal, PipelineHandle pipeline) noexcept;
 };
 
 // A graphics backend. Obtained from the backend's own entry point (for example

@@ -442,5 +442,120 @@ int main()
         }
     }
 
+    // Phase 12: shader modules, the binding model, and a graphics pipeline,
+    // including the description hash a pipeline cache is keyed by.
+    {
+        using namespace cyber::rhi;
+        using cyber::memory::Byte;
+
+        DeviceDesc deviceDesc{};
+        deviceDesc.backend = NullBackend();
+        auto createdDevice = Device::Create(deviceDesc, heap);
+        if (!createdDevice)
+        {
+            return 54;
+        }
+        Device device = std::move(createdDevice.Value());
+
+        const char source[] =
+            "float4 main(float3 p : TEXCOORD0) : SV_Position { return float4(p, 1); }";
+        ShaderDesc shaderDesc{};
+        shaderDesc.stage = ShaderStage::Vertex;
+        shaderDesc.format = ShaderBytecodeFormat::HlslSource;
+        shaderDesc.code =
+            Span<const Byte>(reinterpret_cast<const Byte*>(source), sizeof(source) - 1);
+        shaderDesc.entryPoint = "main";
+        auto vertexShader = device.CreateShader(shaderDesc);
+        if (!vertexShader)
+        {
+            return 55;
+        }
+        shaderDesc.stage = ShaderStage::Pixel;
+        auto pixelShader = device.CreateShader(shaderDesc);
+        if (!pixelShader)
+        {
+            return 56;
+        }
+
+        BindGroupLayoutEntry entry{};
+        entry.binding = 0;
+        entry.type = BindingType::UniformBuffer;
+        entry.visibility = ShaderStageBit(ShaderStage::Vertex);
+        BindGroupLayoutDesc groupLayoutDesc{};
+        groupLayoutDesc.entries = Span<const BindGroupLayoutEntry>(&entry, 1);
+        auto groupLayout = device.CreateBindGroupLayout(groupLayoutDesc);
+        if (!groupLayout)
+        {
+            return 57;
+        }
+
+        PipelineLayoutDesc pipelineLayoutDesc{};
+        pipelineLayoutDesc.groups[static_cast<cyber::core::u32>(BindGroupSlot::PerMaterial)] =
+            groupLayout.Value();
+        auto pipelineLayout = device.CreatePipelineLayout(pipelineLayoutDesc);
+        if (!pipelineLayout)
+        {
+            return 58;
+        }
+
+        BufferDesc uniformDesc{};
+        uniformDesc.usage = BufferUsage::Uniform;
+        uniformDesc.sizeBytes = 256;
+        auto uniforms = device.CreateBuffer(uniformDesc);
+        if (!uniforms)
+        {
+            return 59;
+        }
+
+        BindingResource binding{};
+        binding.type = BindingType::UniformBuffer;
+        binding.buffer = uniforms.Value();
+        BindGroupDesc bindGroupDesc{};
+        bindGroupDesc.layout = groupLayout.Value();
+        bindGroupDesc.resources = Span<const BindingResource>(&binding, 1);
+        auto bindGroup = device.CreateBindGroup(bindGroupDesc);
+        if (!bindGroup || device.BindGroupInfoOf(bindGroup.Value()).resourceCount != 1)
+        {
+            return 60;
+        }
+
+        VertexBinding vertexBinding{};
+        vertexBinding.strideBytes = 12;
+        VertexAttribute attribute{};
+        attribute.location = 0;
+        attribute.binding = 0;
+        attribute.format = Format::R32G32B32Float;
+        ColorAttachmentState attachment{};
+        attachment.format = Format::RGBA8Unorm;
+
+        GraphicsPipelineDesc pipelineDesc{};
+        pipelineDesc.layout = pipelineLayout.Value();
+        pipelineDesc.vertexShader = vertexShader.Value();
+        pipelineDesc.pixelShader = pixelShader.Value();
+        pipelineDesc.vertexLayout.bindings = Span<const VertexBinding>(&vertexBinding, 1);
+        pipelineDesc.vertexLayout.attributes = Span<const VertexAttribute>(&attribute, 1);
+        pipelineDesc.depthStencilFormat = Format::D32Float;
+        pipelineDesc.colorAttachments = Span<const ColorAttachmentState>(&attachment, 1);
+
+        auto pipeline = device.CreateGraphicsPipeline(pipelineDesc);
+        if (!pipeline || !device.PipelineInfoOf(pipeline.Value()).valid ||
+            device.PipelineInfoOf(pipeline.Value()).hash == 0 ||
+            device.PipelineInfoOf(pipeline.Value()).hash != HashGraphicsPipelineDesc(pipelineDesc))
+        {
+            return 61;
+        }
+
+        if (!device.DestroyGraphicsPipeline(pipeline.Value()).IsOk() ||
+            !device.DestroyBindGroup(bindGroup.Value()).IsOk() ||
+            !device.DestroyBuffer(uniforms.Value()).IsOk() ||
+            !device.DestroyPipelineLayout(pipelineLayout.Value()).IsOk() ||
+            !device.DestroyBindGroupLayout(groupLayout.Value()).IsOk() ||
+            !device.DestroyShader(vertexShader.Value()).IsOk() ||
+            !device.DestroyShader(pixelShader.Value()).IsOk())
+        {
+            return 62;
+        }
+    }
+
     return 0;
 }
