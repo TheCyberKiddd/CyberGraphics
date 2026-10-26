@@ -341,5 +341,106 @@ int main()
         }
     }
 
+    // Phase 11: resources through the installed package: a buffer with host
+    // access, a texture and a view, a sampler, and a barrier checked against
+    // tracked state.
+    {
+        using namespace cyber::rhi;
+        using cyber::memory::Byte;
+
+        DeviceDesc deviceDesc{};
+        deviceDesc.backend = NullBackend();
+        auto createdDevice = Device::Create(deviceDesc, heap);
+        if (!createdDevice)
+        {
+            return 43;
+        }
+        Device device = std::move(createdDevice.Value());
+
+        BufferDesc bufferDesc{};
+        bufferDesc.usage = BufferUsage::HostVisible | BufferUsage::CopySource;
+        bufferDesc.sizeBytes = 32;
+        auto createdBuffer = device.CreateBuffer(bufferDesc);
+        if (!createdBuffer)
+        {
+            return 44;
+        }
+        const BufferHandle buffer = createdBuffer.Value();
+
+        const Byte pattern[4] = {static_cast<Byte>(1), static_cast<Byte>(2), static_cast<Byte>(3),
+                                 static_cast<Byte>(4)};
+        Byte read[4] = {};
+        if (!device.WriteBuffer(buffer, 8, Span<const Byte>(pattern, 4)).IsOk() ||
+            !device.ReadBuffer(buffer, 8, Span<Byte>(read, 4)).IsOk() || read[0] != pattern[0] ||
+            read[3] != pattern[3])
+        {
+            return 45;
+        }
+
+        TextureDesc textureDesc{};
+        textureDesc.format = Format::RGBA8Unorm;
+        textureDesc.usage = TextureUsage::Sampled | TextureUsage::RenderTarget;
+        textureDesc.width = 64;
+        textureDesc.height = 64;
+        textureDesc.mipLevels = 7;
+        auto createdTexture = device.CreateTexture(textureDesc);
+        if (!createdTexture)
+        {
+            return 46;
+        }
+        const TextureHandle texture = createdTexture.Value();
+        if (device.TextureInfoOf(texture).sizeBytes == 0 ||
+            device.TextureInfoOf(texture).mipLevels != 7)
+        {
+            return 47;
+        }
+
+        TextureViewDesc viewDesc{};
+        viewDesc.texture = texture;
+        viewDesc.format = Format::RGBA8UnormSrgb;
+        auto createdView = device.CreateTextureView(viewDesc);
+        if (!createdView || device.TextureViewInfoOf(createdView.Value()).range.mipLevelCount != 7)
+        {
+            return 48;
+        }
+
+        SamplerDesc samplerDesc{};
+        samplerDesc.maxAnisotropy = 4;
+        auto createdSampler = device.CreateSampler(samplerDesc);
+        if (!createdSampler)
+        {
+            return 49;
+        }
+
+        TextureBarrier barrier{};
+        barrier.texture = texture;
+        barrier.from = ResourceState::Undefined;
+        barrier.to = ResourceState::ShaderRead;
+        if (!device.Transition({}, Span<const TextureBarrier>(&barrier, 1)).IsOk() ||
+            device.TextureStateOf(texture, 0, 0) != ResourceState::ShaderRead)
+        {
+            return 50;
+        }
+        // The tracked state is ShaderRead. A barrier that claims another source
+        // is the missing-barrier bug and must be rejected.
+        barrier.from = ResourceState::CopySource;
+        barrier.to = ResourceState::ShaderRead;
+        if (device.Transition({}, Span<const TextureBarrier>(&barrier, 1)).IsOk())
+        {
+            return 51;
+        }
+
+        if (!device.DestroySampler(createdSampler.Value()).IsOk() ||
+            !device.DestroyTextureView(createdView.Value()).IsOk() ||
+            !device.DestroyTexture(texture).IsOk() || !device.DestroyBuffer(buffer).IsOk())
+        {
+            return 52;
+        }
+        if (device.TextureInfoOf(texture).valid || device.BufferInfoOf(buffer).valid)
+        {
+            return 53;
+        }
+    }
+
     return 0;
 }

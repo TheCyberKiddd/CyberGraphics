@@ -5,9 +5,13 @@
 #include <cyber/core/types.h>
 #include <cyber/memory/allocator.h>
 #include <cyber/memory/span.h>
+#include <cyber/rhi/buffer.h>
 #include <cyber/rhi/capabilities.h>
 #include <cyber/rhi/descriptors.h>
 #include <cyber/rhi/handle.h>
+#include <cyber/rhi/resource_state.h>
+#include <cyber/rhi/sampler.h>
+#include <cyber/rhi/texture.h>
 
 namespace cyber::rhi
 {
@@ -39,7 +43,8 @@ struct DeviceCreation
 };
 
 // Per-device function table. Every method is required: a null entry is a
-// backend bug that the device creation path rejects.
+// backend bug that device creation rejects with `ErrorCode::Internal` before a
+// caller can reach a half-implemented backend.
 struct DeviceInterface
 {
     // Capabilities of this device. Must be safe to call from any thread and must
@@ -64,6 +69,60 @@ struct DeviceInterface
     // Blocks until the device has finished all submitted work. Phase 10 has no
     // submission, so every backend completes immediately.
     Status<Error> (*waitIdle)(void* internal) noexcept;
+
+    // Creates a buffer and writes its handle to `out`, which must be non-null.
+    // A descriptor no backend can create is `ErrorCode::InvalidArgument`; a
+    // value above `Limits` is `ErrorCode::OutOfRange`.
+    Status<Error> (*createBuffer)(void* internal, const BufferDesc& desc,
+                                  BufferHandle* out) noexcept;
+    // Releases a buffer and invalidates its handle. A stale handle is
+    // `ErrorCode::InvalidArgument`.
+    Status<Error> (*destroyBuffer)(void* internal, BufferHandle buffer) noexcept;
+    // Reports a buffer's size, stride, and usage, or a zeroed value with
+    // `valid` false for a stale handle.
+    BufferInfo (*bufferInfo)(const void* internal, BufferHandle buffer) noexcept;
+    // Copies `bytes` into a `HostVisible` buffer at `offset`. A buffer without
+    // that usage, a null span with a non-zero size, or an offset past the end is
+    // `ErrorCode::InvalidArgument`; a range that overflows is
+    // `ErrorCode::OutOfRange`.
+    Status<Error> (*writeBuffer)(void* internal, BufferHandle buffer, u64 offset,
+                                 memory::Span<const memory::Byte> bytes) noexcept;
+    // Copies bytes out of a `Readback` buffer at `offset`.
+    Status<Error> (*readBuffer)(void* internal, BufferHandle buffer, u64 offset,
+                                memory::Span<memory::Byte> bytes) noexcept;
+    // State of a whole buffer, or `ResourceState::Undefined` for a stale handle.
+    ResourceState (*bufferState)(const void* internal, BufferHandle buffer) noexcept;
+    // Creates a texture and writes its handle to `out`, which must be non-null.
+    Status<Error> (*createTexture)(void* internal, const TextureDesc& desc,
+                                   TextureHandle* out) noexcept;
+    // Releases a texture, invalidates its handle, and retires every view of it.
+    Status<Error> (*destroyTexture)(void* internal, TextureHandle texture) noexcept;
+    // Reports a texture's shape and size, or a zeroed value for a stale handle.
+    TextureInfo (*textureInfo)(const void* internal, TextureHandle texture) noexcept;
+    // Creates a view over a live texture. A stale texture, a format that is not
+    // view-compatible, or a range outside the texture is
+    // `ErrorCode::InvalidArgument`.
+    Status<Error> (*createTextureView)(void* internal, const TextureViewDesc& desc,
+                                       TextureViewHandle* out) noexcept;
+    // Releases a view and invalidates its handle. The texture stays alive.
+    Status<Error> (*destroyTextureView)(void* internal, TextureViewHandle view) noexcept;
+    // Reports a view's format, shape, and range, or a zeroed value for a stale
+    // handle.
+    TextureViewInfo (*textureViewInfo)(const void* internal, TextureViewHandle view) noexcept;
+    // State of one subresource, or `ResourceState::Undefined` when the handle or
+    // the subresource is invalid.
+    ResourceState (*textureState)(const void* internal, TextureHandle texture, u32 mipLevel,
+                                  u32 arrayLayer) noexcept;
+    // Creates a sampler and writes its handle to `out`, which must be non-null.
+    Status<Error> (*createSampler)(void* internal, const SamplerDesc& desc,
+                                   SamplerHandle* out) noexcept;
+    // Releases a sampler and invalidates its handle.
+    Status<Error> (*destroySampler)(void* internal, SamplerHandle sampler) noexcept;
+    // Transitions every barrier in both spans. Each barrier is checked against
+    // tracked state before any of them is applied, so a batch with one bad
+    // barrier changes nothing and reports `ErrorCode::InvalidArgument`.
+    Status<Error> (*transition)(void* internal, memory::Span<const BufferBarrier> buffers,
+                                memory::Span<const TextureBarrier> textures) noexcept;
 };
 
 // A graphics backend. Obtained from the backend's own entry point (for example
