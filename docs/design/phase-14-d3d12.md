@@ -49,18 +49,40 @@ in the renderer that includes `d3d12.h` or `dxgi*.h`.
 
 ### Increments
 
-The phase lands in six increments, each one committed with its own tests:
+The phase lands in increments, each one committed with its own tests. The table
+records what has actually landed, which is the only thing a reader should trust:
+the plan and the delivery drifted by one increment when resources and shaders
+grew larger than the note first estimated.
 
-| Increment | Contents | Evidence |
-|---|---|---|
-| 1. Adapters | DXGI factory, hardware adapters, WARP last, `Backend` entry point | `rhi_d3d12_adapters`, 6 cases |
-| 2. Device | `D3D12CreateDevice`, three queues, timeline fences, `Capabilities` | device conformance against the null backend's suite |
-| 3. Descriptors | CPU staging heaps, a shader-visible ring per frame in flight | descriptor allocation tests |
-| 4. Upload | Upload ring for dynamic data, staging for textures | a buffer written and read back on the GPU |
-| 5. Shaders | `D3DCompile` from the Windows SDK, bytecode cached by description hash | compile-failure and reflection-free layout tests |
-| 6. Pipelines and images | Root signatures from the bind-group layouts, PSOs, the triangle and the cube | the two reference images |
+| Increment | Contents | Evidence | Status |
+|---|---|---|---|
+| 1. Adapters | DXGI factory, hardware adapters, WARP last, `Backend` entry point | `rhi_d3d12_adapters` | landed |
+| 2. Device | `D3D12CreateDevice`, three queues, timeline fences, `Capabilities` | `rhi_d3d12_device` | landed |
+| 3. Resources | Buffers, textures, views, samplers, barriers, staging | `rhi_d3d12_resources` | landed |
+| 4. Shaders and binding | `D3DCompile`, descriptor tables, root signatures, pipeline layouts | `rhi_d3d12_binding`, 7 cases | landed |
+| 5. Pipelines | Graphics and compute PSOs, full state translation, `ID3D12PipelineLibrary` caches | `rhi_d3d12_pipelines`, 6 cases | landed |
+| 6. Recording, submission, presentation | `CommandListInterface` over a real list, `submit` with waits and signals, a `DXGI` flip-model swapchain | `rhi_d3d12_commands`, `rhi_d3d12_swapchain` | not started |
+| 7. Reference images | A triangle and a textured cube on the GPU, compared against `cyber_software_renderer` | the two images and a recorded tolerance | not started |
 
-The roadmap checkbox stays unticked until increment 6 produces both images.
+The roadmap checkbox stays unticked until increment 7 produces both images.
+
+### Decisions this phase made that the rest of the renderer depends on
+
+- **A shader input is its location.** Direct3D 12 matches a vertex input by
+  semantic name and index, so location `N` maps to `TEXCOORD` with index `N`.
+  The Phase 16 HLSL generator emits the same names, which keeps a vertex layout
+  independent of the shader language.
+- **A vertex attribute is not a texel.** `R32G32B32Float` has a real
+  `DXGI_FORMAT_R32G32B32_FLOAT` and the input assembler accepts it, while every
+  texel path refuses it. The backend therefore has two conversions,
+  `ToVertexFormat` and `ToDxgiFormat`, instead of one that lies in one direction.
+- **One descriptor table per bind-group slot.** Slot `S` becomes register space
+  `S`, so a shader written against any layout still works. Push constants follow
+  the tables as one 32-bit-constant range.
+- **Persistence is the API's own.** A pipeline cache is an
+  `ID3D12PipelineLibrary`; a description that is already stored is loaded instead
+  of compiled again, and seed bytes the device cannot use are ignored rather than
+  rejected, which is what the contract requires.
 
 ### Adapter discovery
 

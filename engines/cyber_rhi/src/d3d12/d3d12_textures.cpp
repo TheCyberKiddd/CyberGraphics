@@ -709,6 +709,27 @@ Status<Error> D3D12Transition(void* internal, cyber::memory::Span<const BufferBa
 
 void ReleaseResources(D3D12Device& device) noexcept
 {
+    for (u32 index = 0; index < device.pipelines.Size(); ++index)
+    {
+        D3D12PipelineSlot& slot = device.pipelines[index];
+        if (slot.state != nullptr)
+        {
+            slot.state->Release();
+            slot.state = nullptr;
+        }
+        slot.alive = false;
+        slot.hash = 0;
+    }
+    for (u32 index = 0; index < device.pipelineCaches.Size(); ++index)
+    {
+        D3D12PipelineCacheSlot& slot = device.pipelineCaches[index];
+        if (slot.library != nullptr)
+        {
+            slot.library->Release();
+            slot.library = nullptr;
+        }
+        slot.alive = false;
+    }
     for (u32 index = 0; index < device.pipelineLayouts.Size(); ++index)
     {
         D3D12PipelineLayoutSlot& slot = device.pipelineLayouts[index];

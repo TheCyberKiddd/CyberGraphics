@@ -131,6 +131,28 @@ struct D3D12GroupSlot
     u32 generation = 0;
 };
 
+// Pipeline state, fixed at creation. `hash` is the stable hash of the
+// description the state was built from, which is also the key the pipeline cache
+// stores it under.
+struct D3D12PipelineSlot
+{
+    ID3D12PipelineState* state = nullptr;
+    PipelineKind kind = PipelineKind::Graphics;
+    u64 hash = 0;
+    bool alive = false;
+    u32 generation = 0;
+};
+
+// A pipeline library, which is how D3D12 persists compiled pipelines across
+// runs. Null when the adapter or the SDK version cannot provide one; the cache
+// still exists and simply remembers nothing, which the contract allows.
+struct D3D12PipelineCacheSlot
+{
+    ID3D12PipelineLibrary* library = nullptr;
+    bool alive = false;
+    u32 generation = 0;
+};
+
 struct D3D12PipelineLayoutSlot
 {
     ID3D12RootSignature* rootSignature = nullptr;
@@ -152,7 +174,9 @@ struct D3D12Device
           views(allocator), freeViewSlots(allocator), samplers(allocator),
           freeSamplerSlots(allocator), shaders(allocator), freeShaderSlots(allocator),
           layouts(allocator), freeLayoutSlots(allocator), groups(allocator),
-          freeGroupSlots(allocator), pipelineLayouts(allocator), freePipelineLayoutSlots(allocator)
+          freeGroupSlots(allocator), pipelineLayouts(allocator), freePipelineLayoutSlots(allocator),
+          pipelines(allocator), freePipelineSlots(allocator), pipelineCaches(allocator),
+          freePipelineCacheSlots(allocator)
     {
     }
 
@@ -186,6 +210,10 @@ struct D3D12Device
     DynamicArray<u32> freeGroupSlots;
     DynamicArray<D3D12PipelineLayoutSlot> pipelineLayouts;
     DynamicArray<u32> freePipelineLayoutSlots;
+    DynamicArray<D3D12PipelineSlot> pipelines;
+    DynamicArray<u32> freePipelineSlots;
+    DynamicArray<D3D12PipelineCacheSlot> pipelineCaches;
+    DynamicArray<u32> freePipelineCacheSlots;
 
     // Shader-visible descriptors for views and samplers. One heap each because
     // D3D12 refuses to mix sampler and resource descriptors in one heap.
@@ -213,6 +241,9 @@ struct D3D12Device
 [[nodiscard]] D3D12GroupSlot* Resolve(D3D12Device& device, BindGroupHandle handle) noexcept;
 [[nodiscard]] D3D12PipelineLayoutSlot* Resolve(D3D12Device& device,
                                                PipelineLayoutHandle handle) noexcept;
+[[nodiscard]] D3D12PipelineSlot* Resolve(D3D12Device& device, PipelineHandle handle) noexcept;
+[[nodiscard]] D3D12PipelineCacheSlot* Resolve(D3D12Device& device,
+                                              PipelineCacheHandle handle) noexcept;
 
 // Conversion between the RHI's vocabulary and D3D12's. Every one is total: an
 // unknown enumerator maps to the API's conservative answer rather than asserting,
@@ -294,6 +325,27 @@ void ReleaseResources(D3D12Device& device) noexcept;
                                                       PipelineLayoutHandle* out) noexcept;
 [[nodiscard]] Status<Error> D3D12DestroyPipelineLayout(void* internal,
                                                        PipelineLayoutHandle layout) noexcept;
+
+// Pipeline state and pipeline caches, implemented in `d3d12_pipelines.cpp`.
+[[nodiscard]] Status<Error> D3D12CreateGraphicsPipeline(void* internal,
+                                                        const GraphicsPipelineDesc& desc,
+                                                        PipelineHandle* out) noexcept;
+[[nodiscard]] Status<Error> D3D12DestroyGraphicsPipeline(void* internal,
+                                                         PipelineHandle pipeline) noexcept;
+[[nodiscard]] Status<Error> D3D12CreateComputePipeline(void* internal,
+                                                       const ComputePipelineDesc& desc,
+                                                       PipelineHandle* out) noexcept;
+[[nodiscard]] Status<Error> D3D12DestroyComputePipeline(void* internal,
+                                                        PipelineHandle pipeline) noexcept;
+[[nodiscard]] PipelineInfo D3D12PipelineInfo(const void* internal,
+                                             PipelineHandle pipeline) noexcept;
+[[nodiscard]] Status<Error> D3D12CreatePipelineCache(void* internal, const PipelineCacheDesc& desc,
+                                                     PipelineCacheHandle* out) noexcept;
+[[nodiscard]] Status<Error> D3D12DestroyPipelineCache(void* internal,
+                                                      PipelineCacheHandle cache) noexcept;
+[[nodiscard]] Status<Error> D3D12PipelineCacheBytes(const void* internal, PipelineCacheHandle cache,
+                                                    memory::Allocator& allocator,
+                                                    DynamicArray<memory::Byte>* out) noexcept;
 
 }  // namespace cyber::rhi::detail
 

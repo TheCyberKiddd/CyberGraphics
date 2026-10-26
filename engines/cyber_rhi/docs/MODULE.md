@@ -144,3 +144,10 @@ renderer that includes a graphics API header.
   conformance notes.
 - Error messages are static strings until Phase 15 provides an error sink that
   can format a value without allocating.
+- The D3D12 backend has two format conversions, not one: `ToDxgiFormat` answers
+  for texels and returns `DXGI_FORMAT_UNKNOWN` for `R32G32B32Float`, while
+  `ToVertexFormat` answers for vertex fetch, where the API does have
+  `DXGI_FORMAT_R32G32B32_FLOAT`. A vertex attribute is not a texel.
+- A Direct3D 12 pipeline cache is an `ID3D12PipelineLibrary`, keyed by the hash of
+  the pipeline description. It is an optimization: a cache that cannot answer is
+  a miss, and creating one never fails because of its seed bytes.

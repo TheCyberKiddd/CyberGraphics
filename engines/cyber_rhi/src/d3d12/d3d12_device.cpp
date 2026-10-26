@@ -64,6 +64,9 @@ using cyber::memory::kInvalidHandleIndex;
 [[nodiscard]] Features D3D12Features(const D3D12Device& device) noexcept
 {
     Features features{};
+    // Every Direct3D 12 device has a compute queue and compute pipelines; there
+    // is no feature level below 11_0 to fall back to, so this is not a query.
+    features.Add(Feature::Compute);
     features.Add(Feature::TimelineFences);
     features.Add(Feature::AnisotropicFiltering);
     features.Add(Feature::DebugMarkers);
@@ -450,42 +453,6 @@ constexpr const char* kLaterIncrement = "d3d12 backend: this call arrives in a l
         Error{ErrorCode::InvalidArgument, "d3d12 backend: handle is stale or invalid"});
 }
 
-Status<Error> D3D12CreateGraphicsPipeline(void*, const GraphicsPipelineDesc&,
-                                          PipelineHandle*) noexcept
-{
-    return NotYet();
-}
-Status<Error> D3D12DestroyGraphicsPipeline(void*, PipelineHandle) noexcept
-{
-    return NoSuchHandle();
-}
-Status<Error> D3D12CreateComputePipeline(void*, const ComputePipelineDesc&,
-                                         PipelineHandle*) noexcept
-{
-    return NotYet();
-}
-Status<Error> D3D12DestroyComputePipeline(void*, PipelineHandle) noexcept
-{
-    return NoSuchHandle();
-}
-Status<Error> D3D12CreatePipelineCache(void*, const PipelineCacheDesc&,
-                                       PipelineCacheHandle*) noexcept
-{
-    return NotYet();
-}
-Status<Error> D3D12DestroyPipelineCache(void*, PipelineCacheHandle) noexcept
-{
-    return NoSuchHandle();
-}
-Status<Error> D3D12PipelineCacheBytes(const void*, PipelineCacheHandle, memory::Allocator&,
-                                      DynamicArray<memory::Byte>*) noexcept
-{
-    return NotYet();
-}
-PipelineInfo D3D12PipelineInfo(const void*, PipelineHandle) noexcept
-{
-    return PipelineInfo{};
-}
 Status<Error> D3D12CreateCommandList(void*, const CommandListDesc&, CommandListHandle*,
                                      CommandListCreation*) noexcept
 {
@@ -840,6 +807,10 @@ void DestroyD3D12Device(void* internal) noexcept
     device->freeViewSlots.Clear();
     device->samplers.Clear();
     device->freeSamplerSlots.Clear();
+    device->pipelines.Clear();
+    device->freePipelineSlots.Clear();
+    device->pipelineCaches.Clear();
+    device->freePipelineCacheSlots.Clear();
     if (device->viewHeap != nullptr)
     {
         device->viewHeap->Release();

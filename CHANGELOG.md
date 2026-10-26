@@ -8,6 +8,19 @@ semantic versioning once a public API exists.
 
 ### Added
 
+- Phase 14, increment 5: Direct3D 12 graphics and compute pipeline state.
+  `GraphicsPipelineDesc` becomes a `D3D12_GRAPHICS_PIPELINE_STATE_DESC` with
+  every state translated — vertex layout, blend per attachment, rasterizer,
+  depth and stencil, multisampling, and each attachment format — and a compute
+  description becomes `D3D12_COMPUTE_PIPELINE_STATE_DESC`. Pipelines report the
+  stable hash of the description they were built from.
+- Direct3D 12 pipeline caches over `ID3D12PipelineLibrary`: a description that a
+  previous run stored is loaded instead of compiled, seed bytes the device cannot
+  use are ignored as the contract requires, and `PipelineCacheBytes` serializes
+  through the library's own size query.
+- `Feature::Compute` is reported by the Direct3D 12 backend, because every
+  Direct3D 12 device has a compute queue and compute pipelines.
+
 - Phase 11 `cyber_rhi` resources: `BufferUsage`/`BufferDesc`/`BufferInfo`,
   `TextureDimension`/`TextureUsage`/`TextureAspect`/`SubresourceRange`,
   `TextureDesc`/`TextureViewDesc`, and `SamplerDesc` with every filter, address,

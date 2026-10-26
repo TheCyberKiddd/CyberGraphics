@@ -1,6 +1,7 @@
 #include <cyber/memory/heap_allocator.h>
 #include <cyber/memory/span.h>
 #include <cyber/rhi/backend.h>
+#include <cyber/rhi/command_list.h>
 #include <cyber/rhi/d3d12.h>
 #include <cyber/rhi/device.h>
 #include <cyber/test/test.h>
@@ -220,9 +221,9 @@ CG_TEST(d3d12_device_unimplemented_calls_report_unsupported)
     CG_REQUIRE(OpenSoftwareDevice(device, heap));
 
     // A call this increment has not reached answers `Unsupported` with a message
-    // naming it, rather than pretending to succeed or crashing. Resources and
-    // shaders landed, pipelines have not, so a pipeline is the current boundary.
-    const auto created = device.CreateGraphicsPipeline(GraphicsPipelineDesc{});
+    // naming it, rather than pretending to succeed or crashing. Resources,
+    // shaders, and pipelines landed; recording is the current boundary.
+    const auto created = device.CreateCommandList(CommandListDesc{});
     CG_EXPECT_FALSE(created);
     if (!created)
     {
