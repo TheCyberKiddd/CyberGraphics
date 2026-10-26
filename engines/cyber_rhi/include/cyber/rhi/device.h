@@ -4,10 +4,15 @@
 #include <cyber/core/result.h>
 #include <cyber/core/types.h>
 #include <cyber/memory/allocator.h>
+#include <cyber/memory/span.h>
 #include <cyber/rhi/backend.h>
+#include <cyber/rhi/buffer.h>
 #include <cyber/rhi/capabilities.h>
 #include <cyber/rhi/descriptors.h>
 #include <cyber/rhi/handle.h>
+#include <cyber/rhi/resource_state.h>
+#include <cyber/rhi/sampler.h>
+#include <cyber/rhi/texture.h>
 
 namespace cyber::rhi
 {
@@ -28,6 +33,8 @@ using cyber::core::u64;
 //   reference count.
 // - Destroying an object invalidates its handle. A stale handle is reported as
 //   `ErrorCode::InvalidArgument`, never resolved into a newer object.
+// - A view borrows its texture. Destroying the texture retires every view of it,
+//   so a view handle never outlives the resource it reads.
 // - Handles must not outlive their device. Using one after the device is gone is
 //   a caller bug the type system cannot catch; in debug builds the handle fails
 //   to resolve rather than corrupting memory, because nothing is left to
@@ -35,10 +42,12 @@ using cyber::core::u64;
 // - A moved-from device is empty: it has no capabilities, returns invalid queue
 //   handles, and rejects every call.
 //
-// Threading rules: `Capabilities`, `Queue`, fence creation, `FenceValue`,
-// `SignalFence`, and `WaitFence` are safe to call from any thread. The device
-// does its own locking; a backend whose native API needs external
-// synchronization implements it internally.
+// Threading rules: `Capabilities`, `Queue`, fence create/signal/wait/value, and
+// every resource create, destroy, write, read, query, and transition are safe to
+// call from any thread. The device does its own locking; a backend whose native
+// API needs external synchronization implements it internally. Recording a
+// command list is not safe from two threads and does not need to be — Phase 13
+// gives each recording thread its own list.
 class Device
 {
 public:
@@ -58,7 +67,8 @@ public:
     //   enumerate.
     // - `ErrorCode::Unsupported` when the backend exists but cannot create a
     //   device on this adapter.
-    // - `ErrorCode::Internal` when allocation or backend setup fails.
+    // - `ErrorCode::Internal` when allocation, backend setup, or the per-device
+    //   function table is incomplete.
     // The returned device owns backend state; nothing is shared with another
     // device.
     [[nodiscard]] static Result<Device, Error> Create(const DeviceDesc& desc,
@@ -104,7 +114,95 @@ public:
     // Current value of `fence`, or 0 for a stale handle.
     [[nodiscard]] u64 FenceValue(FenceHandle fence) const noexcept;
 
-    // Blocks until the device has finished all submitted work. Phase 10 submits
+    // Creates a buffer from `desc`. Returns `ErrorCode::InvalidArgument` for a
+    // descriptor no backend can create (no usage, zero size, host-visible
+    // combined with a shader usage, a stride that is not a multiple of 4),
+    // `ErrorCode::OutOfRange` for a size or stride above the device limits, and
+    // `ErrorCode::Internal` when the allocation fails.
+    [[nodiscard]] Result<BufferHandle, Error> CreateBuffer(const BufferDesc& desc) noexcept;
+
+    // Destroys a buffer and invalidates its handle. A stale handle is
+    // `ErrorCode::InvalidArgument`. Phase 11 has no submission, so the storage
+    // is released immediately; Phase 13 retires it once the timeline passes the
+    // last use.
+    [[nodiscard]] Status<Error> DestroyBuffer(BufferHandle buffer) noexcept;
+
+    // Size, stride, and usage of a live buffer. A stale handle returns a value
+    // with `valid` false rather than an error, so a query never has to be
+    // wrapped in a `Result`.
+    [[nodiscard]] BufferInfo BufferInfoOf(BufferHandle buffer) const noexcept;
+
+    // Copies `bytes` into a buffer created with `BufferUsage::HostVisible`.
+    // Returns `ErrorCode::InvalidArgument` for a stale handle, a buffer without
+    // that usage, or a null span with a non-zero size; `ErrorCode::OutOfRange`
+    // when `offset + bytes.Size()` overflows or exceeds the buffer.
+    [[nodiscard]] Status<Error> WriteBuffer(BufferHandle buffer, u64 offset,
+                                            memory::Span<const memory::Byte> bytes) noexcept;
+
+    // Copies `bytes` out of a buffer the CPU can map: one created with
+    // `BufferUsage::Readback` or `BufferUsage::HostVisible`. A device-local
+    // buffer is `ErrorCode::InvalidArgument`; the range errors are the ones
+    // `WriteBuffer` documents.
+    [[nodiscard]] Status<Error> ReadBuffer(BufferHandle buffer, u64 offset,
+                                           memory::Span<memory::Byte> bytes) noexcept;
+
+    // State of a whole buffer, or `ResourceState::Undefined` for a stale handle.
+    [[nodiscard]] ResourceState BufferStateOf(BufferHandle buffer) const noexcept;
+
+    // Creates a texture from `desc`. Returns `ErrorCode::InvalidArgument` for a
+    // malformed shape (zero extent, cube that is not square, 3D with layers or
+    // multisampling, a mip count above the chain, a usage its format cannot
+    // serve), `ErrorCode::OutOfRange` above the device limits, and
+    // `ErrorCode::Unsupported` for a usage whose feature the adapter lacks.
+    [[nodiscard]] Result<TextureHandle, Error> CreateTexture(const TextureDesc& desc) noexcept;
+
+    // Destroys a texture, invalidates its handle, and retires every view of it.
+    // A stale handle is `ErrorCode::InvalidArgument`.
+    [[nodiscard]] Status<Error> DestroyTexture(TextureHandle texture) noexcept;
+
+    // Shape and size of a live texture. A stale handle returns a value with
+    // `valid` false.
+    [[nodiscard]] TextureInfo TextureInfoOf(TextureHandle texture) const noexcept;
+
+    // Creates a view over a live texture. Returns `ErrorCode::InvalidArgument`
+    // for a stale texture, a format that is not view-compatible, a shape the
+    // texture cannot expose, or a range outside the texture.
+    [[nodiscard]] Result<TextureViewHandle, Error>
+    CreateTextureView(const TextureViewDesc& desc) noexcept;
+
+    // Destroys one view. The texture stays alive and usable. A stale handle is
+    // `ErrorCode::InvalidArgument`.
+    [[nodiscard]] Status<Error> DestroyTextureView(TextureViewHandle view) noexcept;
+
+    // Format, shape, and range of a live view. A stale handle returns a value
+    // with `valid` false.
+    [[nodiscard]] TextureViewInfo TextureViewInfoOf(TextureViewHandle view) const noexcept;
+
+    // State of one `(mip, array layer)` subresource. Returns
+    // `ResourceState::Undefined` when the texture handle or either index is
+    // invalid.
+    [[nodiscard]] ResourceState TextureStateOf(TextureHandle texture, u32 mipLevel,
+                                               u32 arrayLayer) const noexcept;
+
+    // Creates a sampler from `desc`. Returns `ErrorCode::InvalidArgument` for a
+    // non-finite LOD, `minLod` above `maxLod`, an anisotropy outside
+    // `1..Limits::maxSamplerAnisotropy`, or anisotropy combined with a nearest
+    // filter; `ErrorCode::Unsupported` when anisotropy is requested and
+    // `Feature::AnisotropicFiltering` is absent.
+    [[nodiscard]] Result<SamplerHandle, Error> CreateSampler(const SamplerDesc& desc) noexcept;
+
+    // Destroys a sampler and invalidates its handle.
+    [[nodiscard]] Status<Error> DestroySampler(SamplerHandle sampler) noexcept;
+
+    // Transitions every barrier in both spans and records the new state. Every
+    // barrier is validated before any is applied: a batch with one bad barrier
+    // changes nothing and reports `ErrorCode::InvalidArgument`, so a caller can
+    // fix the descriptor and resubmit. `Undefined` on a `from` side discards
+    // contents; `Undefined` on a `to` side is rejected.
+    [[nodiscard]] Status<Error> Transition(memory::Span<const BufferBarrier> buffers,
+                                           memory::Span<const TextureBarrier> textures) noexcept;
+
+    // Blocks until the device has finished all submitted work. Phase 11 submits
     // nothing, so this is a drain point rather than a synchronization tool; from
     // Phase 13 it also retires objects awaiting GPU completion. Returns
     // `ErrorCode::InvalidArgument` for an empty device.

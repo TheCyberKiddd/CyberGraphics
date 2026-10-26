@@ -5,13 +5,17 @@ set(CYBER_RHI_SOURCES
 
 set(CYBER_RHI_HEADERS
     include/cyber/rhi/backend.h
+    include/cyber/rhi/buffer.h
     include/cyber/rhi/capabilities.h
     include/cyber/rhi/conventions.h
     include/cyber/rhi/descriptors.h
     include/cyber/rhi/device.h
     include/cyber/rhi/format.h
     include/cyber/rhi/handle.h
+    include/cyber/rhi/resource_state.h
     include/cyber/rhi/rhi.h
+    include/cyber/rhi/sampler.h
+    include/cyber/rhi/texture.h
 )
 
 cyber_add_module(
@@ -61,5 +65,35 @@ cyber_add_test(
 cyber_add_test(
     NAME rhi_fence
     SOURCES tests/fence_test.cpp
+    DEPENDS rhi memory
+)
+
+cyber_add_test(
+    NAME rhi_format_table
+    SOURCES tests/format_table_test.cpp
+    DEPENDS rhi
+)
+
+cyber_add_test(
+    NAME rhi_buffer
+    SOURCES tests/buffer_test.cpp
+    DEPENDS rhi memory
+)
+
+cyber_add_test(
+    NAME rhi_texture
+    SOURCES tests/texture_test.cpp
+    DEPENDS rhi memory
+)
+
+cyber_add_test(
+    NAME rhi_sampler
+    SOURCES tests/sampler_test.cpp
+    DEPENDS rhi memory
+)
+
+cyber_add_test(
+    NAME rhi_resource_state
+    SOURCES tests/resource_state_test.cpp
     DEPENDS rhi memory
 )
