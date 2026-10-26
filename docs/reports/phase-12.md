@@ -113,6 +113,10 @@ auto pipeline = device.CreateGraphicsPipeline(desc);
 The ASan runtime DLL still needs `VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64` on
 `PATH`; with it, 67/67 pass.
 
+CI run [40289190526](https://github.com/TheCyberKiddd/CyberGraphics/actions/runs/40289190526)
+is green on all five jobs: structure and dependency law, Windows MSVC, Linux
+clang + ASan, Linux clang + UBSan, and formatting.
+
 New test binaries:
 
 | Test | Cases | What it proves |
