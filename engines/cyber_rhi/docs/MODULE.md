@@ -91,10 +91,12 @@ WARP software adapter last, the short-span contract, and a complete per-device
 table — `rhi_d3d12_device`: a real `ID3D12Device` on a chosen adapter, three
 command queues, timeline fences over `ID3D12Fence` with GPU signals and
 event-based waits, `Capabilities` from the feature level and the API's
-guaranteed limits, and a drain on `WaitIdle` — and `rhi_d3d12_resources`:
-buffers on the heap their usage names, textures, views, samplers, host-visible
-writes and readback reads, and the barrier path with per-subresource texture
-state.
+guaranteed limits, and a drain on `WaitIdle` — `rhi_d3d12_resources`: buffers on
+the heap their usage names, textures, views, samplers, host-visible writes and
+readback reads, and the barrier path with per-subresource texture state — and
+`rhi_d3d12_binding`: HLSL compiled through the SDK's `D3DCompile`, bind group
+layouts and groups filling one contiguous block of the shader-visible heap, and
+pipeline layouts serialized into root signatures.
 
 ## Budgets
 
@@ -116,9 +118,10 @@ fences, the frame ring, the retirement queue, and the swapchain. The null backen
 validates every recorded command against a per-list shadow of resource state, so
 a missing barrier is a record-time error naming the resource.
 
-Phase 14 is in progress: adapter discovery, the device, and the resource layer
-are in place, and the upload ring, shader compilation, pipelines, command
-recording, and the two reference images land in order behind them. Resources
+Phase 14 is in progress: adapter discovery, the device, the resource layer, and
+the shader and binding model are in place, and pipelines, command recording,
+submission, the swapchain, and the two reference images land in order behind
+them. Resources
 carry their own D3D12 state, and a transition is submitted through a one-shot
 list and waited on, because the API has no immediate-mode barrier. Every entry this increment has not reached yet
 answers `Unsupported` with a message naming the increment, so a caller is never

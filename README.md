@@ -108,7 +108,7 @@ tests pass in debug; the design is ADR 0013.
   and timeline fences, and places buffers, textures, views, and samplers on the
   heaps and descriptors the API names, with per-subresource state tracked for
   barriers. The backend compiles out entirely when `CYBER_RHI_ENABLE_D3D12` is
-  off. 77 tests pass in every preset; the design is ADR 0017. The descriptor ring,
+  off. 78 tests pass in every preset; the design is ADR 0017. The descriptor ring,
   the upload ring, shader compilation, pipelines, command recording, and the two
   reference images follow.
 

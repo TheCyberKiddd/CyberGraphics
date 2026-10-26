@@ -450,48 +450,6 @@ constexpr const char* kLaterIncrement = "d3d12 backend: this call arrives in a l
         Error{ErrorCode::InvalidArgument, "d3d12 backend: handle is stale or invalid"});
 }
 
-Status<Error> D3D12CreateShader(void*, const ShaderDesc&, ShaderHandle*) noexcept
-{
-    return NotYet();
-}
-Status<Error> D3D12DestroyShader(void*, ShaderHandle) noexcept
-{
-    return NoSuchHandle();
-}
-ShaderInfo D3D12ShaderInfo(const void*, ShaderHandle) noexcept
-{
-    return ShaderInfo{};
-}
-Status<Error> D3D12CreateBindGroupLayout(void*, const BindGroupLayoutDesc&,
-                                         BindGroupLayoutHandle*) noexcept
-{
-    return NotYet();
-}
-Status<Error> D3D12DestroyBindGroupLayout(void*, BindGroupLayoutHandle) noexcept
-{
-    return NoSuchHandle();
-}
-Status<Error> D3D12CreateBindGroup(void*, const BindGroupDesc&, BindGroupHandle*) noexcept
-{
-    return NotYet();
-}
-Status<Error> D3D12DestroyBindGroup(void*, BindGroupHandle) noexcept
-{
-    return NoSuchHandle();
-}
-BindGroupInfo D3D12BindGroupInfo(const void*, BindGroupHandle) noexcept
-{
-    return BindGroupInfo{};
-}
-Status<Error> D3D12CreatePipelineLayout(void*, const PipelineLayoutDesc&,
-                                        PipelineLayoutHandle*) noexcept
-{
-    return NotYet();
-}
-Status<Error> D3D12DestroyPipelineLayout(void*, PipelineLayoutHandle) noexcept
-{
-    return NoSuchHandle();
-}
 Status<Error> D3D12CreateGraphicsPipeline(void*, const GraphicsPipelineDesc&,
                                           PipelineHandle*) noexcept
 {

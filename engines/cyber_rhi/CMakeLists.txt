@@ -7,6 +7,7 @@ set(CYBER_RHI_SOURCES
     # `CYBER_RHI_HAS_D3D12`.
     src/d3d12/d3d12_backend.cpp
     src/d3d12/d3d12_device.cpp
+    src/d3d12/d3d12_binding.cpp
     src/d3d12/d3d12_resources.cpp
     src/d3d12/d3d12_textures.cpp
     src/device.cpp
@@ -59,7 +60,10 @@ if(CYBER_RHI_ENABLE_D3D12)
     # that calls `D3D12Backend()` resolves its DXGI imports itself, and a
     # `PRIVATE` entry would leave those unresolved at link time.
     target_compile_definitions(cyber_rhi PUBLIC CYBER_RHI_HAS_D3D12=1)
-    target_link_libraries(cyber_rhi PUBLIC d3d12 dxgi)
+    # `d3dcompiler` is the HLSL compiler that ships with the Windows SDK. Phase 16
+    # replaces it with the project's own shader pipeline, and until then it is the
+    # only way a shader becomes bytecode.
+    target_link_libraries(cyber_rhi PUBLIC d3d12 dxgi d3dcompiler)
 endif()
 
 cyber_add_test(
@@ -216,6 +220,11 @@ if(CYBER_RHI_ENABLE_D3D12)
     cyber_add_test(
         NAME rhi_d3d12_resources
         SOURCES tests/d3d12_resources_test.cpp
+        DEPENDS rhi memory
+    )
+    cyber_add_test(
+        NAME rhi_d3d12_binding
+        SOURCES tests/d3d12_binding_test.cpp
         DEPENDS rhi memory
     )
 endif()

@@ -103,6 +103,17 @@ semantic versioning once a public API exists.
   target, depth stencil, or shader resource descriptors, samplers on a
   shader-visible heap, and the barrier path with one-shot submission and
   per-subresource texture state.
+- Phase 14 `cyber_rhi` Direct3D 12 shaders and binding model: HLSL source
+  compiled to bytecode through the SDK's `D3DCompile` with a shader-model target
+  per stage, precompiled blobs accepted verbatim, bind group layouts turned into
+  descriptor tables by register space, bind groups filling one contiguous block
+  of the shader-visible heap with constant buffer, structured buffer, sampled
+  texture, storage texture, and sampler descriptors, and pipeline layouts
+  serialized into a root signature with root constants for push constants.
+- `rhi_d3d12_binding` test binary: a compiling shader, a shader that fails to
+  compile, incomplete descriptions, precompiled bytecode, layouts and groups with
+  a count mismatch and a stale layout, a root signature from a pipeline layout,
+  and bytecode released on destroy.
 - `rhi_d3d12_resources` test binary: host-visible write ranges, readback reads,
   texture and view lifetime including views retired with their texture, a format
   with no native equivalent, sampler creation, buffer and texture state across
