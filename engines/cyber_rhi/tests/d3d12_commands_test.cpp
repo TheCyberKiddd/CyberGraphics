@@ -308,3 +308,8 @@ CG_TEST(d3d12_commands_refuse_a_swapchain_without_a_surface)
     desc.surface.width = 0;
     CG_EXPECT_FALSE(device.CreateSwapChain(desc).IsOk());
 }
+
+// The depth-off control experiment lives in the report, not in the suite: with
+// depth removed entirely the geometry still did not appear, which rules out the
+// depth path and leaves the vertex fetch or the upload as the fault. A test that
+// does not pass is not kept.
