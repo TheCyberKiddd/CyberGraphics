@@ -66,13 +66,6 @@ using cyber::memory::kInvalidHandleIndex;
     return nullptr;
 }
 
-// D3D12's descriptor tables hold one range each in this backend: every binding of
-// a group lives in one CBV/SRV/UAV table that the group's block spans.
-[[nodiscard]] u32 LayoutDescriptorCount(const D3D12LayoutSlot& layout) noexcept
-{
-    return layout.descriptorCount;
-}
-
 }  // namespace
 
 D3D12ShaderSlot* Resolve(D3D12Device& device, ShaderHandle handle) noexcept
@@ -317,6 +310,8 @@ Status<Error> D3D12CreateBindGroupLayout(void* internal, const BindGroupLayoutDe
     const std::lock_guard<std::mutex> lock(device.mutex);
 
     u32 descriptors = 0;
+    u32 resources = 0;
+    u32 samplers = 0;
     for (usize index = 0; index < desc.entries.Size(); ++index)
     {
         const BindGroupLayoutEntry& entry = desc.entries[index];
@@ -331,6 +326,16 @@ Status<Error> D3D12CreateBindGroupLayout(void* internal, const BindGroupLayoutDe
                                "d3d12 backend: layout entry array count is zero");
         }
         descriptors += entry.arrayCount;
+        // A sampler descriptor cannot share a heap with a resource descriptor, so
+        // the layout keeps two totals: one per heap, one overall.
+        if (entry.type == BindingType::Sampler)
+        {
+            samplers += entry.arrayCount;
+        }
+        else
+        {
+            resources += entry.arrayCount;
+        }
     }
 
     u32 index = kInvalidHandleIndex;
@@ -353,6 +358,8 @@ Status<Error> D3D12CreateBindGroupLayout(void* internal, const BindGroupLayoutDe
     slot.alive = true;
     slot.entryCount = static_cast<u32>(desc.entries.Size());
     slot.descriptorCount = descriptors;
+    slot.resourceCount = resources;
+    slot.samplerCount = samplers;
     for (usize entry = 0; entry < desc.entries.Size(); ++entry)
     {
         slot.entries[entry] = desc.entries[entry];
@@ -416,17 +423,25 @@ Status<Error> D3D12CreateBindGroup(void* internal, const BindGroupDesc& desc,
                            "d3d12 backend: group resource count does not match its layout");
     }
 
-    // One contiguous block from the shader-visible heap: a root descriptor table
-    // is a range, so every binding of a group must sit together.
+    // Two contiguous blocks, one per heap: a root descriptor table is a range, so
+    // every resource of a group must sit together, and the same for its samplers.
     const u32 capacity = D3D12_MAX_SHADER_VISIBLE_DESCRIPTOR_HEAP_SIZE_TIER_1;
     const u32 first = device.viewDescriptorsUsed;
-    if (first + layout->descriptorCount > capacity)
+    if (first + layout->resourceCount > capacity)
     {
         return StatusError(ErrorCode::OutOfRange,
                            "d3d12 backend: shader-visible descriptor heap is full");
     }
+    const u32 samplerCapacity = D3D12_MAX_SHADER_VISIBLE_SAMPLER_HEAP_SIZE;
+    const u32 samplerFirst = device.samplerDescriptorsUsed;
+    if (samplerFirst + layout->samplerCount > samplerCapacity)
+    {
+        return StatusError(ErrorCode::OutOfRange, "d3d12 backend: sampler heap is full");
+    }
 
     u32 resourceIndex = 0;
+    u32 resourceOrdinal = 0;
+    u32 samplerOrdinal = 0;
     for (u32 entryIndex = 0; entryIndex < layout->entryCount; ++entryIndex)
     {
         const BindGroupLayoutEntry& entry = layout->entries[entryIndex];
@@ -434,8 +449,18 @@ Status<Error> D3D12CreateBindGroup(void* internal, const BindGroupDesc& desc,
         {
             const BindingResource& resource = desc.resources[resourceIndex];
             const D3D12_CPU_DESCRIPTOR_HANDLE destination =
-                CpuHandleAt(device, first + resourceIndex);
+                entry.type == BindingType::Sampler
+                    ? SamplerCpuAt(device, samplerFirst + samplerOrdinal)
+                    : CpuHandleAt(device, first + resourceOrdinal);
             ++resourceIndex;
+            if (entry.type == BindingType::Sampler)
+            {
+                ++samplerOrdinal;
+            }
+            else
+            {
+                ++resourceOrdinal;
+            }
 
             switch (entry.type)
             {
@@ -541,7 +566,8 @@ Status<Error> D3D12CreateBindGroup(void* internal, const BindGroupDesc& desc,
             }
         }
     }
-    device.viewDescriptorsUsed = first + layout->descriptorCount;
+    device.viewDescriptorsUsed = first + layout->resourceCount;
+    device.samplerDescriptorsUsed = samplerFirst + layout->samplerCount;
 
     u32 index = kInvalidHandleIndex;
     if (device.freeGroupSlots.Size() > 0)
@@ -563,7 +589,9 @@ Status<Error> D3D12CreateBindGroup(void* internal, const BindGroupDesc& desc,
     slot.alive = true;
     slot.layout = desc.layout;
     slot.descriptorIndex = first;
-    slot.descriptorCount = LayoutDescriptorCount(*layout);
+    slot.descriptorCount = layout->resourceCount;
+    slot.samplerIndex = samplerFirst;
+    slot.samplerCount = layout->samplerCount;
 
     BindGroupHandle handle;
     handle.index = index;
@@ -632,12 +660,23 @@ Status<Error> D3D12CreatePipelineLayout(void* internal, const PipelineLayoutDesc
     auto& device = *static_cast<D3D12Device*>(internal);
     const std::lock_guard<std::mutex> lock(device.mutex);
 
-    // A used slot contributes one descriptor table; the RHI's four slots become
-    // register spaces 0..3, so the same shader works for any layout.
-    D3D12_ROOT_PARAMETER parameters[kBindGroupSlotCount]{};
-    D3D12_DESCRIPTOR_RANGE ranges[kBindGroupSlotCount]{};
+    // A used slot contributes up to two descriptor tables; the RHI's four slots
+    // become register spaces 0..3, so the same shader works for any layout. The
+    // resource table and the sampler table are separate because the API forbids
+    // mixing the two descriptor kinds in one heap.
+    constexpr u32 kMaxParameters = kBindGroupSlotCount * 2 + 1;
+    D3D12_ROOT_PARAMETER parameters[kMaxParameters]{};
+    D3D12_DESCRIPTOR_RANGE ranges[kBindGroupSlotCount * 2]{};
     u32 parameterCount = 0;
+    u32 rangeCount = 0;
     u32 descriptorCounts[kBindGroupSlotCount]{};
+    u32 resourceParameter[kBindGroupSlotCount]{};
+    u32 samplerParameter[kBindGroupSlotCount]{};
+    for (u32 slotIndex = 0; slotIndex < kBindGroupSlotCount; ++slotIndex)
+    {
+        resourceParameter[slotIndex] = kNoRootParameter;
+        samplerParameter[slotIndex] = kNoRootParameter;
+    }
 
     for (u32 slotIndex = 0; slotIndex < kBindGroupSlotCount; ++slotIndex)
     {
@@ -652,17 +691,41 @@ Status<Error> D3D12CreatePipelineLayout(void* internal, const PipelineLayoutDesc
                                "d3d12 backend: pipeline layout names a stale group layout");
         }
         descriptorCounts[slotIndex] = layout->descriptorCount;
-        ranges[slotIndex].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-        ranges[slotIndex].NumDescriptors = layout->descriptorCount;
-        ranges[slotIndex].BaseShaderRegister = 0;
-        ranges[slotIndex].RegisterSpace = slotIndex;
-        ranges[slotIndex].OffsetInDescriptorsFromTableStart = 0;
 
-        parameters[parameterCount].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-        parameters[parameterCount].DescriptorTable.NumDescriptorRanges = 1;
-        parameters[parameterCount].DescriptorTable.pDescriptorRanges = &ranges[slotIndex];
-        parameters[parameterCount].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-        ++parameterCount;
+        if (layout->resourceCount > 0 && parameterCount < kMaxParameters)
+        {
+            D3D12_DESCRIPTOR_RANGE& range = ranges[rangeCount];
+            range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+            range.NumDescriptors = layout->resourceCount;
+            range.BaseShaderRegister = 0;
+            range.RegisterSpace = slotIndex;
+            range.OffsetInDescriptorsFromTableStart = 0;
+
+            parameters[parameterCount].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+            parameters[parameterCount].DescriptorTable.NumDescriptorRanges = 1;
+            parameters[parameterCount].DescriptorTable.pDescriptorRanges = &ranges[rangeCount];
+            parameters[parameterCount].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+            resourceParameter[slotIndex] = parameterCount;
+            ++parameterCount;
+            ++rangeCount;
+        }
+        if (layout->samplerCount > 0 && parameterCount < kMaxParameters)
+        {
+            D3D12_DESCRIPTOR_RANGE& range = ranges[rangeCount];
+            range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
+            range.NumDescriptors = layout->samplerCount;
+            range.BaseShaderRegister = 0;
+            range.RegisterSpace = slotIndex;
+            range.OffsetInDescriptorsFromTableStart = 0;
+
+            parameters[parameterCount].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+            parameters[parameterCount].DescriptorTable.NumDescriptorRanges = 1;
+            parameters[parameterCount].DescriptorTable.pDescriptorRanges = &ranges[rangeCount];
+            parameters[parameterCount].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+            samplerParameter[slotIndex] = parameterCount;
+            ++parameterCount;
+            ++rangeCount;
+        }
     }
 
     u32 pushConstantBytes = 0;
@@ -675,8 +738,10 @@ Status<Error> D3D12CreatePipelineLayout(void* internal, const PipelineLayoutDesc
             pushConstantBytes = end;
         }
     }
-    if (pushConstantBytes > 0)
+    u32 pushConstantParameter = kNoRootParameter;
+    if (pushConstantBytes > 0 && parameterCount < kMaxParameters)
     {
+        pushConstantParameter = parameterCount;
         parameters[parameterCount].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
         parameters[parameterCount].Constants.ShaderRegister = 0;
         parameters[parameterCount].Constants.RegisterSpace = 0;
@@ -739,9 +804,12 @@ Status<Error> D3D12CreatePipelineLayout(void* internal, const PipelineLayoutDesc
     slot.alive = true;
     slot.rootSignature = rootSignature;
     slot.pushConstantBytes = pushConstantBytes;
+    slot.pushConstantParameter = pushConstantParameter;
     for (u32 groupIndex = 0; groupIndex < kBindGroupSlotCount; ++groupIndex)
     {
         slot.descriptorCounts[groupIndex] = descriptorCounts[groupIndex];
+        slot.resourceParameter[groupIndex] = resourceParameter[groupIndex];
+        slot.samplerParameter[groupIndex] = samplerParameter[groupIndex];
     }
 
     PipelineLayoutHandle handle;

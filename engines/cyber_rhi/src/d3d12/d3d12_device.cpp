@@ -430,56 +430,6 @@ Status<Error> D3D12WaitIdle(void* internal) noexcept
     return Status<Error>::Ok();
 }
 
-// ---------------------------------------------------------------------------
-// Entries this increment does not implement
-//
-// The table must be complete or `Device::Create` refuses it, so each entry that
-// arrives in a later Phase 14 increment answers `Unsupported` with a message that
-// names the increment. A query returns a zeroed value: asking a device what it
-// has when it has nothing is not an error.
-// ---------------------------------------------------------------------------
-
-constexpr const char* kLaterIncrement = "d3d12 backend: this call arrives in a later Phase 14 "
-                                        "increment";
-
-[[nodiscard]] Status<Error> NotYet() noexcept
-{
-    return Status<Error>::Err(Error{ErrorCode::Unsupported, kLaterIncrement});
-}
-
-[[nodiscard]] Status<Error> NoSuchHandle() noexcept
-{
-    return Status<Error>::Err(
-        Error{ErrorCode::InvalidArgument, "d3d12 backend: handle is stale or invalid"});
-}
-
-Status<Error> D3D12CreateCommandList(void*, const CommandListDesc&, CommandListHandle*,
-                                     CommandListCreation*) noexcept
-{
-    return NotYet();
-}
-Status<Error> D3D12DestroyCommandList(void*, CommandListHandle) noexcept
-{
-    return NoSuchHandle();
-}
-Status<Error> D3D12Submit(void*, const SubmitDesc&) noexcept
-{
-    return NotYet();
-}
-SubmissionInfo D3D12SubmissionInfo(const void*, QueueKind) noexcept
-{
-    return SubmissionInfo{};
-}
-Status<Error> D3D12CreateSwapChain(void*, const SwapChainDesc&, SwapChainHandle*,
-                                   SwapChainCreation*) noexcept
-{
-    return NotYet();
-}
-Status<Error> D3D12DestroySwapChain(void*, SwapChainHandle) noexcept
-{
-    return NoSuchHandle();
-}
-
 [[nodiscard]] const DeviceInterface* BuildInterface() noexcept
 {
     static const DeviceInterface interface = []() noexcept
@@ -614,6 +564,35 @@ Status<Error> D3D12DestroySwapChain(void*, SwapChainHandle) noexcept
     }
     device.samplerDescriptorSize =
         device.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
+
+    // Attachment descriptors live in their own heaps: the API forbids putting an
+    // RTV or DSV in a shader-visible heap. The count matches the largest ring of
+    // attachments a device can be asked for many times over.
+    D3D12_DESCRIPTOR_HEAP_DESC rtvDesc{};
+    rtvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+    rtvDesc.NumDescriptors = kAttachmentDescriptors;
+    rtvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+    if (FAILED(device.device->CreateDescriptorHeap(&rtvDesc, __uuidof(ID3D12DescriptorHeap),
+                                                   reinterpret_cast<void**>(&device.rtvHeap))) ||
+        device.rtvHeap == nullptr)
+    {
+        return false;
+    }
+    device.rtvDescriptorSize =
+        device.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+
+    D3D12_DESCRIPTOR_HEAP_DESC dsvDesc{};
+    dsvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+    dsvDesc.NumDescriptors = kAttachmentDescriptors;
+    dsvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+    if (FAILED(device.device->CreateDescriptorHeap(&dsvDesc, __uuidof(ID3D12DescriptorHeap),
+                                                   reinterpret_cast<void**>(&device.dsvHeap))) ||
+        device.dsvHeap == nullptr)
+    {
+        return false;
+    }
+    device.dsvDescriptorSize =
+        device.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
     return true;
 }
 
@@ -795,6 +774,8 @@ void DestroyD3D12Device(void* internal) noexcept
     (void)D3D12WaitIdle(device);
 
     ReleaseResources(*device);
+    ReleaseCommandLists(*device);
+    ReleaseSwapChains(*device);
     ReleaseFences(*device);
     ReleaseQueues(*device);
     device->fences.Clear();
@@ -811,6 +792,10 @@ void DestroyD3D12Device(void* internal) noexcept
     device->freePipelineSlots.Clear();
     device->pipelineCaches.Clear();
     device->freePipelineCacheSlots.Clear();
+    device->commandLists.Clear();
+    device->freeCommandListSlots.Clear();
+    device->swapChains.Clear();
+    device->freeSwapChainSlots.Clear();
     if (device->viewHeap != nullptr)
     {
         device->viewHeap->Release();
@@ -820,6 +805,16 @@ void DestroyD3D12Device(void* internal) noexcept
     {
         device->samplerHeap->Release();
         device->samplerHeap = nullptr;
+    }
+    if (device->rtvHeap != nullptr)
+    {
+        device->rtvHeap->Release();
+        device->rtvHeap = nullptr;
+    }
+    if (device->dsvHeap != nullptr)
+    {
+        device->dsvHeap->Release();
+        device->dsvHeap = nullptr;
     }
     if (device->debug != nullptr)
     {

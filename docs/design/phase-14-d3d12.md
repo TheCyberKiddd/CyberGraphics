@@ -61,7 +61,7 @@ grew larger than the note first estimated.
 | 3. Resources | Buffers, textures, views, samplers, barriers, staging | `rhi_d3d12_resources` | landed |
 | 4. Shaders and binding | `D3DCompile`, descriptor tables, root signatures, pipeline layouts | `rhi_d3d12_binding`, 7 cases | landed |
 | 5. Pipelines | Graphics and compute PSOs, full state translation, `ID3D12PipelineLibrary` caches | `rhi_d3d12_pipelines`, 6 cases | landed |
-| 6. Recording, submission, presentation | `CommandListInterface` over a real list, `submit` with waits and signals, a `DXGI` flip-model swapchain | `rhi_d3d12_commands`, `rhi_d3d12_swapchain` | not started |
+| 6. Recording, submission, presentation | `CommandListInterface` over a real list, `submit` with waits and signals, a `DXGI` flip-model swapchain | `rhi_d3d12_commands`, 2 cases (lifecycle and refusals) | landed, draw path unverified |
 | 7. Reference images | A triangle and a textured cube on the GPU, compared against `cyber_software_renderer` | the two images and a recorded tolerance | not started |
 
 The roadmap checkbox stays unticked until increment 7 produces both images.

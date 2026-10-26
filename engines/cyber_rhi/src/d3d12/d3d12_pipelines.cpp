@@ -610,7 +610,9 @@ template <typename CreateState, typename Lookup>
 // Writes a freshly created state into the device table, releasing it if the
 // table cannot grow.
 [[nodiscard]] Status<Error> StorePipeline(D3D12Device& device, ID3D12PipelineState* state,
-                                          PipelineKind kind, u64 hash, PipelineHandle* out) noexcept
+                                          PipelineKind kind, u64 hash,
+                                          const GraphicsPipelineDesc* graphics,
+                                          PipelineLayoutHandle layout, PipelineHandle* out) noexcept
 {
     u32 index = kInvalidHandleIndex;
     if (device.freePipelineSlots.Size() > 0)
@@ -634,6 +636,30 @@ template <typename CreateState, typename Lookup>
     slot.state = state;
     slot.kind = kind;
     slot.hash = hash;
+    slot.layout = layout;
+    slot.vertexBindingCount = 0;
+    slot.sampleCount = 1;
+    slot.colorAttachmentCount = 0;
+    slot.depthStencilFormat = Format::Count;
+    if (graphics != nullptr)
+    {
+        const VertexLayout& vertexLayout = graphics->vertexLayout;
+        for (usize binding = 0;
+             binding < vertexLayout.bindings.Size() && binding < kMaxVertexBindings; ++binding)
+        {
+            slot.vertexStrides[binding] = vertexLayout.bindings[binding].strideBytes;
+        }
+        slot.vertexBindingCount = static_cast<u32>(vertexLayout.bindings.Size());
+        slot.sampleCount = graphics->multisample.sampleCount;
+        slot.colorAttachmentCount = graphics->colorAttachments.Size() > kMaxColorAttachments
+                                        ? kMaxColorAttachments
+                                        : static_cast<u32>(graphics->colorAttachments.Size());
+        for (u32 attachment = 0; attachment < slot.colorAttachmentCount; ++attachment)
+        {
+            slot.colorFormats[attachment] = graphics->colorAttachments[attachment].format;
+        }
+        slot.depthStencilFormat = graphics->depthStencilFormat;
+    }
 
     PipelineHandle handle;
     handle.index = index;
@@ -779,7 +805,8 @@ Status<Error> D3D12CreateGraphicsPipeline(void* internal, const GraphicsPipeline
     }
     NameObject(pipelineState, desc.label);
 
-    return StorePipeline(device, pipelineState, PipelineKind::Graphics, hash, out);
+    return StorePipeline(device, pipelineState, PipelineKind::Graphics, hash, &desc, desc.layout,
+                         out);
 }
 
 Status<Error> D3D12DestroyGraphicsPipeline(void* internal, PipelineHandle handle) noexcept
@@ -900,7 +927,8 @@ Status<Error> D3D12CreateComputePipeline(void* internal, const ComputePipelineDe
     }
     NameObject(pipelineState, desc.label);
 
-    return StorePipeline(device, pipelineState, PipelineKind::Compute, hash, out);
+    return StorePipeline(device, pipelineState, PipelineKind::Compute, hash, nullptr, desc.layout,
+                         out);
 }
 
 Status<Error> D3D12DestroyComputePipeline(void* internal, PipelineHandle handle) noexcept

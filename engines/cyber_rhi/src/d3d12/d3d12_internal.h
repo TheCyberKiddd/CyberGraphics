@@ -29,6 +29,14 @@ using cyber::core::u32;
 using cyber::core::u64;
 using cyber::memory::DynamicArray;
 
+// Descriptors each attachment heap holds. A frame needs one per attachment; this
+// is far more, so a device never recycles an RTV a live view still names.
+inline constexpr u32 kAttachmentDescriptors = 256;
+
+// The device is declared later: a command list holds a pointer back to it so the
+// list's interface, which only ever receives the list, can reach the tables.
+struct D3D12Device;
+
 // Highest subresource count one texture may have. The state table is per
 // (mip, layer) because D3D12 cannot express a per-aspect barrier; Phase 15
 // replaces this flat table with an allocator once textures are transient.
@@ -50,6 +58,8 @@ struct D3D12Queue
     D3D12_COMMAND_LIST_TYPE type = D3D12_COMMAND_LIST_TYPE_DIRECT;
     u64 signalled = 0;
     u64 submissions = 0;
+    // What the last accepted batch contained, for `submissionInfo`.
+    SubmissionInfo last{};
 };
 
 struct D3D12BufferSlot
@@ -72,14 +82,27 @@ struct D3D12TextureSlot
     TextureDesc desc{};
     ResourceState states[kMaxTrackedSubresources]{};
     D3D12_RESOURCE_STATES native[kMaxTrackedSubresources]{};
+    // A presentable image belongs to its swapchain: the two texture entries that
+    // would release it are refused, because the surface outlives any one image.
+    bool swapChainOwned = false;
     bool alive = false;
     u32 generation = 0;
+};
+
+// Which descriptor heap a view's index refers to. Render-target and depth views
+// cannot live in the shader-visible heap, so each kind has its own.
+enum class DescriptorHeapKind : cyber::core::u8
+{
+    Resource = 0,
+    RenderTarget,
+    DepthStencil,
 };
 
 struct D3D12ViewSlot
 {
     TextureHandle texture{};
     TextureViewDesc desc{};
+    DescriptorHeapKind heap = DescriptorHeapKind::Resource;
     // Index into the device's shader-visible view heap.
     u32 descriptorIndex = 0;
     bool alive = false;
@@ -98,6 +121,9 @@ struct D3D12SamplerSlot
 // number, so a layout that exceeds it is refused before it reaches here.
 inline constexpr u32 kMaxLayoutEntries = 64;
 
+// Most vertex buffers one list may have bound. This is the API's own slot count.
+inline constexpr u32 kMaxVertexBindings = 32;
+
 struct D3D12ShaderSlot
 {
     // Compiled bytecode, owned. HLSL is compiled at creation, so what is stored
@@ -114,8 +140,13 @@ struct D3D12LayoutSlot
 {
     BindGroupLayoutEntry entries[kMaxLayoutEntries]{};
     u32 entryCount = 0;
-    // Descriptors this group occupies in a table: the sum of every array count.
+    // Descriptors this layout occupies: the sum of every array count.
     u32 descriptorCount = 0;
+    // The same total split by heap. A sampler descriptor cannot live in the
+    // CBV/SRV/UAV heap, so a group is two blocks rather than one, and each block
+    // is a separate table in the root signature.
+    u32 resourceCount = 0;
+    u32 samplerCount = 0;
     bool alive = false;
     u32 generation = 0;
 };
@@ -123,10 +154,13 @@ struct D3D12LayoutSlot
 struct D3D12GroupSlot
 {
     BindGroupLayoutHandle layout{};
-    // First descriptor of this group's contiguous block in the shader-visible
-    // heap, and how many it spans.
+    // First descriptor of this group's resource block in the shader-visible heap,
+    // and how many it spans.
     u32 descriptorIndex = 0;
     u32 descriptorCount = 0;
+    // First descriptor of its sampler block in the sampler heap, and how many.
+    u32 samplerIndex = 0;
+    u32 samplerCount = 0;
     bool alive = false;
     u32 generation = 0;
 };
@@ -139,6 +173,17 @@ struct D3D12PipelineSlot
     ID3D12PipelineState* state = nullptr;
     PipelineKind kind = PipelineKind::Graphics;
     u64 hash = 0;
+    // Size of the pipeline's vertex layout, kept because a vertex buffer view
+    // needs the stride and the pipeline is what declares it.
+    u32 vertexBindingCount = 0;
+    u32 vertexStrides[kMaxVertexBindings]{};
+    // What the pipeline was built for, so a list can refuse to bind it into a
+    // pass whose attachments or sample count differ.
+    PipelineLayoutHandle layout{};
+    u32 sampleCount = 1;
+    u32 colorAttachmentCount = 0;
+    Format colorFormats[kMaxColorAttachments]{};
+    Format depthStencilFormat = Format::Count;
     bool alive = false;
     u32 generation = 0;
 };
@@ -153,13 +198,80 @@ struct D3D12PipelineCacheSlot
     u32 generation = 0;
 };
 
+// No root parameter: a slot uses no descriptors, or a range it needs is absent.
+inline constexpr u32 kNoRootParameter = 0xFFFFFFFFU;
+
 struct D3D12PipelineLayoutSlot
 {
     ID3D12RootSignature* rootSignature = nullptr;
+    // Root parameter index of each bind-group slot's resource table and sampler
+    // table, or `kNoRootParameter`. Root parameter order is a property of the
+    // signature, not of the slot number, so it is recorded rather than derived.
+    u32 resourceParameter[kBindGroupSlotCount]{};
+    u32 samplerParameter[kBindGroupSlotCount]{};
     // Descriptor count per slot, so a bind group can be checked against the
     // layout it will be bound through.
     u32 descriptorCounts[kBindGroupSlotCount]{};
     u32 pushConstantBytes = 0;
+    // Root parameter index of the push-constant range, or `kNoRootParameter`.
+    u32 pushConstantParameter = kNoRootParameter;
+    bool alive = false;
+    u32 generation = 0;
+};
+
+// One recording session. The allocator and the list are created together and
+// reset together, so a list never holds a reset allocator's stale state.
+struct D3D12CommandListSlot
+{
+    // The device the list records against. A list's interface only ever receives
+    // its own state, so the way back to the tables it resolves handles in is here.
+    D3D12Device* device = nullptr;
+    ID3D12CommandAllocator* allocator = nullptr;
+    ID3D12GraphicsCommandList* list = nullptr;
+    QueueKind queue = QueueKind::Graphics;
+    CommandListState state = CommandListState::Initial;
+    CommandListStats stats{};
+    RenderPassInfo pass{};
+    bool passOpen = false;
+    // Depth of open debug labels, so `end` can refuse an unbalanced list.
+    u32 labelDepth = 0;
+    PipelineHandle pipeline{};
+    PipelineKind pipelineKind = PipelineKind::Graphics;
+    PipelineLayoutHandle layout{};
+    BindGroupHandle groups[kBindGroupSlotCount]{};
+    BufferHandle vertexBuffers[kMaxVertexBindings]{};
+    u64 vertexOffsets[kMaxVertexBindings]{};
+    bool vertexBound[kMaxVertexBindings]{};
+    BufferHandle indexBuffer{};
+    u64 indexOffset = 0;
+    IndexFormat indexFormat = IndexFormat::Uint32;
+    bool alive = false;
+    u32 generation = 0;
+};
+
+// Images of one swapchain. The textures and views are entries in the device's
+// own tables, marked `swapChainOwned` so destroying them through the texture
+// entry is refused: the presentable surface owns their lifetime.
+inline constexpr u32 kMaxSwapChainImages = 4;
+
+struct D3D12SwapChainSlot
+{
+    // The device the images live in, because a swapchain's own interface only
+    // ever receives this slot.
+    D3D12Device* device = nullptr;
+    IDXGISwapChain3* swapChain = nullptr;
+    Format format = Format::BGRA8UnormSrgb;
+    u32 width = 0;
+    u32 height = 0;
+    u32 imageCount = 0;
+    PresentMode presentMode = PresentMode::Fifo;
+    // Presented before the surface can be presented without tearing.
+    bool allowsTearing = false;
+    TextureHandle textures[kMaxSwapChainImages]{};
+    TextureViewHandle views[kMaxSwapChainImages]{};
+    bool acquired = false;
+    u32 currentImage = 0;
+    u64 presents = 0;
     bool alive = false;
     u32 generation = 0;
 };
@@ -176,7 +288,8 @@ struct D3D12Device
           layouts(allocator), freeLayoutSlots(allocator), groups(allocator),
           freeGroupSlots(allocator), pipelineLayouts(allocator), freePipelineLayoutSlots(allocator),
           pipelines(allocator), freePipelineSlots(allocator), pipelineCaches(allocator),
-          freePipelineCacheSlots(allocator)
+          freePipelineCacheSlots(allocator), commandLists(allocator),
+          freeCommandListSlots(allocator), swapChains(allocator), freeSwapChainSlots(allocator)
     {
     }
 
@@ -214,15 +327,32 @@ struct D3D12Device
     DynamicArray<u32> freePipelineSlots;
     DynamicArray<D3D12PipelineCacheSlot> pipelineCaches;
     DynamicArray<u32> freePipelineCacheSlots;
+    DynamicArray<D3D12CommandListSlot> commandLists;
+    DynamicArray<u32> freeCommandListSlots;
+    DynamicArray<D3D12SwapChainSlot> swapChains;
+    DynamicArray<u32> freeSwapChainSlots;
 
     // Shader-visible descriptors for views and samplers. One heap each because
-    // D3D12 refuses to mix sampler and resource descriptors in one heap.
+    // D3D12 refuses to mix sampler and resource descriptors in one heap. The
+    // first descriptor of each heap is scratch, for a clear that names an
+    // attachment but has no view to reach it by.
     ID3D12DescriptorHeap* viewHeap = nullptr;
     u32 viewDescriptorSize = 0;
-    u32 viewDescriptorsUsed = 0;
+    u32 viewDescriptorsUsed = 1;
     ID3D12DescriptorHeap* samplerHeap = nullptr;
     u32 samplerDescriptorSize = 0;
-    u32 samplerDescriptorsUsed = 0;
+    u32 samplerDescriptorsUsed = 1;
+    // Attachment descriptors: the API forbids making these shader-visible, so
+    // they have heaps of their own. Both reserve their first descriptor as
+    // scratch, for a clear that names an attachment with no view to reach it.
+    ID3D12DescriptorHeap* rtvHeap = nullptr;
+    u32 rtvDescriptorSize = 0;
+    u32 rtvDescriptorsUsed = 1;
+    ID3D12DescriptorHeap* dsvHeap = nullptr;
+    u32 dsvDescriptorSize = 0;
+    u32 dsvDescriptorsUsed = 1;
+    // Submissions every queue has accepted, for `SubmissionInfo`.
+    u64 submissions = 0;
 
     memory::Allocator* allocator = nullptr;
     u64 fenceSignals = 0;
@@ -244,6 +374,8 @@ struct D3D12Device
 [[nodiscard]] D3D12PipelineSlot* Resolve(D3D12Device& device, PipelineHandle handle) noexcept;
 [[nodiscard]] D3D12PipelineCacheSlot* Resolve(D3D12Device& device,
                                               PipelineCacheHandle handle) noexcept;
+[[nodiscard]] D3D12CommandListSlot* Resolve(D3D12Device& device, CommandListHandle handle) noexcept;
+[[nodiscard]] D3D12SwapChainSlot* Resolve(D3D12Device& device, SwapChainHandle handle) noexcept;
 
 // Conversion between the RHI's vocabulary and D3D12's. Every one is total: an
 // unknown enumerator maps to the API's conservative answer rather than asserting,
@@ -267,6 +399,10 @@ struct D3D12Device
 // `ErrorCode::Internal` when the list or its allocator cannot be created.
 [[nodiscard]] Status<Error>
 SubmitBarriers(D3D12Device& device, const D3D12_RESOURCE_BARRIER* barriers, u32 count) noexcept;
+
+// CPU handle of a view, in whichever heap it was created in.
+[[nodiscard]] D3D12_CPU_DESCRIPTOR_HANDLE DescriptorCpuHandle(D3D12Device& device,
+                                                              const D3D12ViewSlot& view) noexcept;
 
 // Sets the debug name of an object from a UTF-8 label, when one is given.
 void NameObject(ID3D12Object* object, const char* label) noexcept;
@@ -346,6 +482,28 @@ void ReleaseResources(D3D12Device& device) noexcept;
 [[nodiscard]] Status<Error> D3D12PipelineCacheBytes(const void* internal, PipelineCacheHandle cache,
                                                     memory::Allocator& allocator,
                                                     DynamicArray<memory::Byte>* out) noexcept;
+
+// Recording, submission, and presentation, implemented in `d3d12_commands.cpp`
+// and `d3d12_swapchain.cpp`.
+[[nodiscard]] Status<Error> D3D12CreateCommandList(void* internal, const CommandListDesc& desc,
+                                                   CommandListHandle* out,
+                                                   CommandListCreation* creation) noexcept;
+[[nodiscard]] Status<Error> D3D12DestroyCommandList(void* internal,
+                                                    CommandListHandle list) noexcept;
+[[nodiscard]] Status<Error> D3D12Submit(void* internal, const SubmitDesc& desc) noexcept;
+[[nodiscard]] SubmissionInfo D3D12SubmissionInfo(const void* internal, QueueKind kind) noexcept;
+[[nodiscard]] Status<Error> D3D12CreateSwapChain(void* internal, const SwapChainDesc& desc,
+                                                 SwapChainHandle* out,
+                                                 SwapChainCreation* creation) noexcept;
+[[nodiscard]] Status<Error> D3D12DestroySwapChain(void* internal,
+                                                  SwapChainHandle swapchain) noexcept;
+
+// Ends every recording and releases every list's allocator. Called once, from
+// device teardown, after `releaseResources`.
+void ReleaseCommandLists(D3D12Device& device) noexcept;
+
+// Releases every swapchain's images. Called once, from device teardown.
+void ReleaseSwapChains(D3D12Device& device) noexcept;
 
 }  // namespace cyber::rhi::detail
 

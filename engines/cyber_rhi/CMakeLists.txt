@@ -9,6 +9,8 @@ set(CYBER_RHI_SOURCES
     src/d3d12/d3d12_device.cpp
     src/d3d12/d3d12_binding.cpp
     src/d3d12/d3d12_pipelines.cpp
+    src/d3d12/d3d12_commands.cpp
+    src/d3d12/d3d12_swapchain.cpp
     src/d3d12/d3d12_resources.cpp
     src/d3d12/d3d12_textures.cpp
     src/device.cpp
@@ -231,6 +233,11 @@ if(CYBER_RHI_ENABLE_D3D12)
     cyber_add_test(
         NAME rhi_d3d12_pipelines
         SOURCES tests/d3d12_pipelines_test.cpp
+        DEPENDS rhi memory
+    )
+    cyber_add_test(
+        NAME rhi_d3d12_commands
+        SOURCES tests/d3d12_commands_test.cpp
         DEPENDS rhi memory
     )
 endif()

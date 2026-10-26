@@ -8,6 +8,20 @@ semantic versioning once a public API exists.
 
 ### Added
 
+- Phase 14, increment 6: Direct3D 12 command recording, submission, and a
+  flip-model swapchain. `CommandListInterface` is implemented over a real
+  `ID3D12GraphicsCommandList` with every recording rule the contract states —
+  one open pass, one open pipeline of the matching kind, bind groups checked
+  against the layout, vertex and index buffers checked against the states they
+  must be in, and an ended list as the only thing a queue accepts. `submit`
+  applies GPU waits, runs the batch, and reaches its signals. A swapchain adopts
+  its images into the device's texture and view tables and presents through
+  `IDXGISwapChain3`.
+- Attachment descriptors got the heaps the API requires: render-target and depth
+  views now live in dedicated RTV/DSV heaps, because Direct3D 12 refuses them in
+  a shader-visible heap. Samplers similarly take a block of their own, so a bind
+  group is two descriptor ranges with a root parameter each.
+
 - Phase 14, increment 5: Direct3D 12 graphics and compute pipeline state.
   `GraphicsPipelineDesc` becomes a `D3D12_GRAPHICS_PIPELINE_STATE_DESC` with
   every state translated — vertex layout, blend per attachment, rasterizer,

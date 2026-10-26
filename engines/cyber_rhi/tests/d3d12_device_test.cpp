@@ -220,16 +220,12 @@ CG_TEST(d3d12_device_unimplemented_calls_report_unsupported)
     Device device;
     CG_REQUIRE(OpenSoftwareDevice(device, heap));
 
-    // A call this increment has not reached answers `Unsupported` with a message
-    // naming it, rather than pretending to succeed or crashing. Resources,
-    // shaders, and pipelines landed; recording is the current boundary.
-    const auto created = device.CreateCommandList(CommandListDesc{});
+    // A queue class this device has no queue for is refused, and the list it
+    // would have produced is never half-created.
+    CommandListDesc badQueue{};
+    badQueue.queue = QueueKind::Count;
+    const auto created = device.CreateCommandList(badQueue);
     CG_EXPECT_FALSE(created);
-    if (!created)
-    {
-        CG_EXPECT_EQ(created.Error().code, cyber::core::ErrorCode::Unsupported);
-        CG_EXPECT_TRUE(created.Error().message != nullptr);
-    }
 
     // A destroy of something that was never created is a stale handle.
     const auto destroyed = device.DestroyBuffer(BufferHandle{});

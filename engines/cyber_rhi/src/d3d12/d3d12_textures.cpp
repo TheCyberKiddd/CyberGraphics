@@ -26,6 +26,14 @@ using cyber::memory::kInvalidHandleIndex;
     return next == 0 ? 1 : next;
 }
 
+[[nodiscard]] D3D12_CPU_DESCRIPTOR_HANDLE HeapCpuHandle(ID3D12DescriptorHeap* heap,
+                                                        u32 descriptorSize, u32 index) noexcept
+{
+    D3D12_CPU_DESCRIPTOR_HANDLE handle = heap->GetCPUDescriptorHandleForHeapStart();
+    handle.ptr += static_cast<SIZE_T>(index) * descriptorSize;
+    return handle;
+}
+
 [[nodiscard]] D3D12_CPU_DESCRIPTOR_HANDLE ViewCpuHandle(D3D12Device& device, u32 index) noexcept
 {
     D3D12_CPU_DESCRIPTOR_HANDLE handle = device.viewHeap->GetCPUDescriptorHandleForHeapStart();
@@ -334,16 +342,31 @@ Status<Error> D3D12CreateTextureView(void* internal, const TextureViewDesc& desc
                            "d3d12 backend: view range is outside the texture");
     }
 
-    const u32 descriptorIndex = device.viewDescriptorsUsed;
+    const bool depthTextureFirst = HasUsage(texture->desc.usage, TextureUsage::DepthStencil);
+    const bool colorTexture = HasUsage(texture->desc.usage, TextureUsage::RenderTarget);
+    const DescriptorHeapKind heapKind =
+        depthTextureFirst
+            ? DescriptorHeapKind::DepthStencil
+            : (colorTexture ? DescriptorHeapKind::RenderTarget : DescriptorHeapKind::Resource);
+    u32& used = heapKind == DescriptorHeapKind::DepthStencil
+                    ? device.dsvDescriptorsUsed
+                    : (heapKind == DescriptorHeapKind::RenderTarget ? device.rtvDescriptorsUsed
+                                                                    : device.viewDescriptorsUsed);
+    const u32 descriptorIndex = used;
     const u32 capacity = D3D12_MAX_SHADER_VISIBLE_DESCRIPTOR_HEAP_SIZE_TIER_1;
     if (descriptorIndex >= capacity)
     {
         return StatusError(ErrorCode::OutOfRange,
                            "d3d12 backend: shader-visible descriptor heap is full");
     }
-    const D3D12_CPU_DESCRIPTOR_HANDLE destination = ViewCpuHandle(device, descriptorIndex);
+    const D3D12_CPU_DESCRIPTOR_HANDLE destination =
+        heapKind == DescriptorHeapKind::DepthStencil
+            ? HeapCpuHandle(device.dsvHeap, device.dsvDescriptorSize, descriptorIndex)
+            : (heapKind == DescriptorHeapKind::RenderTarget
+                   ? HeapCpuHandle(device.rtvHeap, device.rtvDescriptorSize, descriptorIndex)
+                   : ViewCpuHandle(device, descriptorIndex));
 
-    const bool depthTexture = HasUsage(texture->desc.usage, TextureUsage::DepthStencil);
+    const bool depthTexture = depthTextureFirst;
     if (depthTexture)
     {
         D3D12_DEPTH_STENCIL_VIEW_DESC view{};
@@ -405,7 +428,7 @@ Status<Error> D3D12CreateTextureView(void* internal, const TextureViewDesc& desc
         }
         device.device->CreateShaderResourceView(texture->resource, &view, destination);
     }
-    device.viewDescriptorsUsed = descriptorIndex + 1;
+    used = descriptorIndex + 1;
 
     u32 index = kInvalidHandleIndex;
     if (device.freeViewSlots.Size() > 0)
@@ -428,6 +451,7 @@ Status<Error> D3D12CreateTextureView(void* internal, const TextureViewDesc& desc
     slot.texture = desc.texture;
     slot.desc = desc;
     slot.descriptorIndex = descriptorIndex;
+    slot.heap = heapKind;
 
     TextureViewHandle handle;
     handle.index = index;
@@ -705,6 +729,21 @@ Status<Error> D3D12Transition(void* internal, cyber::memory::Span<const BufferBa
     }
 
     return SubmitBarriers(device, barriers.Data(), static_cast<u32>(barriers.Size()));
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE DescriptorCpuHandle(D3D12Device& device,
+                                                const D3D12ViewSlot& view) noexcept
+{
+    switch (view.heap)
+    {
+    case DescriptorHeapKind::RenderTarget:
+        return HeapCpuHandle(device.rtvHeap, device.rtvDescriptorSize, view.descriptorIndex);
+    case DescriptorHeapKind::DepthStencil:
+        return HeapCpuHandle(device.dsvHeap, device.dsvDescriptorSize, view.descriptorIndex);
+    case DescriptorHeapKind::Resource:
+        break;
+    }
+    return HeapCpuHandle(device.viewHeap, device.viewDescriptorSize, view.descriptorIndex);
 }
 
 void ReleaseResources(D3D12Device& device) noexcept
