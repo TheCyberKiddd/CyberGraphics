@@ -1,3 +1,10 @@
+# The Direct3D 12 backend is the only code in the renderer that includes a
+# graphics API header. It lives under `src/d3d12/` so that rule stays greppable.
+set(CYBER_RHI_D3D12_SOURCES)
+if(CYBER_RHI_ENABLE_D3D12)
+    list(APPEND CYBER_RHI_D3D12_SOURCES src/d3d12/d3d12_backend.cpp)
+endif()
+
 set(CYBER_RHI_SOURCES
     src/command_list.cpp
     src/device.cpp
@@ -8,6 +15,7 @@ set(CYBER_RHI_SOURCES
     src/retirement.cpp
     src/submission.cpp
     src/swapchain.cpp
+    ${CYBER_RHI_D3D12_SOURCES}
 )
 
 set(CYBER_RHI_HEADERS
@@ -17,6 +25,7 @@ set(CYBER_RHI_HEADERS
     include/cyber/rhi/capabilities.h
     include/cyber/rhi/command_list.h
     include/cyber/rhi/conventions.h
+    include/cyber/rhi/d3d12.h
     include/cyber/rhi/descriptors.h
     include/cyber/rhi/device.h
     include/cyber/rhi/format.h
@@ -41,6 +50,16 @@ cyber_add_module(
     PUBLIC_HEADERS ${CYBER_RHI_HEADERS}
     DEPENDS core memory
 )
+
+if(CYBER_RHI_ENABLE_D3D12)
+    # Both are `PUBLIC` on purpose. The definition decides what
+    # `IsD3D12CompiledIn()` returns, so it must agree with the binary a consumer
+    # links. The libraries are `PUBLIC` because `cyber_rhi` is static: a consumer
+    # that calls `D3D12Backend()` resolves its DXGI imports itself, and a
+    # `PRIVATE` entry would leave those unresolved at link time.
+    target_compile_definitions(cyber_rhi PUBLIC CYBER_RHI_HAS_D3D12=1)
+    target_link_libraries(cyber_rhi PUBLIC d3d12 dxgi)
+endif()
 
 cyber_add_test(
     NAME rhi_public_headers
@@ -179,3 +198,13 @@ cyber_add_test(
     SOURCES tests/swapchain_test.cpp
     DEPENDS rhi memory
 )
+
+if(CYBER_RHI_ENABLE_D3D12)
+    # The adapter layer is the one part of the D3D12 backend that runs on any
+    # Windows machine: WARP is always present, so CI exercises it without a GPU.
+    cyber_add_test(
+        NAME rhi_d3d12_adapters
+        SOURCES tests/d3d12_adapters_test.cpp
+        DEPENDS rhi memory
+    )
+endif()

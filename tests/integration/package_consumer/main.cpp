@@ -9,6 +9,7 @@
 #include <cyber/memory/memory.h>
 #include <cyber/perf/perf.h>
 #include <cyber/platform/platform.h>
+#include <cyber/rhi/d3d12.h>
 #include <cyber/rhi/rhi.h>
 #include <cyber/software/raster.h>
 #include <cyber/software/software.h>
@@ -809,6 +810,37 @@ int main()
         if (!collected || collected.Value() != 1 || device.TextureInfoOf(color.Value()).valid)
         {
             return 81;
+        }
+    }
+
+    // Phase 14: the Direct3D 12 backend is reachable through the installed
+    // package, and the installed header's availability query agrees with the
+    // linked binary. This is the one place the package's D3D12 link requirements
+    // are proved: a `PRIVATE` library entry would fail to link here.
+    {
+        const cyber::rhi::Backend* d3d12 = cyber::rhi::D3D12Backend();
+        if (cyber::rhi::IsD3D12CompiledIn() != (d3d12 != nullptr))
+        {
+            return 82;
+        }
+        if (d3d12 != nullptr)
+        {
+            if (d3d12->kind != cyber::rhi::BackendKind::D3D12 ||
+                std::strcmp(d3d12->name, "d3d12") != 0 || d3d12->enumerateAdapters == nullptr)
+            {
+                return 83;
+            }
+            if (d3d12->enumerateAdapters(nullptr, 0) < 1)
+            {
+                return 84;
+            }
+            cyber::rhi::AdapterInfo adapters[4]{};
+            const cyber::core::u32 found = cyber::rhi::EnumerateAdapters(
+                *d3d12, cyber::memory::Span<cyber::rhi::AdapterInfo>(adapters, 4));
+            if (found < 1 || adapters[0].name[0] == '\0')
+            {
+                return 85;
+            }
         }
     }
 
