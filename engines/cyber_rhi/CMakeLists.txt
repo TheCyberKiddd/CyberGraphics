@@ -1,12 +1,11 @@
-# The Direct3D 12 backend is the only code in the renderer that includes a
-# graphics API header. It lives under `src/d3d12/` so that rule stays greppable.
-set(CYBER_RHI_D3D12_SOURCES)
-if(CYBER_RHI_ENABLE_D3D12)
-    list(APPEND CYBER_RHI_D3D12_SOURCES src/d3d12/d3d12_backend.cpp)
-endif()
-
 set(CYBER_RHI_SOURCES
     src/command_list.cpp
+    # Compiled on every platform: without the SDK the file's fallback branch
+    # defines `D3D12Backend()` to return null, so the symbol `d3d12.h` declares
+    # always exists and a consumer never fails to link. This is the only source
+    # in the renderer that includes a graphics API header, and it does so behind
+    # `CYBER_RHI_HAS_D3D12`.
+    src/d3d12/d3d12_backend.cpp
     src/device.cpp
     src/frame_ring.cpp
     src/null_backend.cpp
@@ -15,7 +14,6 @@ set(CYBER_RHI_SOURCES
     src/retirement.cpp
     src/submission.cpp
     src/swapchain.cpp
-    ${CYBER_RHI_D3D12_SOURCES}
 )
 
 set(CYBER_RHI_HEADERS
