@@ -132,6 +132,10 @@ All commands ran on the machine named above.
 The ASan runtime DLL is still not on `PATH` in a bare shell, so `build/debug-asan`
 needs `VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64` prepended; with it, 63/63 pass.
 
+CI run [40285338746](https://github.com/TheCyberKiddd/CyberGraphics/actions/runs/40285338746)
+is green on all five jobs: structure and dependency law, Windows MSVC, Linux
+clang + ASan, Linux clang + UBSan, and formatting.
+
 New test binaries:
 
 | Test | Cases | What it proves |
