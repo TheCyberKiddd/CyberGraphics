@@ -101,16 +101,20 @@ tests pass in debug; the design is ADR 0013.
   backend tracks state per list and per subresource, so a missing barrier is a
   record-time error that names the resource. 74 tests pass in every preset; the
   design is ADR 0016.
-- Phase 14 (in progress): the Direct3D 12 backend. Adapter discovery, the device,
-  and the resource layer are in: `cyber_rhi` enumerates DXGI adapters with vendor,
-  device, and memory, appends Microsoft's WARP adapter last so a machine without a
-  GPU is still testable, creates a real `ID3D12Device` with three command queues
-  and timeline fences, and places buffers, textures, views, and samplers on the
-  heaps and descriptors the API names, with per-subresource state tracked for
-  barriers. The backend compiles out entirely when `CYBER_RHI_ENABLE_D3D12` is
-  off. 78 tests pass in every preset; the design is ADR 0017. The descriptor ring,
-  the upload ring, shader compilation, pipelines, command recording, and the two
-  reference images follow.
+- Phase 14: the Direct3D 12 backend. `cyber_rhi` enumerates DXGI adapters with
+  vendor, device, and memory, appends Microsoft's WARP adapter last so a machine
+  without a GPU is still testable, and creates a real `ID3D12Device` with three
+  command queues, timeline fences, buffers, textures, views, samplers, HLSL
+  shaders, bind groups over descriptor tables, graphics and compute pipelines with
+  `ID3D12PipelineLibrary` caches, command lists, submission, and a flip-model
+  swapchain. The done-when line is a comparison in one process: the same scene —
+  a colored triangle, then a textured cube — rendered by the D3D12 backend and by
+  `cyber_software_renderer`, compared with a recorded tolerance. The triangle is
+  exact and the cube differs on 8 of 16384 pixels, all on silhouette edges. The
+  debug layer runs with GPU-based validation and any message fails a test. The
+  backend compiles out entirely when `CYBER_RHI_ENABLE_D3D12` is off. 81 tests
+  pass in every preset; the design is ADR 0017 and the evidence is the Phase 14
+  report.
 
 See [engines/MODULES.md](engines/MODULES.md) for the module index and
 [docs/architecture/overview.md](docs/architecture/overview.md) for the design.

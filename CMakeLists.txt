@@ -63,6 +63,13 @@ add_subdirectory(engines/cyber_jobs)
 add_subdirectory(engines/cyber_rhi)
 add_subdirectory(engines/cyber_software_renderer)
 
+if(CYBER_BUILD_TESTS AND CYBER_RHI_ENABLE_D3D12)
+    # The Phase 14 image comparison is the one test that may link both
+    # renderers: no module may depend on both the RHI and the software
+    # renderer, so the cross-module test is built from tests/ instead.
+    add_subdirectory(tests/integration/backend_compare)
+endif()
+
 if(CYBER_BUILD_SAMPLES)
     add_subdirectory(samples)
 endif()

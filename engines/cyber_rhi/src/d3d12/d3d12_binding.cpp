@@ -520,9 +520,19 @@ Status<Error> D3D12CreateBindGroup(void* internal, const BindGroupDesc& desc,
                     return StatusError(ErrorCode::InvalidArgument,
                                        "d3d12 backend: group names a stale texture view");
                 }
-                device.device->CopyDescriptorsSimple(1, destination,
-                                                     CpuHandleAt(device, view->descriptorIndex),
-                                                     D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+                const D3D12TextureSlot* texture = Resolve(device, view->texture);
+                if (texture == nullptr)
+                {
+                    return StatusError(ErrorCode::InvalidArgument,
+                                       "d3d12 backend: group names a view of a stale texture");
+                }
+                // The view is built again here, straight into the group's own
+                // descriptor, rather than copied out of the heap the view lives
+                // in: D3D12 makes a shader-visible heap write-only for the CPU,
+                // so a copy that reads a descriptor back out of one is invalid.
+                D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
+                BuildSampledViewDesc(*texture, view->desc, srv);
+                device.device->CreateShaderResourceView(texture->resource, &srv, destination);
                 break;
             }
             case BindingType::StorageTexture:
@@ -555,9 +565,9 @@ Status<Error> D3D12CreateBindGroup(void* internal, const BindGroupDesc& desc,
                     return StatusError(ErrorCode::InvalidArgument,
                                        "d3d12 backend: group names a stale sampler");
                 }
-                device.device->CopyDescriptorsSimple(1, destination,
-                                                     SamplerCpuAt(device, sampler->descriptorIndex),
-                                                     D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
+                D3D12_SAMPLER_DESC samplerDesc{};
+                BuildSamplerDesc(sampler->desc, samplerDesc);
+                device.device->CreateSampler(&samplerDesc, destination);
                 break;
             }
             case BindingType::Count:

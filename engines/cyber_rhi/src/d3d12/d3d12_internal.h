@@ -404,6 +404,16 @@ SubmitBarriers(D3D12Device& device, const D3D12_RESOURCE_BARRIER* barriers, u32 
 [[nodiscard]] D3D12_CPU_DESCRIPTOR_HANDLE DescriptorCpuHandle(D3D12Device& device,
                                                               const D3D12ViewSlot& view) noexcept;
 
+// Fills the shader resource view a sampled view addresses. A bind group writes
+// this view straight into its own descriptor instead of copying one out of the
+// view's heap: D3D12 makes a shader-visible heap write-only for the CPU, so a
+// copy that reads a descriptor back out of one is invalid.
+void BuildSampledViewDesc(const D3D12TextureSlot& texture, const TextureViewDesc& desc,
+                          D3D12_SHADER_RESOURCE_VIEW_DESC& out) noexcept;
+
+// Fills the API's sampler description from the RHI's.
+void BuildSamplerDesc(const SamplerDesc& desc, D3D12_SAMPLER_DESC& out) noexcept;
+
 // Sets the debug name of an object from a UTF-8 label, when one is given.
 void NameObject(ID3D12Object* object, const char* label) noexcept;
 

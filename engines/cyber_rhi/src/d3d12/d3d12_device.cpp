@@ -4,6 +4,10 @@
 
 #include "d3d12_internal.h"
 
+#include <cyber/core/log.h>
+
+#include <cstdio>
+#include <cstdlib>
 #include <new>
 
 namespace cyber::rhi::detail
@@ -596,6 +600,92 @@ Status<Error> D3D12WaitIdle(void* internal) noexcept
     return true;
 }
 
+// Messages this backend provokes deliberately, filtered out of the report: the
+// layer's own startup banner, and its note that a cleared color target carries
+// no optimized clear value. The RHI takes a clear color from the pass rather
+// than the texture, so a color target cannot hold the value the layer wants to
+// see; anything past these two is something the caller's own recording did.
+constexpr D3D12_MESSAGE_ID kByDesignMessages[] = {
+    D3D12_MESSAGE_ID_CREATEDEVICE_DEBUG_LAYER_STARTUP_OPTIONS,
+    D3D12_MESSAGE_ID_CLEARRENDERTARGETVIEW_MISMATCHINGCLEARVALUE,
+};
+
+// Keeps the by-design messages out of the queue, so the report below only ever
+// names something worth reading.
+void ConfigureDebugLayer(D3D12Device& device) noexcept
+{
+    if (device.debug == nullptr)
+    {
+        return;
+    }
+    ComOwner<ID3D12InfoQueue> info;
+    if (FAILED(device.device->QueryInterface(__uuidof(ID3D12InfoQueue), info.PutVoid())))
+    {
+        return;
+    }
+    D3D12_INFO_QUEUE_FILTER filter{};
+    filter.DenyList.NumIDs =
+        static_cast<UINT>(sizeof(kByDesignMessages) / sizeof(kByDesignMessages[0]));
+    filter.DenyList.pIDList = const_cast<D3D12_MESSAGE_ID*>(kByDesignMessages);
+    (void)info->AddStorageFilterEntries(&filter);
+}
+
+// Reports what the debug layer stored, on the `Rhi` channel. The layer keeps its
+// messages in a queue nothing else reads, so a message not drained here is a
+// message nobody ever sees, and the build guide counts any message as a test
+// failure: the tests watch the channel this writes to.
+void ReportDebugMessages(D3D12Device& device) noexcept
+{
+    if (device.debug == nullptr)
+    {
+        return;
+    }
+    ComOwner<ID3D12InfoQueue> info;
+    if (FAILED(device.device->QueryInterface(__uuidof(ID3D12InfoQueue), info.PutVoid())))
+    {
+        return;
+    }
+
+    const UINT64 messages = info->GetNumStoredMessages();
+    for (UINT64 index = 0; index < messages; ++index)
+    {
+        SIZE_T bytes = 0;
+        (void)info->GetMessage(index, nullptr, &bytes);
+        if (bytes == 0)
+        {
+            continue;
+        }
+        auto* storage = static_cast<char*>(std::malloc(bytes));
+        if (storage == nullptr)
+        {
+            continue;
+        }
+        if (SUCCEEDED(info->GetMessage(index, reinterpret_cast<D3D12_MESSAGE*>(storage), &bytes)))
+        {
+            const auto* message = reinterpret_cast<const D3D12_MESSAGE*>(storage);
+            const bool corruption = message->Severity == D3D12_MESSAGE_SEVERITY_CORRUPTION;
+            const char* text = message->pDescription == nullptr ? "" : message->pDescription;
+            if (corruption || message->Severity == D3D12_MESSAGE_SEVERITY_ERROR)
+            {
+                CG_LOG(Error, Rhi, "d3d12 debug layer [%u]: %.380s",
+                       static_cast<unsigned>(message->ID), text);
+            }
+            else
+            {
+                // Informational notes are the layer talking about itself; only a
+                // warning still says something about this device's use.
+                if (message->Severity == D3D12_MESSAGE_SEVERITY_WARNING)
+                {
+                    CG_LOG(Warning, Rhi, "d3d12 debug layer [%u]: %.380s",
+                           static_cast<unsigned>(message->ID), text);
+                }
+            }
+        }
+        std::free(storage);
+    }
+    info->ClearStoredMessages();
+}
+
 }  // namespace
 
 const DeviceInterface* D3D12Interface() noexcept
@@ -684,6 +774,7 @@ Result<DeviceCreation, Error> CreateD3D12Device(const DeviceDesc& desc,
     }
     device->allocator = &allocator;
     device->adapterInfo = DescribeAdapter(*adapter.Get());
+    ConfigureDebugLayer(*device);
 
     D3D12_FEATURE_DATA_FEATURE_LEVELS levels{};
     static const D3D_FEATURE_LEVEL requested[] = {D3D_FEATURE_LEVEL_12_2, D3D_FEATURE_LEVEL_12_1,
@@ -772,6 +863,8 @@ void DestroyD3D12Device(void* internal) noexcept
     }
     auto* device = static_cast<D3D12Device*>(internal);
     (void)D3D12WaitIdle(device);
+
+    ReportDebugMessages(*device);
 
     ReleaseResources(*device);
     ReleaseCommandLists(*device);

@@ -303,6 +303,10 @@ public:
     // its slot: destroying it releases the slot, so there is no destroy call to
     // forget and no way to destroy a list twice.
     //
+    // A submitted list must not be destroyed or reset while the GPU is still
+    // executing it: both release the command allocator the queue reads from.
+    // Wait for the submission's fence, or `WaitIdle`, before dropping the list.
+    //
     // Returns `ErrorCode::InvalidArgument` for an empty device, for a queue
     // class this device has no queue for, and for a backend whose command list
     // table is incomplete; `ErrorCode::Internal` when the backend cannot create

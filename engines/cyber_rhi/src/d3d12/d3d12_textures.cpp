@@ -100,6 +100,63 @@ void BorderColorValues(BorderColor color, float (&out)[4]) noexcept
 
 }  // namespace
 
+void BuildSampledViewDesc(const D3D12TextureSlot& texture, const TextureViewDesc& desc,
+                          D3D12_SHADER_RESOURCE_VIEW_DESC& out) noexcept
+{
+    const u32 mipCount = ResolveMipCount(texture.desc, desc.range);
+    const u32 layerCount = ResolveLayerCount(texture.desc, desc.range);
+    out = D3D12_SHADER_RESOURCE_VIEW_DESC{};
+    out.Format = ToDxgiFormat(desc.format);
+    out.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    if (desc.dimension == TextureDimension::Cube)
+    {
+        out.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
+        out.TextureCube.MipLevels = mipCount;
+        out.TextureCube.MostDetailedMip = desc.range.baseMipLevel;
+    }
+    else if (desc.dimension == TextureDimension::Dim3D)
+    {
+        out.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
+        out.Texture3D.MipLevels = mipCount;
+        out.Texture3D.MostDetailedMip = desc.range.baseMipLevel;
+    }
+    else if (desc.dimension == TextureDimension::Dim1D)
+    {
+        out.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE1D;
+        out.Texture1D.MipLevels = mipCount;
+        out.Texture1D.MostDetailedMip = desc.range.baseMipLevel;
+    }
+    else if (layerCount > 1)
+    {
+        out.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+        out.Texture2DArray.MipLevels = mipCount;
+        out.Texture2DArray.MostDetailedMip = desc.range.baseMipLevel;
+        out.Texture2DArray.FirstArraySlice = desc.range.baseArrayLayer;
+        out.Texture2DArray.ArraySize = layerCount;
+    }
+    else
+    {
+        out.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        out.Texture2D.MipLevels = mipCount;
+        out.Texture2D.MostDetailedMip = desc.range.baseMipLevel;
+    }
+}
+
+void BuildSamplerDesc(const SamplerDesc& desc, D3D12_SAMPLER_DESC& out) noexcept
+{
+    out = D3D12_SAMPLER_DESC{};
+    out.Filter = ToFilter(desc);
+    out.AddressU = ToAddressMode(desc.addressU);
+    out.AddressV = ToAddressMode(desc.addressV);
+    out.AddressW = ToAddressMode(desc.addressW);
+    out.MipLODBias = desc.mipLodBias;
+    out.MaxAnisotropy = desc.maxAnisotropy == 0 ? 1 : desc.maxAnisotropy;
+    out.ComparisonFunc = ToComparisonFunc(desc.compareFunction);
+    BorderColorValues(desc.borderColor, out.BorderColor);
+    out.MinLOD = desc.minLod;
+    out.MaxLOD = desc.maxLod;
+}
+
 // ---------------------------------------------------------------------------
 // Textures
 // ---------------------------------------------------------------------------
@@ -161,18 +218,18 @@ Status<Error> D3D12CreateTexture(void* internal, const TextureDesc& desc,
 
     D3D12_CLEAR_VALUE clear{};
     const D3D12_CLEAR_VALUE* clearPointer = nullptr;
-    if (HasUsage(desc.usage, TextureUsage::RenderTarget))
+    // A color target gets no optimized clear: the RHI chooses the clear color
+    // per pass, not per texture, so a value guessed here would disagree with
+    // most callers and the debug layer would report the mismatch on every
+    // clear. A depth target clears to a value the convention fixes, so its
+    // optimized clear is worth advertising.
+    if (HasUsage(desc.usage, TextureUsage::DepthStencil))
     {
         clear.Format = format;
-        // Reverse-Z: the far plane is 0, which is what a fresh depth buffer wants
-        // and what a fresh color buffer clears to for the engine's default.
-        clear.Color[3] = 1.0f;
-        clearPointer = &clear;
-    }
-    else if (HasUsage(desc.usage, TextureUsage::DepthStencil))
-    {
-        clear.Format = format;
-        clear.DepthStencil.Depth = 1.0f;
+        // Reverse-Z, which is this project's convention: the near plane is 1 and
+        // the far plane is 0, so a fresh depth buffer holds the far plane and
+        // nearer geometry passes a greater-or-equal test against it.
+        clear.DepthStencil.Depth = 0.0f;
         clear.DepthStencil.Stencil = 0;
         clearPointer = &clear;
     }
@@ -392,40 +449,7 @@ Status<Error> D3D12CreateTextureView(void* internal, const TextureViewDesc& desc
     else
     {
         D3D12_SHADER_RESOURCE_VIEW_DESC view{};
-        view.Format = format;
-        view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        if (desc.dimension == TextureDimension::Cube)
-        {
-            view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
-            view.TextureCube.MipLevels = mipCount;
-            view.TextureCube.MostDetailedMip = desc.range.baseMipLevel;
-        }
-        else if (desc.dimension == TextureDimension::Dim3D)
-        {
-            view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
-            view.Texture3D.MipLevels = mipCount;
-            view.Texture3D.MostDetailedMip = desc.range.baseMipLevel;
-        }
-        else if (desc.dimension == TextureDimension::Dim1D)
-        {
-            view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE1D;
-            view.Texture1D.MipLevels = mipCount;
-            view.Texture1D.MostDetailedMip = desc.range.baseMipLevel;
-        }
-        else if (layerCount > 1)
-        {
-            view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
-            view.Texture2DArray.MipLevels = mipCount;
-            view.Texture2DArray.MostDetailedMip = desc.range.baseMipLevel;
-            view.Texture2DArray.FirstArraySlice = desc.range.baseArrayLayer;
-            view.Texture2DArray.ArraySize = layerCount;
-        }
-        else
-        {
-            view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-            view.Texture2D.MipLevels = mipCount;
-            view.Texture2D.MostDetailedMip = desc.range.baseMipLevel;
-        }
+        BuildSampledViewDesc(*texture, desc, view);
         device.device->CreateShaderResourceView(texture->resource, &view, destination);
     }
     used = descriptorIndex + 1;
@@ -528,16 +552,7 @@ Status<Error> D3D12CreateSampler(void* internal, const SamplerDesc& desc,
     }
 
     D3D12_SAMPLER_DESC sampler{};
-    sampler.Filter = ToFilter(desc);
-    sampler.AddressU = ToAddressMode(desc.addressU);
-    sampler.AddressV = ToAddressMode(desc.addressV);
-    sampler.AddressW = ToAddressMode(desc.addressW);
-    sampler.MipLODBias = desc.mipLodBias;
-    sampler.MaxAnisotropy = desc.maxAnisotropy == 0 ? 1 : desc.maxAnisotropy;
-    sampler.ComparisonFunc = ToComparisonFunc(desc.compareFunction);
-    BorderColorValues(desc.borderColor, sampler.BorderColor);
-    sampler.MinLOD = desc.minLod;
-    sampler.MaxLOD = desc.maxLod;
+    BuildSamplerDesc(desc, sampler);
     device.device->CreateSampler(&sampler, SamplerCpuHandle(device, descriptorIndex));
     device.samplerDescriptorsUsed = descriptorIndex + 1;
 

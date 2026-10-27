@@ -171,7 +171,12 @@ void SetHeaps(D3D12CommandListSlot& list, D3D12Device& device) noexcept
         // state moves and no barrier is recorded.
         const bool fixedState = HasBufferUsage(buffer->desc.usage, BufferUsage::HostVisible) ||
                                 HasBufferUsage(buffer->desc.usage, BufferUsage::Readback);
-        if (!fixedState)
+        const D3D12_RESOURCE_STATES after = ToD3D12State(barrier.to);
+        // A transition to the state the barrier's own tracking already holds
+        // records nothing: the API rejects a transition whose two states are
+        // equal, and a caller asking for the state it is already in is asking
+        // for a no-op, not reporting an error.
+        if (!fixedState && buffer->native != after)
         {
             D3D12_RESOURCE_BARRIER entry{};
             entry.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -179,13 +184,13 @@ void SetHeaps(D3D12CommandListSlot& list, D3D12Device& device) noexcept
             entry.Transition.pResource = buffer->resource;
             entry.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
             entry.Transition.StateBefore = buffer->native;
-            entry.Transition.StateAfter = ToD3D12State(barrier.to);
+            entry.Transition.StateAfter = after;
             if (!out->TryPushBack(entry))
             {
                 return StatusError(ErrorCode::Internal,
                                    "d3d12 backend: barrier batch allocation failed");
             }
-            buffer->native = entry.Transition.StateAfter;
+            buffer->native = after;
         }
         buffer->state = barrier.to;
         ++*transitionCount;
@@ -221,19 +226,25 @@ void SetHeaps(D3D12CommandListSlot& list, D3D12Device& device) noexcept
                         ErrorCode::OutOfRange,
                         "d3d12 backend: texture has more subresources than are tracked");
                 }
-                D3D12_RESOURCE_BARRIER entry{};
-                entry.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-                entry.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-                entry.Transition.pResource = texture->resource;
-                entry.Transition.Subresource = subresource;
-                entry.Transition.StateBefore = texture->native[subresource];
-                entry.Transition.StateAfter = after;
-                if (!out->TryPushBack(entry))
+                // As for buffers: a subresource already in the target state needs
+                // no barrier, and recording one would hand the API a transition
+                // whose two states are equal, which it rejects.
+                if (texture->native[subresource] != after)
                 {
-                    return StatusError(ErrorCode::Internal,
-                                       "d3d12 backend: barrier batch allocation failed");
+                    D3D12_RESOURCE_BARRIER entry{};
+                    entry.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                    entry.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+                    entry.Transition.pResource = texture->resource;
+                    entry.Transition.Subresource = subresource;
+                    entry.Transition.StateBefore = texture->native[subresource];
+                    entry.Transition.StateAfter = after;
+                    if (!out->TryPushBack(entry))
+                    {
+                        return StatusError(ErrorCode::Internal,
+                                           "d3d12 backend: barrier batch allocation failed");
+                    }
+                    texture->native[subresource] = after;
                 }
-                texture->native[subresource] = after;
                 texture->states[subresource] = barrier.to;
                 ++*transitionCount;
             }
@@ -653,6 +664,7 @@ Status<Error> SetPipeline(void* internal, PipelineHandle pipeline) noexcept
                                    "d3d12 backend: pipeline attachment format differs from pass");
             }
         }
+        list->list->SetPipelineState(slot->state);
         list->list->SetGraphicsRootSignature(layout->rootSignature);
         list->list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     }
@@ -663,6 +675,7 @@ Status<Error> SetPipeline(void* internal, PipelineHandle pipeline) noexcept
             return StatusError(ErrorCode::InvalidArgument,
                                "d3d12 backend: compute pipeline inside a render pass");
         }
+        list->list->SetPipelineState(slot->state);
         list->list->SetComputeRootSignature(layout->rootSignature);
     }
 
@@ -1468,7 +1481,13 @@ Status<Error> Barrier(void* internal, memory::Span<const BufferBarrier> buffers,
     {
         return collected;
     }
-    list->list->ResourceBarrier(static_cast<UINT>(batch.Size()), batch.Data());
+    // A batch whose every entry was already in its target state collects
+    // nothing, and the API counts a call with no barrier as a no-op worth
+    // reporting.
+    if (!batch.Empty())
+    {
+        list->list->ResourceBarrier(static_cast<UINT>(batch.Size()), batch.Data());
+    }
     list->stats.barriers += transitions;
     return Status<Error>::Ok();
 }

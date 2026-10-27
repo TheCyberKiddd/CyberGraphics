@@ -328,13 +328,19 @@ Done when: a test with a missing barrier is caught by null-backend validation, a
 ### Phase 14: Direct3D 12 backend
 
 Tasks
-[ ] DXGI factory and adapter enumeration with logging of adapter name, memory, and feature level; also support Microsoft's WARP software adapter so CI can run without a GPU.
-[ ] Device, queues, fences, and command allocators and lists per frame.
+[x] DXGI factory and adapter enumeration with logging of adapter name, memory, and feature level; also support Microsoft's WARP software adapter so CI can run without a GPU.
+[x] Device, queues, fences, and command allocators and lists per frame.
 [ ] Descriptor heaps: CPU staging heaps plus a GPU-visible ring, and descriptor allocation.
 [ ] An upload ring buffer for dynamic data, and staging uploads for textures.
-[ ] Shader loading using the HLSL compiler that ships with Windows for now.
-[ ] Pipeline state objects and root signatures built from your binding layouts.
-[ ] Milestones: a colored triangle, then a textured cube; compare both with the software renderer's images.
+[x] Shader loading using the HLSL compiler that ships with Windows for now.
+[x] Pipeline state objects and root signatures built from your binding layouts.
+[x] Milestones: a colored triangle, then a textured cube; compare both with the software renderer's images.
+
+Two of these moved to Phase 15 with the GPU memory allocator that owns them
+(`docs/reports/phase-14.md`, "Known gaps"): an upload ring, and descriptor
+staging heaps — the latter because this backend writes a bind group's descriptors
+directly into the shader-visible heap, which removes the copy a staging heap
+exists to feed.
 Read first: Direct3D 12 programming guide · Programming guide for HLSL (compiler targets) · PIX overview · DirectX specifications (enhanced barriers)
 Tips
 • Turn on the debug layer and GPU-based validation from the first line of device code, and treat any message as a test failure.

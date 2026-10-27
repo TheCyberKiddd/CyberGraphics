@@ -118,13 +118,17 @@ fences, the frame ring, the retirement queue, and the swapchain. The null backen
 validates every recorded command against a per-list shadow of resource state, so
 a missing barrier is a record-time error naming the resource.
 
-Phase 14 is in progress: adapter discovery, the device, the resource layer, and
-the shader and binding model are in place, and pipelines, command recording,
-submission, the swapchain, and the two reference images land in order behind
-them. Resources
+Phase 14 is complete: adapter discovery, the device, queues and timeline fences,
+resources, HLSL shaders and the binding model, pipeline state with pipeline
+libraries, command recording and submission over a real
+`ID3D12GraphicsCommandList`, a flip-model swapchain, and the image comparison
+that renders a colored triangle and a textured cube through the interface and
+matches `cyber_software_renderer` within a recorded tolerance (`backend_compare`,
+under `tests/integration/`, because it is the one test that may link both
+renderers). Resources
 carry their own D3D12 state, and a transition is submitted through a one-shot
-list and waited on, because the API has no immediate-mode barrier. Every entry this increment has not reached yet
-answers `Unsupported` with a message naming the increment, so a caller is never
+list and waited on, because the API has no immediate-mode barrier. Every entry this backend has not reached yet
+answers `Unsupported` with a message naming it, so a caller is never
 lied to about what a device can do; `Capabilities::features` advertises only
 `TimelineFences` for the same reason. `cyber/rhi/d3d12.h` is the only public header the
 phase adds. The backend lives under `src/d3d12/`, the only directory in the
@@ -151,3 +155,20 @@ renderer that includes a graphics API header.
 - A Direct3D 12 pipeline cache is an `ID3D12PipelineLibrary`, keyed by the hash of
   the pipeline description. It is an optimization: a cache that cannot answer is
   a miss, and creating one never fails because of its seed bytes.
+- A bind group writes its own view and sampler descriptors into its block of the
+  shader-visible heap and copies none: Direct3D 12 makes a shader-visible heap
+  write-only for the CPU, so a descriptor read back out of one is invalid. The
+  API's `CopyDescriptors` path is therefore unused by this backend.
+- A barrier whose entry is already in the state the resource's tracking holds
+  records nothing. Direct3D 12 rejects a transition whose two states are equal,
+  which fails the whole list at `Close`, so a repeated transition is a no-op here
+  rather than an error that names neither the resource nor the caller.
+- The debug layer, with GPU-based validation, is enabled before the device exists
+  in debug builds. It has no reader of its own, so the backend drains its queue
+  when the device is destroyed and reports what it found on `LogChannel::Rhi` —
+  errors at error level, warnings at warning level — which is what lets a test
+  fail on any message. Two by-design messages (the startup banner and the
+  missing-optimized-clear note) are filtered at the queue.
+- A submitted command list must not be destroyed, or have its allocator reset,
+  while the queue is still executing it; `Device::CreateCommandList` documents the
+  fence a caller has to wait on first.

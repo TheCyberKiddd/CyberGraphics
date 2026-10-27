@@ -61,10 +61,17 @@ grew larger than the note first estimated.
 | 3. Resources | Buffers, textures, views, samplers, barriers, staging | `rhi_d3d12_resources` | landed |
 | 4. Shaders and binding | `D3DCompile`, descriptor tables, root signatures, pipeline layouts | `rhi_d3d12_binding`, 7 cases | landed |
 | 5. Pipelines | Graphics and compute PSOs, full state translation, `ID3D12PipelineLibrary` caches | `rhi_d3d12_pipelines`, 6 cases | landed |
-| 6. Recording, submission, presentation | `CommandListInterface` over a real list, `submit` with waits and signals, a `DXGI` flip-model swapchain | `rhi_d3d12_commands`, 2 cases (lifecycle and refusals) | landed, draw path unverified |
-| 7. Reference images | A triangle and a textured cube on the GPU, compared against `cyber_software_renderer` | the two images and a recorded tolerance | not started |
+| 6. Recording, submission, presentation | `CommandListInterface` over a real list, `submit` with waits and signals, a `DXGI` flip-model swapchain | `rhi_d3d12_commands`, 5 cases (lifecycle, refusals, an upload round trip, a colored triangle read back from the attachment it was drawn into, and a sampling frame that leaves the debug layer silent) | landed |
+| 7. Reference images | A triangle and a textured cube on the GPU, compared against `cyber_software_renderer` | `backend_compare` (cross-module, under `tests/integration/`), the four images under `docs/reports/images/`, and the tolerance recorded in the test | landed |
 
-The roadmap checkbox stays unticked until increment 7 produces both images.
+Increment 6 took two fixes the increment before it could not have caught, both found
+by the debug layer rather than by a test that passed: the command list never had
+its pipeline state set, so a draw recorded and submitted and rasterized nothing,
+and a bind group read its descriptors back out of a shader-visible heap, which
+Direct3D 12 refuses because that heap is write-combined for the CPU. Both now
+have a regression test (`d3d12_commands_draw_a_colored_triangle` and
+`d3d12_commands_leave_the_debug_layer_silent`), and the second is what turns any
+future debug-layer message into a failing test rather than a line in a log.
 
 ### Decisions this phase made that the rest of the renderer depends on
 
@@ -83,6 +90,17 @@ The roadmap checkbox stays unticked until increment 7 produces both images.
   `ID3D12PipelineLibrary`; a description that is already stored is loaded instead
   of compiled again, and seed bytes the device cannot use are ignored rather than
   rejected, which is what the contract requires.
+- **A descriptor is written where it is used.** A bind group writes its own view
+  and sampler descriptors into its block of the shader-visible heap and copies
+  none from anywhere: Direct3D 12 treats a shader-visible heap as write-only for
+  the CPU, so reading one back is invalid, and a copied descriptor is a second
+  place a view can go stale. The API's own `CopyDescriptors` path is therefore
+  unused, and the CPU staging heap this note first planned is not needed.
+- **A redundant barrier records nothing.** `Barrier` compares each entry against
+  the state the resource's tracking already holds and skips the ones that already
+  match. The alternative is worse than doing nothing: Direct3D 12 rejects a
+  transition whose two states are equal, which fails the whole command list at
+  `Close` with a message that names neither the resource nor the caller.
 
 ### Adapter discovery
 
@@ -109,8 +127,8 @@ resolve here rather than in the backend.
 | `FenceHandle` | `ID3D12Fence` | Timeline semantics are native: `Signal`/`SetEventOnCompletion`. |
 | `BufferHandle` | `ID3D12Resource` (`D3D12_RESOURCE_DIMENSION_BUFFER`) | `HostVisible` = `UPLOAD`, `Readback` = `READBACK`, else `DEFAULT`. |
 | `TextureHandle` | `ID3D12Resource` | Row pitch aligned to 256 bytes for uploads. |
-| `ViewHandle` | A descriptor in a shader-visible heap | CPU staging heap mirrored to the ring at bind time. |
-| `SamplerHandle` | A sampler descriptor | Static samplers where the root signature allows. |
+| `ViewHandle` | A descriptor in a shader-visible heap | A bind group writes its own descriptor into its block of that heap; nothing is copied out of it. |
+| `SamplerHandle` | A sampler descriptor in the shader-visible sampler heap | Also written directly into the bind group's block. |
 | `BindGroupLayoutDesc` | Root signature parameter list | Four slots = four descriptor tables plus root constants. |
 | `PushConstantRange` | `D3D12_ROOT_CONSTANTS` | Four ranges maximum, matching Vulkan. |
 | `GraphicsPipelineDesc` | `D3D12_GRAPHICS_PIPELINE_STATE_DESC` | Blend, depth, rasterizer, and input layout map field for field. |
@@ -145,10 +163,25 @@ matrix.
 ### Debug layer
 
 The debug layer and GPU-based validation are enabled from the first line of
-device code, and the message queue is drained after every submission. A message
-at `CORRUPTION` or `ERROR` severity fails the submission; `WARNING` is recorded
-in the frame report. This is stricter than the API default and is what the build
-guide asks for.
+device code, before the device exists, because that is the earliest the device
+records messages. The layer's queue has no reader of its own, so the backend
+drains it when the device is destroyed and reports what it found on the `Rhi`
+log channel: `CORRUPTION` and `ERROR` at error level, `WARNING` at warning level,
+and the layer's informational notes not at all. Two messages are filtered out at
+the queue because this backend provokes them by design — the startup banner that
+announces GPU-based validation, and the note that a cleared color target carries
+no optimized clear value, which the RHI cannot satisfy because it takes the clear
+color from the pass rather than the texture.
+
+That report is what makes "treat any message as a test failure" executable:
+`d3d12_commands_leave_the_debug_layer_silent` installs a sink on the channel,
+records a frame that uploads, samples a texture and draws, destroys the device,
+and fails if a single record arrived. The three defects this phase's last
+increment found were all found that way, and each one is now covered by a test.
+
+A depth target does carry an optimized clear value — the reverse-Z far plane,
+which is the value the pass clears to — so the warning below applies to color
+targets only.
 
 ## Alternatives considered
 
@@ -164,7 +197,8 @@ guide asks for.
   no entry needs to change.
 - **Rendering to an offscreen texture instead of a swapchain.** Rejected as the
   only path: the image comparison needs a deterministic target, so the comparison
-  runs offscreen while the swapchain is exercised by the sample.
+  runs offscreen, while the swapchain is exercised by its own conformance test
+  and by the frame-ring and presentation cases in `rhi_d3d12_commands`.
 
 ## Risks
 
@@ -184,11 +218,12 @@ guide asks for.
 | Test | Proves |
 |---|---|
 | `rhi_d3d12_adapters` | Adapter enumeration, WARP last, the short-span contract, and that an incomplete table is a reported error. |
-| device conformance | The same cases the null backend passes, run on D3D12 and on WARP. |
-| descriptor ring | Allocation, exhaustion, and reset per frame. |
-| upload and readback | Bytes written on the CPU arrive on the GPU and come back unchanged. |
-| pipeline build | Every `GraphicsPipelineDesc` field reaches `D3D12_GRAPHICS_PIPELINE_STATE_DESC`, and an invalid combination still fails at creation. |
-| image comparison | The triangle and the cube match the software renderer within the recorded tolerance, on hardware and on WARP. |
+| `rhi_d3d12_device` | Device creation, three queues, timeline fences, capabilities, object naming, and the stale-handle answers. |
+| `rhi_d3d12_resources` | Buffers, textures, views, samplers, host-visible writes and readback reads, and per-subresource state across a barrier. |
+| `rhi_d3d12_binding` | HLSL compilation, bind group layouts and groups filling one contiguous descriptor block, and root signatures built from pipeline layouts. |
+| `rhi_d3d12_pipelines` | Every `GraphicsPipelineDesc` field reaching `D3D12_GRAPHICS_PIPELINE_STATE_DESC`, compute state, and pipeline-library caches. |
+| `rhi_d3d12_commands` | The recording state machine, submission with fences, host upload through a staging buffer, the triangle's pixel read back out of the attachment, and a sampling frame the debug layer has nothing to say about. |
+| `backend_compare` | The triangle and the cube each match the software renderer within the recorded tolerance, on the adapter the test selects. |
 
 ## Sources
 

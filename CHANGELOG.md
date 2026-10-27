@@ -8,6 +8,22 @@ semantic versioning once a public API exists.
 
 ### Added
 
+- Phase 14, increment 7 (the phase's done-when line): an image comparison that
+  renders the same scene through the Direct3D 12 backend and through
+  `cyber_software_renderer` and compares the two images with a recorded tolerance
+  — at most 5% of pixels may differ by more than 4 per channel, and the mean
+  channel delta must stay under 6. It lives in
+  `tests/integration/backend_compare/` because it is the one target that may link
+  both renderers, and it writes its four images to
+  `build/<preset>/backend_compare_images/` on every run. The colored triangle
+  matches the reference exactly and the textured cube differs on 8 of 16384
+  pixels, all on silhouette and texel edges where the two rasterizers disagree
+  about coverage.
+- Phase 14: every debug-layer message the backend stored reaches the `Rhi` log
+  channel when the device is destroyed, at error or warning level, with the two
+  messages this backend provokes by design filtered at the queue. That is what
+  makes the build guide's "treat any message as a test failure" a test:
+  `d3d12_commands_leave_the_debug_layer_silent` fails on a single record.
 - Phase 14, increment 6: Direct3D 12 command recording, submission, and a
   flip-model swapchain. `CommandListInterface` is implemented over a real
   `ID3D12GraphicsCommandList` with every recording rule the contract states —
@@ -289,6 +305,29 @@ semantic versioning once a public API exists.
   backend that validates every call.
 - ADR 0013 (RHI object model), the Phase 10 design note, the D3D12/Vulkan/WebGPU
   comparison notes, and the Phase 10 report.
+
+### Fixed
+
+Found by rendering the two reference images and by the debug layer's own
+messages, which the backend now reports on the `Rhi` channel.
+
+- Direct3D 12: `SetPipeline` bound the root signature but never set the pipeline
+  state, so every draw rasterized nothing while the frame recorded, submitted,
+  and cleared correctly. `d3d12_commands_draw_a_colored_triangle` reads the
+  uploaded bytes, the clear, and the shaded pixel back to catch it.
+- Direct3D 12: a bind group read its descriptors back out of a shader-visible
+  heap, which the API forbids because that heap is write-only for the CPU. Views
+  and samplers are now built straight into the group's own descriptor.
+- Direct3D 12: a color target advertised an optimized clear value that disagreed
+  with the clear color every pass actually used; color targets now carry none,
+  and depth targets carry the reverse-Z far plane the pass clears to.
+- Direct3D 12: a barrier batch whose every entry was already in its target state
+  still called `ResourceBarrier` with no barriers. An entry already in the
+  tracked state now records nothing, and an empty batch makes no call.
+- `cyber_rhi`: a submitted command list released before its fence was drained
+  released the allocator the queue was still reading from; `Device`'s
+  `CreateCommandList` now states the rule, and the test that broke it drains
+  first.
 
 ### Notes
 
