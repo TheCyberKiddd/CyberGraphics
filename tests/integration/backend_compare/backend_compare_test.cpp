@@ -57,13 +57,25 @@ namespace software = cyber::software;
 namespace
 {
 
-constexpr u32 kWidth = 128;
-constexpr u32 kHeight = 128;
+// The size of the image the phase presents: the PPM the test writes, the PNG
+// the report embeds, and the pair the comparison measures are all this size.
+constexpr u32 kWidth = 256;
+constexpr u32 kHeight = 256;
 constexpr u32 kRowBytes = kWidth * 4;
+
+// Supersampling is the project's antialiasing until a rasterizer grows
+// multisample coverage (ADR 0012): both renderers draw the scene into a target
+// `kSupersample` times larger per axis and box-filter it down, which smooths the
+// silhouette and the texel boundaries at once and changes neither engine. ADR
+// 0012 fixes the maximum at 4 — sixteen samples behind every output pixel.
+constexpr u32 kSupersample = 4;
+constexpr u32 kRenderWidth = kWidth * kSupersample;
+constexpr u32 kRenderHeight = kHeight * kSupersample;
+constexpr u32 kRenderRowBytes = kRenderWidth * 4;
 // D3D12 requires a texture-to-buffer row pitch of at least the row's byte size
-// and a multiple of 256; 512 is both for a 128-pixel RGBA8 row.
-constexpr u32 kRowPitch = 512;
-constexpr u32 kReadbackBytes = kRowPitch * kHeight;
+// and a multiple of 256; 4096 is both for a 1024-pixel RGBA8 row.
+constexpr u32 kRowPitch = kRenderRowBytes;
+constexpr u32 kReadbackBytes = kRowPitch * kRenderHeight;
 
 constexpr u32 kTextureSize = 8;
 constexpr u32 kCheckerBytes = kTextureSize * kTextureSize * 4;
@@ -82,9 +94,12 @@ const Color kClearColor{0.05f, 0.05f, 0.08f, 1.0f};
 // inside every triangle and disagree where an edge falls: the software
 // rasterizer snaps coverage to integer pixel centers with fixed-point
 // arithmetic, the hardware does not, so silhouette and texel-boundary pixels
-// may land on either side. `kChannelTolerance` is the per-channel delta treated
-// as equal, `kOverTolerancePercent` the share of pixels allowed past it, and
-// `kMeanChannelTolerance` the average delta over the whole image.
+// may land on either side. The comparison measures the resolved images — the
+// ones the phase presents — so a disagreement has to survive the box filter to
+// count; a difference of one sample in sixteen shows up as a fraction of the
+// edge color, not as the whole pixel. `kChannelTolerance` is the per-channel
+// delta treated as equal, `kOverTolerancePercent` the share of pixels allowed
+// past it, and `kMeanChannelTolerance` the average delta over the whole image.
 constexpr u32 kChannelTolerance = 4;
 constexpr u32 kOverTolerancePercent = 5;
 constexpr f64 kMeanChannelTolerance = 6.0;
@@ -163,7 +178,7 @@ struct Scene
         camera.distance = 4.5f;
         camera.yawRadians = 0.6f;
         camera.pitchRadians = 0.4f;
-        const f32 aspect = static_cast<f32>(kWidth) / static_cast<f32>(kHeight);
+        const f32 aspect = static_cast<f32>(kRenderWidth) / static_cast<f32>(kRenderHeight);
         modelViewProjection = software::OrbitCameraProjection(camera, aspect) *
                               software::OrbitCameraView(camera) * model;
     }
@@ -195,8 +210,8 @@ Color CubePixelStage(const software::Varyings& varyings, const void* userData) n
 bool RenderSoftwareCube(HeapAllocator& heap, u8* outPixels)
 {
     software::FramebufferDesc colorDesc{};
-    colorDesc.width = static_cast<i32>(kWidth);
-    colorDesc.height = static_cast<i32>(kHeight);
+    colorDesc.width = static_cast<i32>(kRenderWidth);
+    colorDesc.height = static_cast<i32>(kRenderHeight);
     colorDesc.format = software::PixelFormat::RGBA8Unorm;
     auto color = software::Framebuffer::Create(colorDesc, heap);
     if (!color)
@@ -204,8 +219,8 @@ bool RenderSoftwareCube(HeapAllocator& heap, u8* outPixels)
         return false;
     }
     software::DepthBufferDesc depthDesc{};
-    depthDesc.width = static_cast<i32>(kWidth);
-    depthDesc.height = static_cast<i32>(kHeight);
+    depthDesc.width = static_cast<i32>(kRenderWidth);
+    depthDesc.height = static_cast<i32>(kRenderHeight);
     auto depth = software::DepthBuffer::Create(depthDesc, heap);
     if (!depth)
     {
@@ -263,8 +278,8 @@ bool RenderSoftwareCube(HeapAllocator& heap, u8* outPixels)
     uniforms.sampler.mipFilter = software::FilterMode::Nearest;
 
     software::ShaderDesc shader{};
-    shader.pipeline.viewport =
-        software::Viewport{0.0f, 0.0f, static_cast<f32>(kWidth), static_cast<f32>(kHeight)};
+    shader.pipeline.viewport = software::Viewport{0.0f, 0.0f, static_cast<f32>(kRenderWidth),
+                                                  static_cast<f32>(kRenderHeight)};
     // Both sides draw every winding; the depth buffer decides which face wins.
     shader.pipeline.cullMode = software::CullMode::None;
     shader.vertexShader = &CubeVertexStage;
@@ -278,9 +293,10 @@ bool RenderSoftwareCube(HeapAllocator& heap, u8* outPixels)
         return false;
     }
 
-    for (u32 y = 0; y < kHeight; ++y)
+    for (u32 y = 0; y < kRenderHeight; ++y)
     {
-        std::memcpy(outPixels + y * kRowBytes, color.Value().Row(static_cast<i32>(y)), kRowBytes);
+        std::memcpy(outPixels + y * kRenderRowBytes, color.Value().Row(static_cast<i32>(y)),
+                    kRenderRowBytes);
     }
     return true;
 }
@@ -291,8 +307,8 @@ bool RenderSoftwareCube(HeapAllocator& heap, u8* outPixels)
 bool RenderSoftwareTriangle(HeapAllocator& heap, u8* outPixels, const Color& shading)
 {
     software::FramebufferDesc colorDesc{};
-    colorDesc.width = static_cast<i32>(kWidth);
-    colorDesc.height = static_cast<i32>(kHeight);
+    colorDesc.width = static_cast<i32>(kRenderWidth);
+    colorDesc.height = static_cast<i32>(kRenderHeight);
     colorDesc.format = software::PixelFormat::RGBA8Unorm;
     auto color = software::Framebuffer::Create(colorDesc, heap);
     if (!color)
@@ -300,8 +316,8 @@ bool RenderSoftwareTriangle(HeapAllocator& heap, u8* outPixels, const Color& sha
         return false;
     }
     software::DepthBufferDesc depthDesc{};
-    depthDesc.width = static_cast<i32>(kWidth);
-    depthDesc.height = static_cast<i32>(kHeight);
+    depthDesc.width = static_cast<i32>(kRenderWidth);
+    depthDesc.height = static_cast<i32>(kRenderHeight);
     auto depth = software::DepthBuffer::Create(depthDesc, heap);
     if (!depth)
     {
@@ -322,8 +338,8 @@ bool RenderSoftwareTriangle(HeapAllocator& heap, u8* outPixels, const Color& sha
     software::TransformShaderData transform{};
 
     software::ShaderDesc shader{};
-    shader.pipeline.viewport =
-        software::Viewport{0.0f, 0.0f, static_cast<f32>(kWidth), static_cast<f32>(kHeight)};
+    shader.pipeline.viewport = software::Viewport{0.0f, 0.0f, static_cast<f32>(kRenderWidth),
+                                                  static_cast<f32>(kRenderHeight)};
     shader.pipeline.cullMode = software::CullMode::None;
     shader.vertexShader = &software::TransformVertexShader;
     shader.pixelShader = [](const software::Varyings& varyings, const void*) noexcept
@@ -337,9 +353,10 @@ bool RenderSoftwareTriangle(HeapAllocator& heap, u8* outPixels, const Color& sha
         return false;
     }
 
-    for (u32 y = 0; y < kHeight; ++y)
+    for (u32 y = 0; y < kRenderHeight; ++y)
     {
-        std::memcpy(outPixels + y * kRowBytes, color.Value().Row(static_cast<i32>(y)), kRowBytes);
+        std::memcpy(outPixels + y * kRenderRowBytes, color.Value().Row(static_cast<i32>(y)),
+                    kRenderRowBytes);
     }
     return true;
 }
@@ -444,8 +461,8 @@ struct Target
     TextureDesc desc{};
     desc.format = format;
     desc.usage = usage;
-    desc.width = kWidth;
-    desc.height = kHeight;
+    desc.width = kRenderWidth;
+    desc.height = kRenderHeight;
     auto created = device.CreateTexture(desc);
     if (!created)
     {
@@ -495,20 +512,22 @@ struct Target
     {
         return false;
     }
-    if (!list.SetViewport(Viewport::Of(static_cast<f32>(kWidth), static_cast<f32>(kHeight))).IsOk())
+    if (!list.SetViewport(
+                 Viewport::Of(static_cast<f32>(kRenderWidth), static_cast<f32>(kRenderHeight)))
+             .IsOk())
     {
         return false;
     }
-    return list.SetScissor(ScissorRect{0, 0, kWidth, kHeight}).IsOk();
+    return list.SetScissor(ScissorRect{0, 0, kRenderWidth, kRenderHeight}).IsOk();
 }
 
 [[nodiscard]] bool ReadTarget(Device& device, BufferHandle readback, u8* outPixels)
 {
-    for (u32 y = 0; y < kHeight; ++y)
+    for (u32 y = 0; y < kRenderHeight; ++y)
     {
         const Status<Error> read = device.ReadBuffer(
             readback, static_cast<u64>(y) * kRowPitch,
-            Span<Byte>(reinterpret_cast<Byte*>(outPixels) + y * kRowBytes, kRowBytes));
+            Span<Byte>(reinterpret_cast<Byte*>(outPixels) + y * kRenderRowBytes, kRenderRowBytes));
         if (!read.IsOk())
         {
             return false;
@@ -692,8 +711,8 @@ bool RenderD3DTriangle(HeapAllocator& heap, u8* outPixels)
     pixels.buffer = readback.Value();
     pixels.bufferRowPitch = kRowPitch;
     pixels.texture = color.texture;
-    pixels.width = kWidth;
-    pixels.height = kHeight;
+    pixels.width = kRenderWidth;
+    pixels.height = kRenderHeight;
     if (!list.CopyTextureToBuffer(pixels).IsOk() || !list.End().IsOk())
     {
         return false;
@@ -1021,8 +1040,8 @@ u32 RenderD3DCube(HeapAllocator& heap, u8* outPixels)
     pixels.buffer = readback.Value();
     pixels.bufferRowPitch = kRowPitch;
     pixels.texture = color.texture;
-    pixels.width = kWidth;
-    pixels.height = kHeight;
+    pixels.width = kRenderWidth;
+    pixels.height = kRenderHeight;
     const Status<Error> copiedPixels = list.CopyTextureToBuffer(pixels);
     if (!copiedPixels.IsOk())
     {
@@ -1055,6 +1074,41 @@ u32 RenderD3DCube(HeapAllocator& heap, u8* outPixels)
 // ---------------------------------------------------------------------------
 // Comparison
 // ---------------------------------------------------------------------------
+
+// Box-filters one supersampled frame down to the image the phase presents:
+// every output pixel becomes the rounded mean of the `kSupersample` squared
+// samples that covered it. Both renderers go through this same resolve, so it
+// cannot favour either side, and it is the antialiasing ADR 0012 places at the
+// caller until a rasterizer grows multisample coverage.
+void ResolveBox(const u8* rendered, u8* out) noexcept
+{
+    constexpr u32 kSamples = kSupersample * kSupersample;
+    for (u32 y = 0; y < kHeight; ++y)
+    {
+        for (u32 x = 0; x < kWidth; ++x)
+        {
+            u32 sum[4] = {0, 0, 0, 0};
+            for (u32 sampleY = 0; sampleY < kSupersample; ++sampleY)
+            {
+                const u64 first = (static_cast<u64>(y) * kSupersample + sampleY) * kRenderWidth +
+                                  static_cast<u64>(x) * kSupersample;
+                const u8* samples = rendered + first * 4;
+                for (u32 sampleX = 0; sampleX < kSupersample; ++sampleX)
+                {
+                    for (u32 channel = 0; channel < 4; ++channel)
+                    {
+                        sum[channel] += samples[sampleX * 4 + channel];
+                    }
+                }
+            }
+            u8* pixel = out + (static_cast<u64>(y) * kWidth + x) * 4;
+            for (u32 channel = 0; channel < 4; ++channel)
+            {
+                pixel[channel] = static_cast<u8>((sum[channel] + kSamples / 2) / kSamples);
+            }
+        }
+    }
+}
 
 struct Difference
 {
@@ -1193,12 +1247,17 @@ void ExpectWithin(const char* name, const u8* reference, const u8* candidate) no
 CG_TEST(backend_compare_triangle)
 {
     HeapAllocator heap;
+    // One supersampled frame, reused by each renderer in turn: it is filled, then
+    // resolved into the output image the comparison measures and writes.
+    static u8 rendered[kRenderRowBytes * kRenderHeight];
     static u8 reference[kRowBytes * kHeight];
     static u8 candidate[kRowBytes * kHeight];
     const Color shading{1.0f, 0.5f, 0.25f, 1.0f};
 
-    CG_REQUIRE(RenderSoftwareTriangle(heap, reference, shading));
-    CG_REQUIRE(RenderD3DTriangle(heap, candidate));
+    CG_REQUIRE(RenderSoftwareTriangle(heap, rendered, shading));
+    ResolveBox(rendered, reference);
+    CG_REQUIRE(RenderD3DTriangle(heap, rendered));
+    ResolveBox(rendered, candidate);
     WriteImage("phase-14-triangle-software", reference);
     WriteImage("phase-14-triangle-d3d12", candidate);
     ExpectWithin("triangle", reference, candidate);
@@ -1207,13 +1266,15 @@ CG_TEST(backend_compare_triangle)
 CG_TEST(backend_compare_textured_cube)
 {
     HeapAllocator heap;
+    static u8 rendered[kRenderRowBytes * kRenderHeight];
     static u8 reference[kRowBytes * kHeight];
     static u8 candidate[kRowBytes * kHeight];
 
-    CG_REQUIRE(RenderSoftwareCube(heap, reference));
+    CG_REQUIRE(RenderSoftwareCube(heap, rendered));
+    ResolveBox(rendered, reference);
     // The Direct3D 12 half reports the line of the step that stopped it, because
     // a boolean would say only that one of a hundred steps failed.
-    const u32 stoppedAt = RenderD3DCube(heap, candidate);
+    const u32 stoppedAt = RenderD3DCube(heap, rendered);
     if (stoppedAt != 0)
     {
         char message[96];
@@ -1221,6 +1282,7 @@ CG_TEST(backend_compare_textured_cube)
         CG_FAIL(message);
         return;
     }
+    ResolveBox(rendered, candidate);
     WriteImage("phase-14-cube-software", reference);
     WriteImage("phase-14-cube-d3d12", candidate);
     ExpectWithin("textured cube", reference, candidate);

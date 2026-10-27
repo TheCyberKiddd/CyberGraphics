@@ -15,10 +15,12 @@ semantic versioning once a public API exists.
   channel delta must stay under 6. It lives in
   `tests/integration/backend_compare/` because it is the one target that may link
   both renderers, and it writes its four images to
-  `build/<preset>/backend_compare_images/` on every run. The colored triangle
-  matches the reference exactly and the textured cube differs on 8 of 16384
-  pixels, all on silhouette and texel edges where the two rasterizers disagree
-  about coverage.
+  `build/<preset>/backend_compare_images/` on every run. Both images are
+  antialiased by 4x supersampling box-filtered down to 256x256, the path ADR 0012
+  places at the caller until a rasterizer grows multisample coverage: the
+  colored triangle matches the reference exactly and the textured cube differs
+  on 375 of 65536 pixels, all on silhouette and texel edges where the two
+  rasterizers disagree about coverage.
 - Phase 14: every debug-layer message the backend stored reaches the `Rhi` log
   channel when the device is destroyed, at error or warning level, with the two
   messages this backend provokes by design filtered at the queue. That is what

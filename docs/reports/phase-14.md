@@ -24,24 +24,38 @@ Both images exist, both comparisons pass, and the tolerance is in the test:
 
 | Comparison | Pixels over tolerance | Worst channel | Mean channel |
 |---|---|---|---|
-| `triangle` | **0 of 16384** (0%) | 0 | 0.000 |
-| `textured cube` | **8 of 16384** (0.05%) | 179 | 0.050 |
+| `triangle` | **0 of 65536** (0%) | 0 | 0.000 |
+| `textured cube` | **375 of 65536** (0.57%) | 45 | 0.051 |
 
 Tolerance, from `tests/integration/backend_compare/backend_compare_test.cpp`: a
 channel delta above 4 counts as a differing pixel, at most 5% of pixels may
-exceed it, and the mean delta over the whole image must stay under 6.0. The
-triangle is exact — the software rasterizer and the hardware agree on every one
-of its pixels — and the cube differs on eight pixels, all on a silhouette or a
-texel boundary where the two rasterizers disagree about which side of an edge a
-pixel falls on. That is the class of difference the tolerance exists for; the
-rest of the image is identical.
+exceed it, and the mean delta over the whole image must stay under 6.0.
+
+Both images are antialiased by supersampling, the caller-side path
+[ADR 0012](../adr/0012-supersampling-before-multisample-coverage.md) fixes until
+a rasterizer grows multisample coverage: each side renders the scene 4x larger
+per axis — a 1024x1024 frame — and the same box filter reduces it to the 256x256
+image that is compared, written, and embedded here. The comparison measures the
+resolved images, so a disagreement has to survive the box filter to count: one
+differing sample in sixteen shows up as a fraction of the edge color rather than
+as a whole pixel.
+
+The triangle is exact — after the resolve, the software rasterizer and the
+hardware agree on every one of its 65536 pixels. The cube differs on 375 pixels
+(0.57%), and every one of them is past the tolerance rather than merely nonzero:
+all sit on a silhouette or a texel boundary where the two rasterizers disagree
+about how much of a pixel an edge covers. The worst channel differs by 45,
+which is four of the sixteen samples disagreeing on a boundary between the
+checker's light and dark texels, 179 apart. That is the class of difference the
+tolerance exists for; the rest of the image is byte-identical.
 
 ![The triangle on Direct3D 12](images/phase-14-triangle-d3d12.png)
 ![The textured cube on Direct3D 12](images/phase-14-cube-d3d12.png)
 
 The software renderer's two images (`phase-14-triangle-software.png`,
 `phase-14-cube-software.png`, same directory) are byte-identical to these two
-except for those eight pixel pairs. The test writes all four into
+except for those 375 pixel pairs, all of them on an edge. The test writes all
+four into
 `<build>/backend_compare_images/` on every run, so the images a reader can
 regenerate and the images committed here are the same bytes.
 
@@ -127,10 +141,10 @@ Test runs, all from the repository root with the scripts the project ships:
 
 | Preset | Command | Result |
 |---|---|---|
-| debug | `scripts/build.ps1 -Preset debug`, `ctest --preset debug` | **81 of 81 passed**, 17.1 s |
-| release | `scripts/build.ps1 -Preset release`, `ctest --preset release` | **81 of 81 passed**, 6.3 s |
-| shipping | `scripts/build.ps1 -Preset shipping`, `ctest --preset shipping` | **81 of 81 passed**, 6.8 s |
-| debug-asan | `scripts/build.ps1 -Preset debug-asan`, `ctest --preset debug-asan` | **81 of 81 passed**, 71.9 s |
+| debug | `scripts/build.ps1 -Preset debug`, `ctest --preset debug` | **81 of 81 passed**, 24.1 s |
+| release | `scripts/build.ps1 -Preset release`, `ctest --preset release` | **81 of 81 passed**, 6.2 s |
+| shipping | `scripts/build.ps1 -Preset shipping`, `ctest --preset shipping` | **81 of 81 passed**, 7.6 s |
+| debug-asan | `scripts/build.ps1 -Preset debug-asan`, `ctest --preset debug-asan` | **81 of 81 passed**, 88.4 s |
 
 The AddressSanitizer run needs the MSVC toolset's binary directory on `PATH` —
 `VC/Tools/MSVC/<version>/bin/Hostx64/x64`, which a developer command prompt
@@ -142,10 +156,12 @@ Checks and packaging:
 - `py scripts/check_structure.py` — passed, 16 modules, 1 contract.
 - `py scripts/layer_check.py` — passed, 16 modules.
 - `py scripts/check_format.py` with `CLANG_FORMAT` set — passed, 271 files. The
-  formatter to hand is the one `scripts/format.ps1` finds; a different
-  clang-format *minor* version formats the software rasterizer's lambdas
-  differently from what CI accepts (`0b9681d`), so a tree-wide format run with
-  the wrong binary would move code this phase did not touch.
+  formatter to hand is CI's: Ubuntu's apt `clang-format` (18.1.8 here, from the
+  `clang-format` pip package), because the Visual Studio binary on this machine
+  is 19.1.5 and formats the software rasterizer's two lambdas differently from
+  what CI accepts (`0b9681d`). Running the check with 19.1.5 flags exactly those
+  two lines and nothing else, so a tree-wide format run with the wrong binary
+  would move code this phase did not touch.
 - `scripts/verify_package.ps1 -Preset debug` — the installed package's consumer
   builds against the installed headers and library. `include/cyber/rhi/device.h`
   changed (a comment on command-list lifetime), so this check applies.
@@ -153,8 +169,8 @@ Checks and packaging:
 Direct comparison, from the test's own output:
 
 ```text
-triangle: 0/16384 pixels over tolerance, worst 0, mean 0.000
-textured cube: 8/16384 pixels over tolerance, worst 179, mean 0.050
+triangle: 0/65536 pixels over tolerance, worst 0, mean 0.000
+textured cube: 375/65536 pixels over tolerance, worst 45, mean 0.051
 ```
 
 ## Known gaps
