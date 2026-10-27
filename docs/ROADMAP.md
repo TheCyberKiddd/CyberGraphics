@@ -34,7 +34,7 @@ are recorded.
 - [x] **Phase 12 — Pipelines and binding model** — complete; [report](reports/phase-12.md), sixteen RHI test binaries, green CI on run 40289190526, and every pipeline described by plain structs with invalid combinations rejected · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-12-pipelines-and-binding-model) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-12-pipelines-and-binding-model)
 - [x] **Phase 13 — Command lists, synchronization, swapchain** — complete; [report](reports/phase-13.md), twenty-three RHI test binaries, green CI on run 40306013967, and the missing-barrier and frame-ring tests that the done-when line names · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-13-command-lists-synchronization-swapchain) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-13-command-lists-synchronization-and-swapchain)
 - [x] **Phase 14 — Direct3D 12 backend** — complete; [report](reports/phase-14.md), [design note](design/phase-14-d3d12.md), [ADR 0017](adr/0017-d3d12-backend.md), six D3D12 test binaries plus the cross-module `backend_compare`, 81/81 tests in debug, release, shipping and ASan, and the done-when line's two images matching `cyber_software_renderer` (triangle exact, cube 8 of 16384 pixels over tolerance on silhouette edges) · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-14-direct3d-12-backend) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-14-direct3d-12-backend)
-- [ ] **Phase 15 — GPU memory and debug tooling** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-15-gpu-memory-and-debug-tooling) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-15-gpu-memory-and-debug-tooling)
+- [ ] **Phase 15 — GPU memory and debug tooling** — designed, no code yet: [design note](design/phase-15-gpu-memory-debug.md) and [ADR 0018](adr/0018-gpu-heap-suballocation-and-rhi-validation.md); the first increment is the heap allocator with sub-allocation and a statistics report · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-15-gpu-memory-and-debug-tooling) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-15-gpu-memory-and-debug-tooling)
 
 ## Part 4: Shaders and materials (phases 16-19)
 
@@ -110,6 +110,8 @@ boundary, and null backend; 58/58 tests in debug.
   comparison that renders a colored triangle and a textured cube through the RHI
   and matches the software renderer's images within a recorded tolerance. The
   debug layer is enabled with GPU-based validation and its messages fail a test.
-- Next: Phase 15, GPU memory and debug tooling — the allocator, sub-allocation,
-  aliasing, the RHI-level validation layer, GPU markers, timestamps, and
-  device-lost handling.
+- Next: Phase 15, GPU memory and debug tooling — designed in
+  `docs/design/phase-15-gpu-memory-debug.md` and decided in ADR 0018, with no
+  code landed yet. The first increment is the heap allocator with sub-allocation
+  and a statistics report, followed by aliasing, the RHI-level validation layer,
+  names and markers, timestamps, the leak report, and device-lost handling.

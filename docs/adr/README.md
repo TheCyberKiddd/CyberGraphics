@@ -26,6 +26,7 @@ to it, and the consequences. Use one when a future reader would otherwise ask
 | [0015](0015-pipeline-binding-model.md) | Four binding slots, location-based vertex input, and hash-keyed pipelines | accepted |
 | [0016](0016-command-lists-and-synchronization.md) | Recorded command lists, explicit barriers, and timeline submission | accepted |
 | [0017](0017-d3d12-backend.md) | The Direct3D 12 backend: adapter discovery, WARP, and the increment plan | accepted |
+| [0018](0018-gpu-heap-suballocation-and-rhi-validation.md) | GPU heap sub-allocation and one RHI-level validation layer | proposed |
 
 Add new records as `NNNN-title.md`, starting at `0001`. Never delete an ADR;
 supersede it with a new one and update the old record's status.
