@@ -210,9 +210,9 @@ targets only.
 - **The upload ring's coherency.** `UPLOAD` heaps are write-combined, so a read
   back through the same memory is slow and wrong; the tests read back through a
   `READBACK` resource instead.
-- **WARP in CI is slow.** The image comparison on WARP renders one 1024x1024
+- **WARP in CI is slow.** The image comparison on WARP renders one 2048x2048
   frame per side — the 4x supersampled render ADR 0012's caller-side path
-  specifies — and box-filters it to the 256x256 image that is compared and
+  specifies — and box-filters it to the 512x512 image that is compared and
   written, so the cost is bounded by that fixed size and the tolerance is
   recorded with the reference.
 

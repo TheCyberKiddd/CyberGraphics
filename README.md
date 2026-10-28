@@ -110,8 +110,8 @@ tests pass in debug; the design is ADR 0013.
   swapchain. The done-when line is a comparison in one process: the same scene —
   a colored triangle, then a textured cube — rendered by the D3D12 backend and by
   `cyber_software_renderer`, compared with a recorded tolerance. Both images are
-  4x supersampled and box-filtered to 256x256 (ADR 0012), the triangle is exact,
-  and the cube differs on 375 of 65536 pixels, all on silhouette edges. The
+  4x supersampled and box-filtered to 512x512 (ADR 0012), the triangle is exact,
+  and the cube differs on 1089 of 262144 pixels, all on silhouette edges. The
   debug layer runs with GPU-based validation and any message fails a test. The
   backend compiles out entirely when `CYBER_RHI_ENABLE_D3D12` is off. 81 tests
   pass in every preset; the design is ADR 0017 and the evidence is the Phase 14

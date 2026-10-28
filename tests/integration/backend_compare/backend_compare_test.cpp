@@ -59,8 +59,8 @@ namespace
 
 // The size of the image the phase presents: the PPM the test writes, the PNG
 // the report embeds, and the pair the comparison measures are all this size.
-constexpr u32 kWidth = 256;
-constexpr u32 kHeight = 256;
+constexpr u32 kWidth = 512;
+constexpr u32 kHeight = 512;
 constexpr u32 kRowBytes = kWidth * 4;
 
 // Supersampling is the project's antialiasing until a rasterizer grows
@@ -73,7 +73,7 @@ constexpr u32 kRenderWidth = kWidth * kSupersample;
 constexpr u32 kRenderHeight = kHeight * kSupersample;
 constexpr u32 kRenderRowBytes = kRenderWidth * 4;
 // D3D12 requires a texture-to-buffer row pitch of at least the row's byte size
-// and a multiple of 256; 4096 is both for a 1024-pixel RGBA8 row.
+// and a multiple of 256; 8192 is both for a 2048-pixel RGBA8 row.
 constexpr u32 kRowPitch = kRenderRowBytes;
 constexpr u32 kReadbackBytes = kRowPitch * kRenderHeight;
 
@@ -1175,6 +1175,16 @@ void Report(const char* name, const Difference& difference) noexcept
 // build-tree directory this target names. The bytes are the ones the comparison
 // just read, so the images and a green test cannot disagree about what was
 // rendered, and the two of them together are the phase's evidence.
+//
+// The framebuffer the renderers filled stores linear bytes — that is the
+// `PixelFormat::RGBA8Unorm` contract, no transfer function at write time. A P6
+// PPM on the other hand is a display interchange format every viewer reads as
+// sRGB-encoded, so exporting linear bytes as-is displays midtones far darker
+// than they were rendered: against a dark clear color that reads as a muddy
+// halo along every smoothed edge. The export therefore applies the engine's
+// sRGB transfer function per channel — the same encode `PresentTarget` performs
+// when a frame goes to a window — and channels re-encode identically on both
+// sides, the comparison itself keeps measuring the stored linear bytes.
 void WriteImage(const char* name, const u8* pixels) noexcept
 {
     constexpr u32 kHeaderBytes = 32;
@@ -1198,9 +1208,13 @@ void WriteImage(const char* name, const u8* pixels) noexcept
         for (u32 x = 0; x < kWidth; ++x)
         {
             const u64 source = (static_cast<u64>(y) * kWidth + x) * 4;
-            file[cursor] = pixels[source];
-            file[cursor + 1] = pixels[source + 1];
-            file[cursor + 2] = pixels[source + 2];
+            constexpr f32 kUnorm8ToLinear = 1.0f / 255.0f;
+            file[cursor] =
+                software::EncodeSrgb8(static_cast<f32>(pixels[source]) * kUnorm8ToLinear);
+            file[cursor + 1] =
+                software::EncodeSrgb8(static_cast<f32>(pixels[source + 1]) * kUnorm8ToLinear);
+            file[cursor + 2] =
+                software::EncodeSrgb8(static_cast<f32>(pixels[source + 2]) * kUnorm8ToLinear);
             cursor += 3;
         }
     }

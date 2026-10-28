@@ -24,8 +24,8 @@ Both images exist, both comparisons pass, and the tolerance is in the test:
 
 | Comparison | Pixels over tolerance | Worst channel | Mean channel |
 |---|---|---|---|
-| `triangle` | **0 of 65536** (0%) | 0 | 0.000 |
-| `textured cube` | **375 of 65536** (0.57%) | 45 | 0.051 |
+| `triangle` | **0 of 262144** (0%) | 0 | 0.000 |
+| `textured cube` | **1089 of 262144** (0.42%) | 49 | 0.052 |
 
 Tolerance, from `tests/integration/backend_compare/backend_compare_test.cpp`: a
 channel delta above 4 counts as a differing pixel, at most 5% of pixels may
@@ -34,27 +34,37 @@ exceed it, and the mean delta over the whole image must stay under 6.0.
 Both images are antialiased by supersampling, the caller-side path
 [ADR 0012](../adr/0012-supersampling-before-multisample-coverage.md) fixes until
 a rasterizer grows multisample coverage: each side renders the scene 4x larger
-per axis — a 1024x1024 frame — and the same box filter reduces it to the 256x256
+per axis — a 2048x2048 frame — and the same box filter reduces it to the 512x512
 image that is compared, written, and embedded here. The comparison measures the
 resolved images, so a disagreement has to survive the box filter to count: one
 differing sample in sixteen shows up as a fraction of the edge color rather than
 as a whole pixel.
 
+The images the reader sees go through two further steps that do not touch the
+comparison. First, the framebuffers hold linear bytes — that is the
+`PixelFormat::RGBA8Unorm` contract — and the export applies the engine's sRGB
+transfer function per channel before writing the PPM, as `PresentTarget` does
+when a frame goes to a window; exporting the linear bytes raw displayed midtones
+far darker than they were rendered, which read as a muddy halo along every
+smoothed edge until it was fixed. Second, the report PNG is the PPM upscaled by
+exact integer pixel doubling; the first converter interpolated instead, and its
+kernel darkened the outer ring of every image by sampling past the source.
+
 The triangle is exact — after the resolve, the software rasterizer and the
-hardware agree on every one of its 65536 pixels. The cube differs on 375 pixels
-(0.57%), and every one of them is past the tolerance rather than merely nonzero:
-all sit on a silhouette or a texel boundary where the two rasterizers disagree
-about how much of a pixel an edge covers. The worst channel differs by 45,
-which is four of the sixteen samples disagreeing on a boundary between the
-checker's light and dark texels, 179 apart. That is the class of difference the
-tolerance exists for; the rest of the image is byte-identical.
+hardware agree on every one of its 262144 pixels. The cube differs on 1089
+pixels (0.42%), and every one of them is past the tolerance rather than merely
+nonzero: all sit on a silhouette or a texel boundary where the two rasterizers
+disagree about how much of a pixel an edge covers. The worst channel differs by
+49, against the 179 that separate the checker's light and dark texels: a handful
+of the sixteen samples on such a boundary disagree. That is the class of
+difference the tolerance exists for; the rest of the image is byte-identical.
 
 ![The triangle on Direct3D 12](images/phase-14-triangle-d3d12.png)
 ![The textured cube on Direct3D 12](images/phase-14-cube-d3d12.png)
 
 The software renderer's two images (`phase-14-triangle-software.png`,
 `phase-14-cube-software.png`, same directory) are byte-identical to these two
-except for those 375 pixel pairs, all of them on an edge. The test writes all
+except for those 1089 pixel pairs, all of them on an edge. The test writes all
 four into
 `<build>/backend_compare_images/` on every run, so the images a reader can
 regenerate and the images committed here are the same bytes.
@@ -141,10 +151,10 @@ Test runs, all from the repository root with the scripts the project ships:
 
 | Preset | Command | Result |
 |---|---|---|
-| debug | `scripts/build.ps1 -Preset debug`, `ctest --preset debug` | **81 of 81 passed**, 24.1 s |
-| release | `scripts/build.ps1 -Preset release`, `ctest --preset release` | **81 of 81 passed**, 6.2 s |
-| shipping | `scripts/build.ps1 -Preset shipping`, `ctest --preset shipping` | **81 of 81 passed**, 7.6 s |
-| debug-asan | `scripts/build.ps1 -Preset debug-asan`, `ctest --preset debug-asan` | **81 of 81 passed**, 88.4 s |
+| debug | `scripts/build.ps1 -Preset debug`, `ctest --preset debug` | **81 of 81 passed**, 19.5 s |
+| release | `scripts/build.ps1 -Preset release`, `ctest --preset release` | **81 of 81 passed**, 4.4 s |
+| shipping | `scripts/build.ps1 -Preset shipping`, `ctest --preset shipping` | **81 of 81 passed**, 4.1 s |
+| debug-asan | `scripts/build.ps1 -Preset debug-asan`, `ctest --preset debug-asan` | **81 of 81 passed**, 87.6 s |
 
 The AddressSanitizer run needs the MSVC toolset's binary directory on `PATH` —
 `VC/Tools/MSVC/<version>/bin/Hostx64/x64`, which a developer command prompt
@@ -169,8 +179,8 @@ Checks and packaging:
 Direct comparison, from the test's own output:
 
 ```text
-triangle: 0/65536 pixels over tolerance, worst 0, mean 0.000
-textured cube: 375/65536 pixels over tolerance, worst 45, mean 0.051
+triangle: 0/262144 pixels over tolerance, worst 0, mean 0.000
+textured cube: 1089/262144 pixels over tolerance, worst 49, mean 0.052
 ```
 
 ## Known gaps
