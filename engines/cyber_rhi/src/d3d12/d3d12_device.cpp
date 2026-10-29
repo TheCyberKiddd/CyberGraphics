@@ -140,6 +140,19 @@ Capabilities D3D12Capabilities(const void* internal) noexcept
     return device.capabilities;
 }
 
+// The allocator's report (ADR 0018, increment 1). The allocator keeps no state
+// the mutex does not already guard, so the report reads while other calls run.
+MemoryStats D3D12MemoryStats(const void* internal) noexcept
+{
+    if (internal == nullptr)
+    {
+        return MemoryStats{};
+    }
+    const auto& device = *static_cast<const D3D12Device*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+    return device.memory.Statistics();
+}
+
 QueueHandle D3D12QueueFor(const void* internal, QueueKind kind) noexcept
 {
     if (internal == nullptr)
@@ -440,6 +453,7 @@ Status<Error> D3D12WaitIdle(void* internal) noexcept
     {
         DeviceInterface value{};
         value.capabilities = &D3D12Capabilities;
+        value.memoryStats = &D3D12MemoryStats;
         value.queue = &D3D12QueueFor;
         value.createFence = &D3D12CreateFence;
         value.destroyFence = &D3D12DestroyFence;
@@ -822,6 +836,8 @@ Result<DeviceCreation, Error> CreateD3D12Device(const DeviceDesc& desc,
         device->queueHandles[index].index = index;
         device->queueHandles[index].generation = 1;
     }
+
+    device->memory.Initialize(raw);
 
     if (!CreateDescriptorHeaps(*device))
     {

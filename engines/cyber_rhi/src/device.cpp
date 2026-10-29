@@ -23,20 +23,21 @@ namespace
 // makes the failure a device-creation error with one clear message.
 [[nodiscard]] bool InterfaceIsComplete(const DeviceInterface& interface) noexcept
 {
-    return interface.capabilities != nullptr && interface.queue != nullptr &&
-           interface.createFence != nullptr && interface.destroyFence != nullptr &&
-           interface.signalFence != nullptr && interface.waitFence != nullptr &&
-           interface.fenceValue != nullptr && interface.waitIdle != nullptr &&
-           interface.createBuffer != nullptr && interface.destroyBuffer != nullptr &&
-           interface.bufferInfo != nullptr && interface.writeBuffer != nullptr &&
-           interface.readBuffer != nullptr && interface.bufferState != nullptr &&
-           interface.createTexture != nullptr && interface.destroyTexture != nullptr &&
-           interface.textureInfo != nullptr && interface.createTextureView != nullptr &&
-           interface.destroyTextureView != nullptr && interface.textureViewInfo != nullptr &&
-           interface.textureState != nullptr && interface.createSampler != nullptr &&
-           interface.destroySampler != nullptr && interface.transition != nullptr &&
-           interface.createShader != nullptr && interface.destroyShader != nullptr &&
-           interface.shaderInfo != nullptr && interface.createBindGroupLayout != nullptr &&
+    return interface.capabilities != nullptr && interface.memoryStats != nullptr &&
+           interface.queue != nullptr && interface.createFence != nullptr &&
+           interface.destroyFence != nullptr && interface.signalFence != nullptr &&
+           interface.waitFence != nullptr && interface.fenceValue != nullptr &&
+           interface.waitIdle != nullptr && interface.createBuffer != nullptr &&
+           interface.destroyBuffer != nullptr && interface.bufferInfo != nullptr &&
+           interface.writeBuffer != nullptr && interface.readBuffer != nullptr &&
+           interface.bufferState != nullptr && interface.createTexture != nullptr &&
+           interface.destroyTexture != nullptr && interface.textureInfo != nullptr &&
+           interface.createTextureView != nullptr && interface.destroyTextureView != nullptr &&
+           interface.textureViewInfo != nullptr && interface.textureState != nullptr &&
+           interface.createSampler != nullptr && interface.destroySampler != nullptr &&
+           interface.transition != nullptr && interface.createShader != nullptr &&
+           interface.destroyShader != nullptr && interface.shaderInfo != nullptr &&
+           interface.createBindGroupLayout != nullptr &&
            interface.destroyBindGroupLayout != nullptr && interface.createBindGroup != nullptr &&
            interface.destroyBindGroup != nullptr && interface.bindGroupInfo != nullptr &&
            interface.createPipelineLayout != nullptr &&
@@ -172,6 +173,15 @@ cyber::rhi::Capabilities Device::Capabilities() const noexcept
         return cyber::rhi::Capabilities{};
     }
     return m_interface->capabilities(m_internal);
+}
+
+MemoryStats Device::MemoryStats() const noexcept
+{
+    if (!IsValid() || m_interface->memoryStats == nullptr)
+    {
+        return cyber::rhi::MemoryStats{};
+    }
+    return m_interface->memoryStats(m_internal);
 }
 
 QueueHandle Device::Queue(QueueKind kind) const noexcept

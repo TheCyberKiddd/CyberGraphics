@@ -802,6 +802,14 @@ Capabilities NullCapabilities(const void* internal) noexcept
     return device.capabilities;
 }
 
+// The null backend drives no memory, so it reports no memory. A zeroed value is
+// the documented answer for a backend that owns no heap.
+MemoryStats NullMemoryStats(const void* internal) noexcept
+{
+    (void)internal;
+    return MemoryStats{};
+}
+
 QueueHandle NullQueue(const void* internal, QueueKind kind) noexcept
 {
     if (internal == nullptr)
@@ -5380,6 +5388,7 @@ void NullDestroyDevice(void* internal) noexcept
     {
         DeviceInterface interface{};
         interface.capabilities = &NullCapabilities;
+        interface.memoryStats = &NullMemoryStats;
         interface.queue = &NullQueue;
         interface.createFence = &NullCreateFence;
         interface.destroyFence = &NullDestroyFence;

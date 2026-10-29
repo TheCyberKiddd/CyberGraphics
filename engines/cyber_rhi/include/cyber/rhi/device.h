@@ -91,6 +91,14 @@ public:
     // safe to keep. An empty device reports zeroed limits and no features.
     [[nodiscard]] Capabilities Capabilities() const noexcept;
 
+    // Statistics of the GPU memory this device has allocated, per memory class:
+    // blocks, reserved and used bytes, alignment waste, and the largest
+    // sub-allocation each class could still make without a new block (ADR 0018).
+    // A value type; safe to call from any thread. An empty device, a device that
+    // has allocated nothing, and a backend that does not drive a heap all return
+    // a zeroed value, so a caller never needs a validity flag.
+    [[nodiscard]] MemoryStats MemoryStats() const noexcept;
+
     // Handle of the queue for `kind`, or an invalid handle when this device has
     // no such queue. Queue handles live as long as the device.
     [[nodiscard]] QueueHandle Queue(QueueKind kind) const noexcept;

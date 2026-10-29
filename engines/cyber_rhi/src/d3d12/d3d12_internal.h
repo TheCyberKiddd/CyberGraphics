@@ -3,10 +3,12 @@
 #if defined(CYBER_RHI_HAS_D3D12)
 
 #include "d3d12_com.h"
+#include "gpu_allocator.h"
 
 #include <cyber/core/error.h>
 #include <cyber/core/result.h>
 #include <cyber/core/types.h>
+#include <cyber/memory/alignment.h>
 #include <cyber/memory/allocator.h>
 #include <cyber/memory/dynamic_array.h>
 #include <cyber/rhi/backend.h>
@@ -72,6 +74,17 @@ struct D3D12BufferSlot
     // The API's own state. It differs from `state` for host-visible and readback
     // heaps, whose state D3D12 fixes at creation.
     D3D12_RESOURCE_STATES native = D3D12_RESOURCE_STATE_COMMON;
+    // Where the resource is placed (ADR 0018). Every buffer is a placed
+    // resource: inside a sub-heap of its memory class, or on a dedicated heap
+    // when no sub-heap could serve its size. `MemoryStats` and Phase 15's
+    // aliasing checks read these back at destroy time.
+    ID3D12Heap* heap = nullptr;
+    u64 heapOffset = 0;
+    // The reservation the allocator returned, with alignment padding included;
+    // returning anything else would corrupt a neighbour.
+    u64 reservedBytes = 0;
+    d3d12::MemoryClassType memoryClass = d3d12::MemoryClassType::DeviceLocal;
+    bool dedicated = false;
     bool alive = false;
     u32 generation = 0;
 };
@@ -274,9 +287,7 @@ struct D3D12SwapChainSlot
     u64 presents = 0;
     bool alive = false;
     u32 generation = 0;
-};
-
-// What a device owns. Two devices of this backend share nothing: every pointer
+};  // What a device owns. Two devices of this backend share nothing: every pointer
 // below hangs off `device`, and the one mutex guards the slot tables.
 struct D3D12Device
 {
@@ -289,7 +300,8 @@ struct D3D12Device
           freeGroupSlots(allocator), pipelineLayouts(allocator), freePipelineLayoutSlots(allocator),
           pipelines(allocator), freePipelineSlots(allocator), pipelineCaches(allocator),
           freePipelineCacheSlots(allocator), commandLists(allocator),
-          freeCommandListSlots(allocator), swapChains(allocator), freeSwapChainSlots(allocator)
+          freeCommandListSlots(allocator), swapChains(allocator), freeSwapChainSlots(allocator),
+          memory(allocator)
     {
     }
 
@@ -358,6 +370,14 @@ struct D3D12Device
     u64 fenceSignals = 0;
     mutable std::mutex mutex;
     std::condition_variable condition;
+
+    // GPU memory the backend owns, sub-allocating inside large heaps (ADR 0018,
+    // increment 1), instead of one heap per resource. Guarded by `mutex`, like
+    // every other device member: a caller that shares the device across threads
+    // does so through the same RHI calls the mutex already guards.
+    // Declared last because it is constructed with `allocator`, which every
+    // array above consumes first.
+    d3d12::GpuHeapAllocator memory;
 };
 
 // Slot resolution. Every one returns null for a stale or default handle.

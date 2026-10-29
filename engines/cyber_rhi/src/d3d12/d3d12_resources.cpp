@@ -385,15 +385,35 @@ D3D12_TEXTURE_ADDRESS_MODE ToAddressMode(AddressMode mode) noexcept
     return D3D12_TEXTURE_ADDRESS_MODE_WRAP;
 }
 
-D3D12_HEAP_TYPE ToHeapType(BufferUsage usage) noexcept
+// The memory class a buffer's usage calls for (ADR 0018). The three classes
+// map to the three heap types D3D12 names for host and device placement.
+[[nodiscard]] d3d12::MemoryClassType MemoryClassOf(BufferUsage usage) noexcept
 {
-    if (HasUsage(usage, BufferUsage::HostVisible))
-    {
-        return D3D12_HEAP_TYPE_UPLOAD;
-    }
     if (HasUsage(usage, BufferUsage::Readback))
     {
+        return d3d12::MemoryClassType::Readback;
+    }
+    if (HasUsage(usage, BufferUsage::HostVisible))
+    {
+        return d3d12::MemoryClassType::Upload;
+    }
+    return d3d12::MemoryClassType::DeviceLocal;
+}
+
+// The heap type a buffer's memory class is placed into. The old per-usage
+// version is gone: the class is the one decision the allocator and the resource
+// state now share, so a buffer's usage and its heap cannot disagree.
+D3D12_HEAP_TYPE ToHeapType(BufferUsage usage) noexcept
+{
+    switch (MemoryClassOf(usage))
+    {
+    case d3d12::MemoryClassType::Upload:
+        return D3D12_HEAP_TYPE_UPLOAD;
+    case d3d12::MemoryClassType::Readback:
         return D3D12_HEAP_TYPE_READBACK;
+    case d3d12::MemoryClassType::DeviceLocal:
+    case d3d12::MemoryClassType::Count:
+        break;
     }
     return D3D12_HEAP_TYPE_DEFAULT;
 }
@@ -540,10 +560,7 @@ Status<Error> D3D12CreateBuffer(void* internal, const BufferDesc& desc, BufferHa
                            "d3d12 backend: buffer size is above Limits::maxBufferBytes");
     }
 
-    D3D12_HEAP_PROPERTIES heap{};
-    heap.Type = ToHeapType(desc.usage);
-    heap.CreationNodeMask = 1;
-    heap.VisibleNodeMask = 1;
+    const d3d12::MemoryClassType memoryClass = MemoryClassOf(desc.usage);
 
     D3D12_RESOURCE_DESC resource{};
     resource.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
@@ -560,29 +577,48 @@ Status<Error> D3D12CreateBuffer(void* internal, const BufferDesc& desc, BufferHa
                          : D3D12_RESOURCE_FLAG_NONE;
 
     // The API fixes the initial state per heap type: an upload heap must start in
-    // GENERIC_READ and a readback heap in COPY_DEST.
+    // GENERIC_READ and a readback heap in COPY_DEST. The memory class decides the
+    // heap type the resource is placed into, so the same rule follows from it.
     D3D12_RESOURCE_STATES initial = D3D12_RESOURCE_STATE_COMMON;
-    if (heap.Type == D3D12_HEAP_TYPE_UPLOAD)
+    if (memoryClass == d3d12::MemoryClassType::Upload)
     {
         initial = D3D12_RESOURCE_STATE_GENERIC_READ;
     }
-    else if (heap.Type == D3D12_HEAP_TYPE_READBACK)
+    else if (memoryClass == d3d12::MemoryClassType::Readback)
     {
         initial = D3D12_RESOURCE_STATE_COPY_DEST;
     }
 
+    // Reserve space for the buffer inside its class's heaps (ADR 0018):
+    // sub-allocated when a block can hold it, dedicated when nothing can. The
+    // resource is then created *placed*, not committed, which is what lets a
+    // released allocation return to the free list instead of vanishing.
+    ID3D12Heap* heap = nullptr;
+    u64 heapOffset = 0;
+    bool dedicated = false;
+    if (auto allocated =
+            device.memory.Allocate(memoryClass, desc.sizeBytes, d3d12::kDefaultPlacementAlignment,
+                                   &heap, &heapOffset, &dedicated);
+        allocated.IsError())
+    {
+        return StatusError(allocated.Error().code, allocated.Error().message);
+    }
+
     ID3D12Resource* resource3D = nullptr;
-    if (FAILED(device.device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &resource,
-                                                      initial, nullptr, __uuidof(ID3D12Resource),
-                                                      reinterpret_cast<void**>(&resource3D))) ||
+    if (FAILED(device.device->CreatePlacedResource(heap, heapOffset, &resource, initial, nullptr,
+                                                   __uuidof(ID3D12Resource),
+                                                   reinterpret_cast<void**>(&resource3D))) ||
         resource3D == nullptr)
     {
+        device.memory.Deallocate(
+            memoryClass, heap, heapOffset,
+            cyber::memory::AlignUp(desc.sizeBytes, d3d12::kDefaultPlacementAlignment), dedicated);
         return StatusError(ErrorCode::Internal, "d3d12 backend: buffer creation failed");
     }
     NameObject(resource3D, desc.label);
 
     void* mapped = nullptr;
-    if (initial == D3D12_RESOURCE_STATE_GENERIC_READ || heap.Type == D3D12_HEAP_TYPE_READBACK)
+    if (initial == D3D12_RESOURCE_STATE_GENERIC_READ || initial == D3D12_RESOURCE_STATE_COPY_DEST)
     {
         // A host heap stays mapped for its lifetime: mapping per write costs more
         // than the write on a write-combined heap.
@@ -590,6 +626,10 @@ Status<Error> D3D12CreateBuffer(void* internal, const BufferDesc& desc, BufferHa
         if (FAILED(resource3D->Map(0, &range, &mapped)))
         {
             resource3D->Release();
+            device.memory.Deallocate(
+                memoryClass, heap, heapOffset,
+                cyber::memory::AlignUp(desc.sizeBytes, d3d12::kDefaultPlacementAlignment),
+                dedicated);
             return StatusError(ErrorCode::Internal, "d3d12 backend: buffer map failed");
         }
     }
@@ -622,6 +662,11 @@ Status<Error> D3D12CreateBuffer(void* internal, const BufferDesc& desc, BufferHa
     slot.desc = desc;
     slot.state = FromD3D12State(initial);
     slot.native = initial;
+    slot.heap = heap;
+    slot.heapOffset = heapOffset;
+    slot.reservedBytes = cyber::memory::AlignUp(desc.sizeBytes, d3d12::kDefaultPlacementAlignment);
+    slot.memoryClass = memoryClass;
+    slot.dedicated = dedicated;
 
     BufferHandle handle;
     handle.index = index;
@@ -651,6 +696,13 @@ Status<Error> D3D12DestroyBuffer(void* internal, BufferHandle handle) noexcept
     }
     slot->resource->Release();
     slot->resource = nullptr;
+    // The reservation goes back to the allocator rather than to the OS, so a
+    // later allocation can land where this buffer was (ADR 0018).
+    device.memory.Deallocate(slot->memoryClass, slot->heap, slot->heapOffset, slot->reservedBytes,
+                             slot->dedicated);
+    slot->heap = nullptr;
+    slot->heapOffset = 0;
+    slot->reservedBytes = 0;
     slot->alive = false;
     slot->generation = NextGeneration(slot->generation);
     slot->state = ResourceState::Undefined;

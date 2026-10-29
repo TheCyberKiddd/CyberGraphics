@@ -845,8 +845,14 @@ void ReleaseResources(D3D12Device& device) noexcept
             slot.resource->Release();
             slot.resource = nullptr;
         }
+        // The placement stays until the device's allocator shuts down, which is
+        // what makes `MemoryStats` a report rather than a snapshot.
+        slot.heap = nullptr;
         slot.alive = false;
     }
+
+    // Every resource is released; the heaps behind them go with the allocator.
+    device.memory.Shutdown();
 }
 
 }  // namespace cyber::rhi::detail

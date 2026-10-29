@@ -12,6 +12,7 @@
 #include <cyber/rhi/command_list.h>
 #include <cyber/rhi/descriptors.h>
 #include <cyber/rhi/handle.h>
+#include <cyber/rhi/memory.h>
 #include <cyber/rhi/pipeline.h>
 #include <cyber/rhi/resource_state.h>
 #include <cyber/rhi/sampler.h>
@@ -57,6 +58,11 @@ struct DeviceInterface
     // Capabilities of this device. Must be safe to call from any thread and must
     // not allocate. `internal` is never null.
     Capabilities (*capabilities)(const void* internal) noexcept;
+    // Statistics of the GPU memory the device has allocated (ADR 0018), per
+    // memory class. Must be safe to call from any thread, must not allocate, and
+    // must hold no lock the caller can observe. A backend that does not drive a
+    // heap reports a zeroed value. `internal` is never null.
+    MemoryStats (*memoryStats)(const void* internal) noexcept;
     // Handle of the queue for a class, or an invalid handle when the backend has
     // none. A kind outside the enum is out of range and yields an invalid handle.
     QueueHandle (*queue)(const void* internal, QueueKind kind) noexcept;

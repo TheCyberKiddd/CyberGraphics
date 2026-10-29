@@ -13,6 +13,7 @@ set(CYBER_RHI_SOURCES
     src/d3d12/d3d12_swapchain.cpp
     src/d3d12/d3d12_resources.cpp
     src/d3d12/d3d12_textures.cpp
+    src/d3d12/gpu_allocator.cpp
     src/device.cpp
     src/frame_ring.cpp
     src/null_backend.cpp
@@ -46,6 +47,7 @@ set(CYBER_RHI_HEADERS
     include/cyber/rhi/submission.h
     include/cyber/rhi/swapchain.h
     include/cyber/rhi/texture.h
+    include/cyber/rhi/memory.h
 )
 
 cyber_add_module(
@@ -238,6 +240,14 @@ if(CYBER_RHI_ENABLE_D3D12)
     cyber_add_test(
         NAME rhi_d3d12_commands
         SOURCES tests/d3d12_commands_test.cpp
+        DEPENDS rhi memory
+    )
+    # Phase 15: the GPU heap allocator is a D3D12-internal component, but the
+    # report it publishes is the public contract, so its test sits with the
+    # backend tests rather than the null-backend ones.
+    cyber_add_test(
+        NAME rhi_gpu_memory
+        SOURCES tests/gpu_memory_test.cpp
         DEPENDS rhi memory
     )
 endif()
