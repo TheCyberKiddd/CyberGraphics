@@ -14,6 +14,7 @@ using cyber::core::ErrorCode;
 using cyber::core::Status;
 using cyber::core::u32;
 using cyber::core::u64;
+using cyber::core::usize;
 using cyber::memory::kInvalidHandleIndex;
 
 [[nodiscard]] Status<Error> StatusError(ErrorCode code, const char* message) noexcept
@@ -559,6 +560,14 @@ Status<Error> D3D12CreateBuffer(void* internal, const BufferDesc& desc, BufferHa
         return StatusError(ErrorCode::OutOfRange,
                            "d3d12 backend: buffer size is above Limits::maxBufferBytes");
     }
+    if (desc.lifetime >= MemoryLifetime::Count)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "d3d12 backend: buffer lifetime is not a lifetime");
+    }
+    // Destroy runs the same drain before it decides where a reservation goes,
+    // so a used-up epoch can never hide behind the one being created now.
+    DrainTransientReclaims(device);
 
     const d3d12::MemoryClassType memoryClass = MemoryClassOf(desc.usage);
 
@@ -696,10 +705,45 @@ Status<Error> D3D12DestroyBuffer(void* internal, BufferHandle handle) noexcept
     }
     slot->resource->Release();
     slot->resource = nullptr;
+
     // The reservation goes back to the allocator rather than to the OS, so a
-    // later allocation can land where this buffer was (ADR 0018).
-    device.memory.Deallocate(slot->memoryClass, slot->heap, slot->heapOffset, slot->reservedBytes,
-                             slot->dedicated);
+    // later allocation can land where this buffer was (ADR 0018). A transient
+    // resource destroyed while work that may still touch it is in flight keeps
+    // its reservation until the tracker passes its epoch, because handing the
+    // bytes out early would be a real hazard, not a bookkeeping error.
+    DrainTransientReclaims(device);
+    if (slot->desc.lifetime == MemoryLifetime::Transient && device.transientTracker != nullptr &&
+        device.transientTracker->GetCompletedValue() < device.transientEpoch)
+    {
+        D3D12Device::DeferredReclaim reclaim{};
+        reclaim.memoryClass = slot->memoryClass;
+        reclaim.heap = slot->heap;
+        reclaim.offset = slot->heapOffset;
+        reclaim.reservedBytes = slot->reservedBytes;
+        reclaim.dedicated = slot->dedicated;
+        reclaim.epoch = device.transientEpoch;
+        if (!device.deferredReclaims.TryPushBack(reclaim))
+        {
+            // The bytes must still return; an entry that cannot be recorded
+            // falls back to the immediate return the retained path uses.
+            device.memory.Deallocate(slot->memoryClass, slot->heap, slot->heapOffset,
+                                     slot->reservedBytes, slot->dedicated);
+            slot->heap = nullptr;
+            slot->heapOffset = 0;
+            slot->reservedBytes = 0;
+            slot->alive = false;
+            slot->generation = NextGeneration(slot->generation);
+            slot->state = ResourceState::Undefined;
+            (void)device.freeBufferSlots.TryPushBack(handle.index);
+            return StatusError(ErrorCode::Internal,
+                               "d3d12 backend: transient reclaim bookkeeping failed");
+        }
+    }
+    else
+    {
+        device.memory.Deallocate(slot->memoryClass, slot->heap, slot->heapOffset,
+                                 slot->reservedBytes, slot->dedicated);
+    }
     slot->heap = nullptr;
     slot->heapOffset = 0;
     slot->reservedBytes = 0;
@@ -711,6 +755,51 @@ Status<Error> D3D12DestroyBuffer(void* internal, BufferHandle handle) noexcept
         return StatusError(ErrorCode::Internal, "d3d12 backend: buffer free list growth failed");
     }
     return Status<Error>::Ok();
+}
+
+// Returns every deferred reservation the tracker has passed. Create and
+// destroy call this under the device mutex, so `MemoryStats` never shows a
+// reservation that is legally back.
+void DrainTransientReclaims(D3D12Device& device) noexcept
+{
+    if (device.deferredReclaims.Empty())
+    {
+        return;
+    }
+    const u64 completed =
+        device.transientTracker != nullptr ? device.transientTracker->GetCompletedValue() : 0;
+    for (usize index = 0; index < device.deferredReclaims.Size();)
+    {
+        // Facts copied before the entry is replaced: the swap below overwrites
+        // the slot that `reclaim` reads from.
+        const d3d12::MemoryClassType memoryClass = device.deferredReclaims[index].memoryClass;
+        ID3D12Heap* heap = device.deferredReclaims[index].heap;
+        const u64 offset = device.deferredReclaims[index].offset;
+        const u64 reservedBytes = device.deferredReclaims[index].reservedBytes;
+        const bool dedicated = device.deferredReclaims[index].dedicated;
+        if (device.deferredReclaims[index].epoch > completed)
+        {
+            ++index;
+            continue;
+        }
+        device.memory.Deallocate(memoryClass, heap, offset, reservedBytes, dedicated);
+        const usize last = device.deferredReclaims.Size() - 1;
+        device.deferredReclaims[index] = device.deferredReclaims[last];
+        (void)device.deferredReclaims.TryResize(last);
+    }
+}
+
+// Teardown path: the device is leaving, so every remaining deferred
+// reservation is returned without waiting.
+void FlushTransientReclaims(D3D12Device& device) noexcept
+{
+    for (usize index = 0; index < device.deferredReclaims.Size(); ++index)
+    {
+        const D3D12Device::DeferredReclaim& reclaim = device.deferredReclaims[index];
+        device.memory.Deallocate(reclaim.memoryClass, reclaim.heap, reclaim.offset,
+                                 reclaim.reservedBytes, reclaim.dedicated);
+    }
+    device.deferredReclaims.Clear();
 }
 
 BufferInfo D3D12BufferInfo(const void* internal, BufferHandle handle) noexcept
@@ -731,6 +820,7 @@ BufferInfo D3D12BufferInfo(const void* internal, BufferHandle handle) noexcept
     info.sizeBytes = slot->desc.sizeBytes;
     info.elementStride = slot->desc.elementStride;
     info.usage = slot->desc.usage;
+    info.lifetime = slot->desc.lifetime;
     return info;
 }
 

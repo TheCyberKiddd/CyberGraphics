@@ -1809,6 +1809,21 @@ Status<Error> D3D12Submit(void* internal, const SubmitDesc& desc) noexcept
                            "d3d12 backend: the device has no queue of that class");
     }
 
+    // The transient tracker (ADR 0018, increment 2) is created by the first
+    // submission: before one exists, nothing is in flight and a transient
+    // destroy can return its bytes immediately.
+    if (device.transientTracker == nullptr)
+    {
+        if (FAILED(
+                device.device->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence),
+                                           reinterpret_cast<void**>(&device.transientTracker))) ||
+            device.transientTracker == nullptr)
+        {
+            return StatusError(ErrorCode::Internal,
+                               "d3d12 backend: transient lifetime tracker creation failed");
+        }
+    }
+
     ID3D12CommandList* lists[kMaxSubmitLists]{};
     u32 barrierCount = 0;
     for (usize index = 0; index < desc.commandLists.Size(); ++index)
@@ -1851,6 +1866,16 @@ Status<Error> D3D12Submit(void* internal, const SubmitDesc& desc) noexcept
     }
 
     queue.queue->ExecuteCommandLists(static_cast<UINT>(desc.commandLists.Size()), lists);
+
+    // The tracker's next epoch marks this submission's end. The signal is
+    // queued before the epoch is published, so a destroy can never defer
+    // against an epoch that was never signalled.
+    if (FAILED(queue.queue->Signal(device.transientTracker, device.transientEpoch + 1)))
+    {
+        return StatusError(ErrorCode::Internal,
+                           "d3d12 backend: transient lifetime tracker signal failed");
+    }
+    ++device.transientEpoch;
 
     u64 signalled = 0;
     for (usize index = 0; index < desc.signals.Size(); ++index)

@@ -440,6 +440,10 @@ inline constexpr BufferUsage kBufferPipelineUsages = BufferUsage::Vertex | Buffe
         return Fail(out, ErrorCode::InvalidArgument,
                     "buffer element stride must be a multiple of 4 and at most 2048 bytes");
     }
+    if (desc.lifetime >= MemoryLifetime::Count)
+    {
+        return Fail(out, ErrorCode::InvalidArgument, "buffer lifetime is not a lifetime");
+    }
     return true;
 }
 
@@ -459,6 +463,10 @@ inline constexpr BufferUsage kBufferPipelineUsages = BufferUsage::Vertex | Buffe
     if (desc.usage == TextureUsage::None)
     {
         return Fail(out, ErrorCode::InvalidArgument, "texture descriptor has no usage");
+    }
+    if (desc.lifetime >= MemoryLifetime::Count)
+    {
+        return Fail(out, ErrorCode::InvalidArgument, "texture lifetime is not a lifetime");
     }
     if (desc.width == 0 || desc.height == 0 || desc.depth == 0)
     {
@@ -1090,6 +1098,7 @@ BufferInfo NullBufferInfo(const void* internal, BufferHandle handle) noexcept
     info.sizeBytes = buffer->desc.sizeBytes;
     info.elementStride = buffer->desc.elementStride;
     info.usage = buffer->desc.usage;
+    info.lifetime = buffer->desc.lifetime;
     return info;
 }
 
@@ -1326,6 +1335,7 @@ TextureInfo NullTextureInfo(const void* internal, TextureHandle handle) noexcept
     info.arrayLayers = texture->desc.arrayLayers;
     info.mipLevels = texture->desc.mipLevels;
     info.sampleCount = texture->desc.sampleCount;
+    info.lifetime = texture->desc.lifetime;
     info.sizeBytes = TextureByteSize(texture->desc);
     return info;
 }

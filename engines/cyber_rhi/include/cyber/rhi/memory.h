@@ -7,6 +7,36 @@ namespace cyber::rhi
 
 using cyber::core::u32;
 using cyber::core::u64;
+using cyber::core::u8;
+
+// How long a resource's memory must stay reserved.
+enum class MemoryLifetime : u8
+{
+    // The bytes keep their place until the resource is destroyed.
+    Retained = 0,
+    // The bytes only have to exist while the GPU may still use them. A
+    // transient resource destroyed while work touching it can still be in
+    // flight keeps its reservation until that work provably ends, so its bytes
+    // are never handed out early.
+    Transient = 1,
+    // Count, not a lifetime.
+    Count,
+};
+
+// The lifetime's spelling as a lowercase word, or "unknown" for a value
+// outside the enum's range. Never null.
+[[nodiscard]] constexpr const char* MemoryLifetimeName(MemoryLifetime lifetime) noexcept
+{
+    switch (lifetime)
+    {
+    case MemoryLifetime::Retained:
+        return "retained";
+    case MemoryLifetime::Transient:
+        return "transient";
+    default:
+        return "unknown";
+    }
+}
 
 // Statistics for one memory class of the GPU allocator (ADR 0018).
 //

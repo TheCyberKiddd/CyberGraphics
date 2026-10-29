@@ -3,6 +3,7 @@
 #include <cyber/core/types.h>
 #include <cyber/rhi/format.h>
 #include <cyber/rhi/handle.h>
+#include <cyber/rhi/memory.h>
 
 namespace cyber::rhi
 {
@@ -206,6 +207,11 @@ struct TextureDesc
     // a format that `FormatSupportsMultisample` accepts, and a shape no API
     // multisamples (not 1D, not 3D, not a cube).
     u32 sampleCount = 1;
+    // How long the texture's memory must stay reserved. A value outside
+    // `MemoryLifetime`'s range is `ErrorCode::InvalidArgument`. Render-pass
+    // attachments and frame resources are the classic transient case: their
+    // bytes can be reused inside one frame once the GPU walks past them.
+    MemoryLifetime lifetime = MemoryLifetime::Retained;
     // Optional name for logs and debuggers. Borrowed.
     const char* label = nullptr;
 };
@@ -224,6 +230,8 @@ struct TextureInfo
     u32 arrayLayers = 0;
     u32 mipLevels = 0;
     u32 sampleCount = 1;
+    // The lifetime the texture was created with.
+    MemoryLifetime lifetime = MemoryLifetime::Retained;
     // Bytes the backend reserves for the whole texture, using
     // `TextureByteSize` with the default row alignment. Backends that choose a
     // different layout report their own number.

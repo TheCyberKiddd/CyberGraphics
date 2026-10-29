@@ -883,6 +883,15 @@ void DestroyD3D12Device(void* internal) noexcept
     ReportDebugMessages(*device);
 
     ReleaseResources(*device);
+    // Deferred transient reservations are pure bookkeeping; teardown returns
+    // every one of them rather than waiting for work that no longer matters.
+    FlushTransientReclaims(*device);
+    if (device->transientTracker != nullptr)
+    {
+        (void)device->transientTracker->Signal(UINT64_MAX);
+        device->transientTracker->Release();
+        device->transientTracker = nullptr;
+    }
     ReleaseCommandLists(*device);
     ReleaseSwapChains(*device);
     ReleaseFences(*device);

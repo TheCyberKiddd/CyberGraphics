@@ -185,6 +185,11 @@ Status<Error> D3D12CreateTexture(void* internal, const TextureDesc& desc,
         return StatusError(ErrorCode::OutOfRange,
                            "d3d12 backend: texture has more subresources than this backend tracks");
     }
+    if (desc.lifetime >= MemoryLifetime::Count)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "d3d12 backend: texture lifetime is not a lifetime");
+    }
 
     auto& device = *static_cast<D3D12Device*>(internal);
     const std::lock_guard<std::mutex> lock(device.mutex);
@@ -342,6 +347,7 @@ TextureInfo D3D12TextureInfo(const void* internal, TextureHandle handle) noexcep
     info.arrayLayers = slot->desc.arrayLayers;
     info.mipLevels = slot->desc.mipLevels;
     info.sampleCount = slot->desc.sampleCount;
+    info.lifetime = slot->desc.lifetime;
     info.sizeBytes = TextureByteSize(slot->desc);
     return info;
 }

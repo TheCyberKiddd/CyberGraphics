@@ -17,6 +17,7 @@ namespace cyber::rhi::test
 using cyber::core::u32;
 using cyber::core::u64;
 using cyber::memory::HeapAllocator;
+using cyber::memory::Span;
 
 namespace
 {
@@ -282,6 +283,111 @@ CG_TEST(gpu_memory_zero_size_is_refused)
 
     const MemoryStats stats = device.MemoryStats();
     CG_EXPECT_TRUE(IsEmpty(stats));
+}
+
+// The lifetime a buffer was created with is the lifetime its info reports, and
+// a value outside the enum's range is refused before anything is allocated.
+CG_TEST(gpu_memory_lifetime_reports_what_was_created_and_refuses_the_rest)
+{
+    HeapAllocator heap;
+    Device device;
+    CG_REQUIRE(OpenDevice(device, heap));
+
+    auto retained = device.CreateBuffer(BufferOfSize(kSegment, BufferUsage::Vertex, "retained"));
+    CG_REQUIRE(static_cast<bool>(retained));
+    CG_EXPECT_EQ(device.BufferInfoOf(retained.Value()).lifetime, MemoryLifetime::Retained);
+
+    BufferDesc transientDesc = BufferOfSize(kSegment, BufferUsage::Vertex, "transient");
+    transientDesc.lifetime = MemoryLifetime::Transient;
+    auto transient = device.CreateBuffer(transientDesc);
+    CG_REQUIRE(static_cast<bool>(transient));
+    CG_EXPECT_EQ(device.BufferInfoOf(transient.Value()).lifetime, MemoryLifetime::Transient);
+
+    BufferDesc refusedDesc = BufferOfSize(kSegment, BufferUsage::Vertex, "invalid");
+    refusedDesc.lifetime = static_cast<MemoryLifetime>(99);
+    auto refused = device.CreateBuffer(refusedDesc);
+    CG_EXPECT_FALSE(refused);
+    CG_EXPECT_EQ(refused.Error().code, cyber::core::ErrorCode::InvalidArgument);
+
+    // The refused descriptor allocated nothing.
+    const MemoryStats stats = device.MemoryStats();
+    CG_EXPECT_EQ(stats.deviceLocal.usedBytes, 2 * kSegment);
+}
+
+// The heart of the transient promise (ADR 0018, increment 2): a transient
+// buffer destroyed while the queue may still be running keeps its reservation
+// until the tracker passes its epoch. The queue is held off by a GPU wait the
+// test controls, so the deferral is deterministic rather than a race.
+CG_TEST(gpu_memory_transient_destroy_survives_an_in_flight_submission)
+{
+    HeapAllocator heap;
+    Device device;
+    CG_REQUIRE(OpenDevice(device, heap));
+
+    // One submission that cannot begin yet: copy queue waits for `gate` before
+    // it runs the list, and `done` is signalled when it has run everything.
+    // The list runs on the copy queue so the CPU-side fence signal that opens
+    // the gate later reaches the device through the graphics queue, which the
+    // blocked copy queue has not stalled.
+    auto gate = device.CreateFence(FenceDesc{});
+    auto done = device.CreateFence(FenceDesc{});
+    CG_REQUIRE(static_cast<bool>(gate) && static_cast<bool>(done));
+
+    CommandListDesc listDesc{};
+    listDesc.queue = QueueKind::Copy;
+    auto created = device.CreateCommandList(listDesc);
+    CG_REQUIRE(static_cast<bool>(created));
+    CommandList list = std::move(created.Value());
+    CG_REQUIRE(list.Begin().IsOk());
+    CG_REQUIRE(list.End().IsOk());
+
+    const CommandListHandle lists[] = {list.Handle()};
+    const GpuWait waits[] = {{gate.Value(), 1}};
+    const FenceSignal signals[] = {{done.Value(), 1}};
+    SubmitDesc submit{};
+    submit.queue = QueueKind::Copy;
+    submit.commandLists = Span<const CommandListHandle>(lists, 1);
+    submit.gpuWaits = Span<const GpuWait>(waits, 1);
+    submit.signals = Span<const FenceSignal>(signals, 1);
+    CG_REQUIRE(device.Submit(submit).IsOk());
+
+    // The transient whose place the submission may still touch. Its rounded
+    // reservation exactly fills the class's first 8 MiB block.
+    BufferDesc transientDesc = BufferOfSize(kFirstHeap, BufferUsage::CopyDestination, "in flight");
+    transientDesc.lifetime = MemoryLifetime::Transient;
+    auto inFlight = device.CreateBuffer(transientDesc);
+    CG_REQUIRE(static_cast<bool>(inFlight));
+
+    CG_EXPECT_TRUE(device.DestroyBuffer(inFlight.Value()));
+    // The tracker has signalled at least once and its epoch cannot have
+    // completed, because the queue has not begun the submission yet, so the
+    // destroy deferred its reservation instead of returning it.
+    MemoryStats stats = device.MemoryStats();
+    CG_EXPECT_EQ(stats.deviceLocal.blockCount, u32{1});
+    CG_EXPECT_EQ(stats.deviceLocal.usedBytes, kFirstHeap);
+
+    // The deferred bytes cannot be handed out while they may still serve the
+    // submission, so a same-size request opens a fresh block.
+    auto second = device.CreateBuffer(transientDesc);
+    CG_REQUIRE(static_cast<bool>(second));
+    stats = device.MemoryStats();
+    CG_EXPECT_EQ(stats.deviceLocal.blockCount, u32{2});
+    CG_EXPECT_EQ(stats.deviceLocal.reservedBytes, kFirstHeap + 2 * kFirstHeap);
+    CG_EXPECT_EQ(stats.deviceLocal.usedBytes, 2 * kFirstHeap);
+
+    // Once the submission has run, the deferred reservation returns and the
+    // freed bytes are reusable.
+    CG_REQUIRE(device.SignalFence(gate.Value(), 1).IsOk());
+    CG_REQUIRE(device.WaitFence(done.Value(), 1).IsOk());
+    CG_EXPECT_TRUE(device.DestroyBuffer(second.Value()));
+
+    // First fit hands the next request the exact place the deferred buffer
+    // kept: the first block's stride.
+    auto recycled = device.CreateBuffer(transientDesc);
+    CG_REQUIRE(static_cast<bool>(recycled));
+    stats = device.MemoryStats();
+    CG_EXPECT_EQ(stats.deviceLocal.blockCount, u32{2});
+    CG_EXPECT_EQ(stats.deviceLocal.usedBytes, kFirstHeap);
 }
 
 }  // namespace cyber::rhi::test

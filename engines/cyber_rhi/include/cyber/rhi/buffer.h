@@ -2,6 +2,7 @@
 
 #include <cyber/core/types.h>
 #include <cyber/rhi/handle.h>
+#include <cyber/rhi/memory.h>
 
 namespace cyber::rhi
 {
@@ -126,6 +127,9 @@ struct BufferDesc
     // which is D3D12's `D3D12_RAW_UAV_SRV_BYTE_ALIGNMENT` rule and Vulkan's
     // storage-buffer offset alignment on every target.
     u32 elementStride = 0;
+    // How long the buffer's memory must stay reserved. A value outside
+    // `MemoryLifetime`'s range is `ErrorCode::InvalidArgument`.
+    MemoryLifetime lifetime = MemoryLifetime::Retained;
     // Optional name for logs and debuggers. Borrowed; the caller keeps it alive
     // for the buffer's lifetime or passes null.
     const char* label = nullptr;
@@ -139,6 +143,8 @@ struct BufferInfo
     u64 sizeBytes = 0;
     u32 elementStride = 0;
     BufferUsage usage = BufferUsage::None;
+    // The lifetime the buffer was created with.
+    MemoryLifetime lifetime = MemoryLifetime::Retained;
 };
 
 }  // namespace cyber::rhi

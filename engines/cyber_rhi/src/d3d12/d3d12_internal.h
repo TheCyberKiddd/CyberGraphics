@@ -301,7 +301,7 @@ struct D3D12Device
           pipelines(allocator), freePipelineSlots(allocator), pipelineCaches(allocator),
           freePipelineCacheSlots(allocator), commandLists(allocator),
           freeCommandListSlots(allocator), swapChains(allocator), freeSwapChainSlots(allocator),
-          memory(allocator)
+          deferredReclaims(allocator), memory(allocator)
     {
     }
 
@@ -370,6 +370,28 @@ struct D3D12Device
     u64 fenceSignals = 0;
     mutable std::mutex mutex;
     std::condition_variable condition;
+
+    // Transient resources (ADR 0018, increment 2) whose reservation must not
+    // return while the GPU may still be touching them: each record is a destroy
+    // that waits until the tracker has passed its epoch before the bytes go
+    // back to the allocator. Records leave in `DrainTransientReclaims`, which
+    // create and destroy run, so `MemoryStats` always reads a clean answer.
+    struct DeferredReclaim
+    {
+        d3d12::MemoryClassType memoryClass = d3d12::MemoryClassType::DeviceLocal;
+        ID3D12Heap* heap = nullptr;
+        u64 offset = 0;
+        u64 reservedBytes = 0;
+        bool dedicated = false;
+        // Every submission before this epoch is one the bytes may still serve.
+        u64 epoch = 0;
+    };
+    DynamicArray<DeferredReclaim> deferredReclaims;
+    // Signalled at every submission. A transient destroy defers its return
+    // only when this exists, has signalled at least once, and the destroy's
+    // epoch is not complete yet.
+    ID3D12Fence* transientTracker = nullptr;
+    u64 transientEpoch = 0;
 
     // GPU memory the backend owns, sub-allocating inside large heaps (ADR 0018,
     // increment 1), instead of one heap per resource. Guarded by `mutex`, like
@@ -451,6 +473,12 @@ void ReleaseResources(D3D12Device& device) noexcept;
 [[nodiscard]] Status<Error> D3D12ReadBuffer(void* internal, BufferHandle buffer, u64 offset,
                                             memory::Span<memory::Byte> bytes) noexcept;
 [[nodiscard]] ResourceState D3D12BufferState(const void* internal, BufferHandle buffer) noexcept;
+// Deferred-reservation drain (ADR 0018, increment 2). `DrainTransientReclaims`
+// returns the reservations the tracker has passed; create and destroy call it
+// under the device mutex. `FlushTransientReclaims` returns every deferred
+// reservation without waiting; teardown calls it because the device is leaving.
+void DrainTransientReclaims(D3D12Device& device) noexcept;
+void FlushTransientReclaims(D3D12Device& device) noexcept;
 [[nodiscard]] Status<Error> D3D12CreateTexture(void* internal, const TextureDesc& desc,
                                                TextureHandle* out) noexcept;
 [[nodiscard]] Status<Error> D3D12DestroyTexture(void* internal, TextureHandle texture) noexcept;
