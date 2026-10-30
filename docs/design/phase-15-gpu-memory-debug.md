@@ -1,7 +1,8 @@
 # Phase 15 — GPU memory and debug tooling
 
 Date: 2026-10-27
-Status: draft (increments land one at a time)
+Status: drafts landed for increments 1–2 (allocator: 813bb45; reclamation and
+quarantine: 39d3395); remaining increments are in progress
 Related: ADR 0018 (GPU memory allocator and the validation layer), ADR 0006
 (memory allocation and handles), ADR 0013 (RHI object model), ADR 0014 (resource
 model), ADR 0016 (command recording), ADR 0017 (D3D12 backend),
