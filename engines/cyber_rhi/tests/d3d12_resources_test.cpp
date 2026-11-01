@@ -54,7 +54,9 @@ CG_TEST(d3d12_resources_host_visible_buffer_round_trips)
     CG_REQUIRE(OpenSoftwareDevice(device, heap));
 
     BufferDesc desc{};
-    desc.usage = BufferUsage::Uniform | BufferUsage::HostVisible | BufferUsage::CopySource;
+    // Staging usage: host-visible memory cannot carry a shader usage, so the
+    // copy source is the pipeline-legal host access.
+    desc.usage = BufferUsage::HostVisible | BufferUsage::CopySource;
     desc.sizeBytes = 256;
     desc.label = "constants";
     auto created = device.CreateBuffer(desc);
@@ -297,8 +299,10 @@ CG_TEST(d3d12_resources_release_everything_on_teardown)
         Device device;
         CG_REQUIRE(OpenSoftwareDevice(device, heap));
 
+        // Host-visible memory carries no pipeline usage, so the teardown buffer
+        // is staging.
         BufferDesc bufferDesc{};
-        bufferDesc.usage = BufferUsage::HostVisible | BufferUsage::Vertex;
+        bufferDesc.usage = BufferUsage::HostVisible | BufferUsage::CopySource;
         bufferDesc.sizeBytes = 512;
         auto buffer = device.CreateBuffer(bufferDesc);
         CG_REQUIRE(static_cast<bool>(buffer));

@@ -471,6 +471,12 @@ struct Target
     TextureViewDesc viewDesc{};
     viewDesc.texture = created.Value();
     viewDesc.format = format;
+    // A depth-stencil target exposes its depth aspect, and the view rule
+    // requires the description to name it.
+    if (HasUsage(usage, TextureUsage::DepthStencil))
+    {
+        viewDesc.range.aspect = TextureAspect::Depth;
+    }
     auto view = device.CreateTextureView(viewDesc);
     if (!view)
     {
@@ -609,7 +615,41 @@ bool RenderD3DTriangle(HeapAllocator& heap, u8* outPixels)
         return false;
     }
 
+    // One used slot is the binding contract's minimum layout. The shader reads
+    // nothing, so the group binds a real uniform range that nothing samples.
+    const BindGroupLayoutEntry entry{0, BindingType::UniformBuffer,
+                                     ShaderStageBit(ShaderStage::Pixel), 1};
+    BindGroupLayoutDesc groupLayoutDesc{};
+    groupLayoutDesc.entries = Span<const BindGroupLayoutEntry>(&entry, 1);
+    auto groupLayout = device.CreateBindGroupLayout(groupLayoutDesc);
+    if (!groupLayout)
+    {
+        return false;
+    }
+    BufferDesc constantsDesc{};
+    constantsDesc.usage = BufferUsage::Uniform | BufferUsage::CopyDestination;
+    constantsDesc.sizeBytes = 256;
+    auto constants = device.CreateBuffer(constantsDesc);
+    if (!constants)
+    {
+        return false;
+    }
+    BindingResource constantResource{};
+    constantResource.type = BindingType::UniformBuffer;
+    constantResource.buffer = constants.Value();
+    constantResource.offset = 0;
+    constantResource.size = 256;
+    BindGroupDesc groupDesc{};
+    groupDesc.layout = groupLayout.Value();
+    groupDesc.resources = Span<const BindingResource>(&constantResource, 1);
+    auto group = device.CreateBindGroup(groupDesc);
+    if (!group)
+    {
+        return false;
+    }
+
     PipelineLayoutDesc layoutDesc{};
+    layoutDesc.groups[static_cast<u32>(BindGroupSlot::PerFrame)] = groupLayout.Value();
     auto layout = device.CreatePipelineLayout(layoutDesc);
     if (!layout)
     {
@@ -692,6 +732,7 @@ bool RenderD3DTriangle(HeapAllocator& heap, u8* outPixels)
         return false;
     }
     if (!list.SetPipeline(pipeline.Value()).IsOk() ||
+        !list.SetBindGroup(BindGroupSlot::PerFrame, group.Value()).IsOk() ||
         !list.SetVertexBuffer(0, vertices.Value()).IsOk() ||
         !list.Draw(DrawArguments{3, 1, 0, 0}).IsOk() || !list.EndRenderPass().IsOk())
     {

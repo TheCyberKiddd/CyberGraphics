@@ -54,6 +54,31 @@ constexpr char kComputeSource[] = "[numthreads(8, 8, 1)]\n"
                                   "{\n"
                                   "}\n";
 
+// One used slot is the binding contract's minimum layout; the pipeline never
+// records a draw, so the group is declared but not bound here, and the group
+// layout releases with the device.
+[[nodiscard]] bool MakeLayout(Device& device, PipelineLayoutHandle& layout) noexcept
+{
+    const BindGroupLayoutEntry entry{0, BindingType::UniformBuffer,
+                                     ShaderStageBit(ShaderStage::Pixel), 1};
+    BindGroupLayoutDesc groupDesc{};
+    groupDesc.entries = Span<const BindGroupLayoutEntry>(&entry, 1);
+    auto groupLayout = device.CreateBindGroupLayout(groupDesc);
+    if (!groupLayout)
+    {
+        return false;
+    }
+    PipelineLayoutDesc layoutDesc{};
+    layoutDesc.groups[static_cast<u32>(BindGroupSlot::PerMaterial)] = groupLayout.Value();
+    auto created = device.CreatePipelineLayout(layoutDesc);
+    if (!created)
+    {
+        return false;
+    }
+    layout = created.Value();
+    return true;
+}
+
 [[nodiscard]] Span<const Byte> Bytes(const char* text) noexcept
 {
     return Span<const Byte>(reinterpret_cast<const Byte*>(text),
@@ -132,9 +157,8 @@ CG_TEST(d3d12_pipelines_create_a_graphics_pipeline)
     Device device;
     CG_REQUIRE(OpenD3D12Device(device, heap));
 
-    PipelineLayoutDesc layoutDesc{};
-    auto layout = device.CreatePipelineLayout(layoutDesc);
-    CG_REQUIRE(static_cast<bool>(layout));
+    PipelineLayoutHandle layout{};
+    CG_REQUIRE(MakeLayout(device, layout));
 
     ShaderDesc vertexDesc{};
     vertexDesc.stage = ShaderStage::Vertex;
@@ -151,7 +175,8 @@ CG_TEST(d3d12_pipelines_create_a_graphics_pipeline)
     CG_REQUIRE(static_cast<bool>(pixel));
 
     GraphicsFixture fixture{};
-    fixture.layout = layout.Value();
+    fixture.layout = layout;
+    ;
     fixture.vertex = vertex.Value();
     fixture.pixel = pixel.Value();
     const GraphicsPipelineDesc desc = MakeGraphicsDesc(fixture);
@@ -186,9 +211,8 @@ CG_TEST(d3d12_pipelines_reject_incomplete_descriptions)
     Device device;
     CG_REQUIRE(OpenD3D12Device(device, heap));
 
-    PipelineLayoutDesc layoutDesc{};
-    auto layout = device.CreatePipelineLayout(layoutDesc);
-    CG_REQUIRE(static_cast<bool>(layout));
+    PipelineLayoutHandle layout{};
+    CG_REQUIRE(MakeLayout(device, layout));
 
     ShaderDesc vertexDesc{};
     vertexDesc.stage = ShaderStage::Vertex;
@@ -205,7 +229,8 @@ CG_TEST(d3d12_pipelines_reject_incomplete_descriptions)
     CG_REQUIRE(static_cast<bool>(pixel));
 
     GraphicsFixture fixture{};
-    fixture.layout = layout.Value();
+    fixture.layout = layout;
+    ;
     fixture.vertex = vertex.Value();
     fixture.pixel = pixel.Value();
 
@@ -254,7 +279,7 @@ CG_TEST(d3d12_pipelines_reject_incomplete_descriptions)
     }
 
     // A pipeline layout that has been destroyed cannot produce a pipeline.
-    CG_EXPECT_TRUE(device.DestroyPipelineLayout(layout.Value()).IsOk());
+    CG_EXPECT_TRUE(device.DestroyPipelineLayout(layout).IsOk());
     GraphicsFixture stale = fixture;
     const GraphicsPipelineDesc staleDesc = MakeGraphicsDesc(stale);
     const auto staleResult = device.CreateGraphicsPipeline(staleDesc);
@@ -271,9 +296,8 @@ CG_TEST(d3d12_pipelines_refuse_shaders_that_do_not_fit_the_state)
     Device device;
     CG_REQUIRE(OpenD3D12Device(device, heap));
 
-    PipelineLayoutDesc layoutDesc{};
-    auto layout = device.CreatePipelineLayout(layoutDesc);
-    CG_REQUIRE(static_cast<bool>(layout));
+    PipelineLayoutHandle layout{};
+    CG_REQUIRE(MakeLayout(device, layout));
 
     ShaderDesc vertexDesc{};
     vertexDesc.stage = ShaderStage::Vertex;
@@ -295,7 +319,8 @@ CG_TEST(d3d12_pipelines_refuse_shaders_that_do_not_fit_the_state)
     // refuses it, and the backend turns that into an argument error rather than an
     // internal failure.
     GraphicsFixture fixture{};
-    fixture.layout = layout.Value();
+    fixture.layout = layout;
+    ;
     fixture.vertex = vertex.Value();
     fixture.pixel = pixel.Value();
     GraphicsPipelineDesc desc = MakeGraphicsDesc(fixture);
@@ -332,9 +357,8 @@ CG_TEST(d3d12_pipelines_create_a_compute_pipeline)
     const Capabilities capabilities = device.Capabilities();
     CG_REQUIRE(capabilities.features.Has(Feature::Compute));
 
-    PipelineLayoutDesc layoutDesc{};
-    auto layout = device.CreatePipelineLayout(layoutDesc);
-    CG_REQUIRE(static_cast<bool>(layout));
+    PipelineLayoutHandle layout{};
+    CG_REQUIRE(MakeLayout(device, layout));
 
     ShaderDesc shaderDesc{};
     shaderDesc.stage = ShaderStage::Compute;
@@ -344,7 +368,8 @@ CG_TEST(d3d12_pipelines_create_a_compute_pipeline)
     CG_REQUIRE(static_cast<bool>(shader));
 
     ComputePipelineDesc desc{};
-    desc.layout = layout.Value();
+    desc.layout = layout;
+    ;
     desc.computeShader = shader.Value();
     desc.label = "clear";
     auto created = device.CreateComputePipeline(desc);
@@ -371,7 +396,8 @@ CG_TEST(d3d12_pipelines_create_a_compute_pipeline)
     auto vertex = device.CreateShader(vertexDesc);
     CG_REQUIRE(static_cast<bool>(vertex));
     ComputePipelineDesc wrong{};
-    wrong.layout = layout.Value();
+    wrong.layout = layout;
+    ;
     wrong.computeShader = vertex.Value();
     CG_EXPECT_FALSE(device.CreateComputePipeline(wrong));
 }
@@ -382,9 +408,8 @@ CG_TEST(d3d12_pipelines_cache_round_trip)
     Device device;
     CG_REQUIRE(OpenD3D12Device(device, heap));
 
-    PipelineLayoutDesc layoutDesc{};
-    auto layout = device.CreatePipelineLayout(layoutDesc);
-    CG_REQUIRE(static_cast<bool>(layout));
+    PipelineLayoutHandle layout{};
+    CG_REQUIRE(MakeLayout(device, layout));
 
     ShaderDesc vertexDesc{};
     vertexDesc.stage = ShaderStage::Vertex;
@@ -406,7 +431,8 @@ CG_TEST(d3d12_pipelines_cache_round_trip)
     CG_REQUIRE(static_cast<bool>(cache));
 
     GraphicsFixture fixture{};
-    fixture.layout = layout.Value();
+    fixture.layout = layout;
+    ;
     fixture.vertex = vertex.Value();
     fixture.pixel = pixel.Value();
     GraphicsPipelineDesc desc = MakeGraphicsDesc(fixture);
@@ -478,9 +504,8 @@ CG_TEST(d3d12_pipelines_release_their_state)
         Device device;
         CG_REQUIRE(OpenD3D12Device(device, heap));
 
-        PipelineLayoutDesc layoutDesc{};
-        auto layout = device.CreatePipelineLayout(layoutDesc);
-        CG_REQUIRE(static_cast<bool>(layout));
+        PipelineLayoutHandle layout{};
+        CG_REQUIRE(MakeLayout(device, layout));
 
         ShaderDesc shaderDesc{};
         shaderDesc.stage = ShaderStage::Compute;
@@ -490,7 +515,8 @@ CG_TEST(d3d12_pipelines_release_their_state)
         CG_REQUIRE(static_cast<bool>(shader));
 
         ComputePipelineDesc desc{};
-        desc.layout = layout.Value();
+        desc.layout = layout;
+        ;
         desc.computeShader = shader.Value();
         auto pipeline = device.CreateComputePipeline(desc);
         if (pipeline)

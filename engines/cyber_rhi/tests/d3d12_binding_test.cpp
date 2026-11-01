@@ -196,7 +196,9 @@ CG_TEST(d3d12_binding_layouts_and_groups)
 
     // A uniform buffer and a sampled texture, in binding order.
     BufferDesc bufferDesc{};
-    bufferDesc.usage = BufferUsage::Uniform | BufferUsage::HostVisible;
+    // A uniform buffer is a shader-usage buffer: it lives on the device, and
+    // host-visible memory cannot carry the usage.
+    bufferDesc.usage = BufferUsage::Uniform;
     bufferDesc.sizeBytes = 256;
     auto buffer = device.CreateBuffer(bufferDesc);
     CG_REQUIRE(static_cast<bool>(buffer));

@@ -1,3 +1,5 @@
+#include "validating_device.h"
+
 #include <cyber/rhi/device.h>
 
 #include <utility>
@@ -144,6 +146,25 @@ Result<Device, Error> Device::Create(const DeviceDesc& desc, memory::Allocator& 
     }
 
     Device device;
+
+    // A validation level that asks for backend-side checking installs the
+    // wrapper between the front end and the backend's own table. Everything
+    // else reaches the backend directly, exactly as the level's zero cost
+    // promises.
+    if (desc.validation != ValidationLevel::Off)
+    {
+        DeviceCreation real = creation;
+        const auto wrapped = CreateValidatingDevice(real, backend, desc.validation, allocator);
+        if (!wrapped)
+        {
+            // The real device is destroyed here because this Device owns it and
+            // will not return it.
+            backend.destroyDevice(real.internal);
+            return DeviceError(wrapped.Error().code, wrapped.Error().message);
+        }
+        creation = wrapped.Value();
+    }
+
     device.m_backend = &backend;
     device.m_interface = creation.interface;
     device.m_internal = creation.internal;
@@ -841,6 +862,17 @@ Result<SwapChain, Error> Device::CreateSwapChain(const SwapChainDesc& desc) noex
 
 void Device::Release() noexcept
 {
+    if (m_interface != nullptr && m_internal != nullptr && IsWrapperInterface(*m_interface))
+    {
+        // The wrapper releases the real device it remembers, so the backend's
+        // destroyDeviceEntry below must not run on wrapper state.
+        DestroyValidatingDevice(m_internal);
+        m_backend = nullptr;
+        m_interface = nullptr;
+        m_internal = nullptr;
+        return;
+    }
+
     if (m_backend != nullptr && m_internal != nullptr && m_interface != nullptr &&
         m_interface->waitIdle != nullptr)
     {

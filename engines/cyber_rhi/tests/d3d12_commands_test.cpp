@@ -77,10 +77,13 @@ constexpr char kPixelSource[] = "float4 main(float4 position : SV_Position) : SV
 }
 
 // Everything one end-to-end draw needs: geometry on the GPU, a color target, and
-// a readback buffer sized for one aligned row per texel row.
+// a readback buffer sized for one aligned row per texel row. The layout carries
+// the one used slot the binding contract requires, with a group the drawer
+// binds even though the shaders read nothing from it.
 struct Frame
 {
     PipelineLayoutHandle layout{};
+    BindGroupHandle group{};
     ShaderHandle vertex{};
     ShaderHandle pixel{};
     PipelineHandle pipeline{};
@@ -95,7 +98,45 @@ struct Frame
 
 [[nodiscard]] bool BuildFrame(Device& device, HeapAllocator& heap, Frame& frame) noexcept
 {
-    auto layout = device.CreatePipelineLayout(PipelineLayoutDesc{});
+    // One used slot backed by a real uniform buffer, so the recording's bind is
+    // valid even though the shaders below read nothing from it.
+    const BindGroupLayoutEntry entry{0, BindingType::UniformBuffer,
+                                     ShaderStageBit(ShaderStage::Pixel), 1};
+    BindGroupLayoutDesc groupLayoutDesc{};
+    groupLayoutDesc.entries = Span<const BindGroupLayoutEntry>(&entry, 1);
+    auto groupLayout = device.CreateBindGroupLayout(groupLayoutDesc);
+    if (!groupLayout)
+    {
+        return false;
+    }
+
+    BufferDesc constantsDesc{};
+    constantsDesc.usage = BufferUsage::Uniform | BufferUsage::CopyDestination;
+    constantsDesc.sizeBytes = 256;
+    auto constants = device.CreateBuffer(constantsDesc);
+    if (!constants)
+    {
+        return false;
+    }
+
+    BindingResource resource{};
+    resource.type = BindingType::UniformBuffer;
+    resource.buffer = constants.Value();
+    resource.offset = 0;
+    resource.size = 256;
+    BindGroupDesc groupDesc{};
+    groupDesc.layout = groupLayout.Value();
+    groupDesc.resources = Span<const BindingResource>(&resource, 1);
+    auto group = device.CreateBindGroup(groupDesc);
+    if (!group)
+    {
+        return false;
+    }
+    frame.group = group.Value();
+
+    PipelineLayoutDesc layoutDesc{};
+    layoutDesc.groups[static_cast<u32>(BindGroupSlot::PerFrame)] = groupLayout.Value();
+    auto layout = device.CreatePipelineLayout(layoutDesc);
     if (!layout)
     {
         return false;
@@ -161,6 +202,9 @@ struct Frame
     TextureViewDesc depthView{};
     depthView.texture = frame.depth;
     depthView.format = Format::D32Float;
+    // A depth-only texture exposes exactly its depth aspect, and the rule
+    // requires the description to say so.
+    depthView.range.aspect = TextureAspect::Depth;
     auto depthViewResult = device.CreateTextureView(depthView);
     if (!depthViewResult)
     {
@@ -503,6 +547,7 @@ CG_TEST(d3d12_commands_draw_a_colored_triangle)
 
     CG_REQUIRE(list.BeginRenderPass(pass).IsOk());
     CG_REQUIRE(list.SetPipeline(frame.pipeline).IsOk());
+    CG_REQUIRE(list.SetBindGroup(BindGroupSlot::PerFrame, frame.group).IsOk());
     CG_REQUIRE(list.SetViewport(Viewport::Of(static_cast<float>(kSize), static_cast<float>(kSize)))
                    .IsOk());
     CG_REQUIRE(list.SetScissor(ScissorRect{0, 0, kSize, kSize}).IsOk());

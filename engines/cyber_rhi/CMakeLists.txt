@@ -17,6 +17,8 @@ set(CYBER_RHI_SOURCES
     src/device.cpp
     src/frame_ring.cpp
     src/null_backend.cpp
+    src/validation.cpp
+    src/validating_device.cpp
     src/pipeline.cpp
     src/render_pass.cpp
     src/retirement.cpp
@@ -70,6 +72,12 @@ if(CYBER_RHI_ENABLE_D3D12)
     # only way a shader becomes bytecode.
     target_link_libraries(cyber_rhi PUBLIC d3d12 dxgi d3dcompiler)
 endif()
+
+cyber_add_test(
+    NAME rhi_validation_errors
+    SOURCES tests/validation_errors_test.cpp
+    DEPENDS rhi memory
+)
 
 cyber_add_test(
     NAME rhi_public_headers
