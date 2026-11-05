@@ -389,12 +389,12 @@ Done when: a small shader in your language compiles to HLSL, drives the cube sam
 ### Phase 17: Reflection, permutations, and hot reload
 
 Tasks
-[ ] Produce reflection data from your own compiler: resources, constant buffer layouts, vertex inputs, and compute thread group sizes, and use it to build RHI binding layouts automatically.
-[ ] A permutation system (shader keywords) with stable key hashing, a limit on permutation count, and a report of counts per shader.
-[ ] An on-disk shader cache keyed by source hash, compiler version, permutation, and target.
-[ ] Compile shaders on the job system, and create pipelines asynchronously with a fallback while they compile.
-[ ] Hot reload: watch shader files, recompile on change, and swap pipelines at a frame boundary.
-Read first: Programming guide for HLSL (author-time versus runtime compilation) · search the Windows documentation for ReadDirectoryChangesW for file watching
+[x] Produce reflection data from your own compiler: resources, constant buffer layouts, vertex inputs, and compute thread group sizes, and use it to build RHI binding layouts automatically.
+[x] A permutation system (shader keywords) with stable key hashing, a limit on permutation count, and a report of counts per shader.
+[x] An on-disk shader cache keyed by source hash, compiler version, permutation, and target.
+[x] Compile shaders on the job system, and create pipelines asynchronously with a fallback while they compile.
+[x] Hot reload: watch shader files, recompile on change, and swap pipelines at a frame boundary.
+Read first: [Microsoft's HLSL programming guide](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx-graphics-hlsl) (author-time versus runtime compilation) · [`ReadDirectoryChangesW`](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-readdirectorychangesw)
 Tips
 • Include the compiler version in the cache key, or stale cache entries will cause confusing bugs after upgrades.
 • Never block the render thread on shader compilation.

@@ -62,6 +62,7 @@ add_subdirectory(engines/cyber_perf)
 add_subdirectory(engines/cyber_jobs)
 add_subdirectory(engines/cyber_rhi)
 add_subdirectory(engines/cyber_shaders)
+add_subdirectory(engines/cyber_renderer)
 add_subdirectory(engines/cyber_software_renderer)
 
 if(CYBER_BUILD_TESTS AND CYBER_RHI_ENABLE_D3D12)

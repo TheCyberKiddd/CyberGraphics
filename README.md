@@ -14,9 +14,9 @@ in place, and every module test runs through the project's own test runner.
 
 - Structure and module contracts: scaffolded.
 - Build system: CMake 3.28+, C++20, Debug/Release/Shipping presets.
-- Modules: 16 defined, 7 active (`cyber_core`, `cyber_math`, `cyber_memory`,
-  `cyber_platform`, `cyber_perf`, `cyber_jobs`, `cyber_software_renderer`), 9
-  planned.
+- Modules: 16 defined, 10 active (`cyber_core`, `cyber_math`, `cyber_memory`,
+  `cyber_platform`, `cyber_perf`, `cyber_jobs`, `cyber_rhi`, `cyber_shaders`,
+  `cyber_renderer`, `cyber_software_renderer`), 6 planned.
 - CI: Windows MSVC and Linux clang jobs, plus structure and dependency checks.
 - Phase 1: complete. Local builds and tests pass in every preset, structure and
   dependency checks pass, and the Windows + Linux CI jobs are green.
@@ -132,6 +132,14 @@ tests pass in debug; the design is ADR 0013.
   ASan pass 88/88, and the repository-wide formatting gate passes. This is
   shader-tooling progress, not a photorealistic renderer. See the
   [Phase 16 report](docs/reports/phase-16.md).
+- Phase 17 implementation and validation are complete locally. `cyber_shaders`
+  derives reflection from typed source, builds bounded stable keyword
+  permutations, caches compiler output, and reloads shaders asynchronously.
+  `cyber_renderer` builds reflected RHI layouts and swaps pipelines at frame
+  boundaries. Debug, Profile, Release, Shipping, and Debug-ASan pass 96/96; the
+  D3D12 live-reload self-test applied edits in 48 ms and 84 ms and retained the
+  previous pipeline after a syntax error. The master-roadmap checkbox awaits
+  commit of this evidence. See the [Phase 17 report](docs/reports/phase-17.md).
 
 See [engines/MODULES.md](engines/MODULES.md) for the module index and
 [docs/architecture/overview.md](docs/architecture/overview.md) for the design.

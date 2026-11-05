@@ -2,8 +2,9 @@
 
 **Status:** active · **Layer:** 2 · **Kind:** graphics
 
-Phase 16 adds the typed Cyber shader language, compiler, diagnostics, and HLSL
-generation. Reflection, permutations, and hot reload follow in Phase 17.
+Phases 16-17 provide the typed Cyber shader language, compiler-owned reflection,
+stable keyword permutations, on-disk caching, job-system compilation, file
+watching, and renderer-side hot graphics pipelines.
 
 The binding contract for this module lives in [docs/MODULE.md](docs/MODULE.md).
 Read it before adding code or changing a public header.
@@ -14,8 +15,7 @@ Read it before adding code or changing a public header.
 - `src/` — private implementation.
 - `tests/` — unit tests owned by this module.
 
-The module is active. Its CMake target and public API are added as Phase 16 is
-implemented.
+The module is active and has an RHI-independent C++ API.
 
 ## Roadmap
 

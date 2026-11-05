@@ -1,0 +1,5 @@
+shader vertex HotReload {
+    input float2 position @location(0);
+    output float4 clipPosition @builtin(position);
+    output.clipPosition = float4(input.position, 0.5, 1.0);
+}

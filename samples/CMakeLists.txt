@@ -9,4 +9,5 @@ add_subdirectory(04_textured)
 
 if(CYBER_RHI_ENABLE_D3D12)
     add_subdirectory(05_d3d12_markers)
+    add_subdirectory(06_shader_hot_reload)
 endif()

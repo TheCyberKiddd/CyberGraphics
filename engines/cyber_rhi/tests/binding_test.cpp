@@ -433,17 +433,17 @@ CG_TEST(rhi_binding_pipeline_layout)
     CG_EXPECT_TRUE(device.DestroyPipelineLayout(layout));
     CG_EXPECT_FALSE(device.DestroyPipelineLayout(layout));
 
-    // No used slot is a pipeline that binds nothing.
+    // A pipeline layout may describe a shader with no resource bindings.
     PipelineLayoutDesc empty{};
-    auto failed = device.CreatePipelineLayout(empty);
-    CG_EXPECT_FALSE(failed);
-    CG_EXPECT_EQ(failed.Error().code, ErrorCode::InvalidArgument);
+    auto emptyLayout = device.CreatePipelineLayout(empty);
+    CG_REQUIRE(static_cast<bool>(emptyLayout));
+    CG_EXPECT_TRUE(device.DestroyPipelineLayout(emptyLayout.Value()));
 
     // A duplicate group layout in two slots is ambiguous.
     PipelineLayoutDesc duplicate{};
     duplicate.groups[0] = resources.layout;
     duplicate.groups[1] = resources.layout;
-    failed = device.CreatePipelineLayout(duplicate);
+    auto failed = device.CreatePipelineLayout(duplicate);
     CG_EXPECT_FALSE(failed);
     CG_EXPECT_EQ(failed.Error().code, ErrorCode::InvalidArgument);
 

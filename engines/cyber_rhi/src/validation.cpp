@@ -480,7 +480,6 @@ bool ValidateBindGroupLayout(const Limits& limits, const BindGroupLayoutDesc& de
 bool ValidatePipelineLayout(const Capabilities& capabilities, const Existence& live,
                             const PipelineLayoutDesc& desc, Error* out) noexcept
 {
-    u32 usedSlots = 0;
     for (u32 slot = 0; slot < kBindGroupSlotCount; ++slot)
     {
         if (!desc.groups[slot].IsValid())
@@ -500,11 +499,6 @@ bool ValidatePipelineLayout(const Capabilities& capabilities, const Existence& l
                             "pipeline layout repeats a group layout");
             }
         }
-        ++usedSlots;
-    }
-    if (usedSlots == 0)
-    {
-        return Fail(out, ErrorCode::InvalidArgument, "pipeline layout uses no group slot");
     }
 
     if (desc.pushConstants.Size() > kMaxPushConstantRanges)

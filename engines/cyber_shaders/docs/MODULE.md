@@ -8,19 +8,20 @@
 
 ## Purpose
 
-Phase 16's typed shader language, lexer, parser, intermediate representation,
-diagnostics, and HLSL source generator. Reflection, permutations, and cache are
-Phase 17 work.
+The typed Cyber shader language and HLSL compiler, including compiler-owned
+reflection, keyword permutations, checksummed disk cache, job-system compilation,
+and file watching.
 
 ## Public API
 
 `include/cyber/shaders/`
 
-`compiler.h` defines `Stage`, `Diagnostic`, `CompiledShader`, and
-`Compile(StringView sourceName, StringView source, Allocator&)`. Compilation
-returns allocator-owned HLSL text or a diagnostic that borrows the source name
-and includes a one-based line and column. The compiler does not depend on
-`cyber_rhi`; callers pass its generated text to the RHI shader API.
+`compiler.h`, `reflection.h`, `permutation.h`, `cache.h`, and `library.h` expose
+the compiler, compiler-owned reflection, stable permutation keys, an on-disk
+shader cache, and the asynchronous `ShaderLibrary`. `CompileHlsl` returns
+allocator-owned HLSL plus reflection or a diagnostic borrowing the source name
+and containing a one-based line and column. `cyber_shaders` has no RHI
+dependency; callers pass generated HLSL and reflection to `cyber_renderer`.
 
 Only headers under this path are public. Everything under `src/` is private.
 Public headers must compile on their own and must not include another module's
@@ -28,7 +29,7 @@ private headers.
 
 ## Dependencies
 
-Allowed: cyber_core, cyber_math, cyber_memory, cyber_platform, cyber_jobs
+Allowed: cyber_core, cyber_memory, cyber_platform, cyber_jobs
 
 Forbidden: cyber_renderer, cyber_graphics
 
@@ -39,9 +40,13 @@ Dependencies are one-way. A module may depend only on modules with a lower
 
 - Compiler errors carry file, line, and column.
 - The compiler never crashes on malformed input; parsers are fuzz-tested.
-- Reflection is the single source of truth for bindings.
+- Reflection is produced from the typed source and is the single source of
+  truth for bindings and constant-buffer packing.
 - All compiler allocations use the caller-provided allocator.
-- Phase 16 emits HLSL text only; it does not compile platform bytecode.
+- Cache payloads and shader source are treated as hostile input.
+- Failed hot reloads retain the last successfully published shader version.
+- Worker allocations are serialized through a private allocator adapter.
+- The module emits HLSL text only; it does not compile platform bytecode.
 
 ## Non-goals
 
@@ -50,12 +55,13 @@ Dependencies are one-way. A module may depend only on modules with a lower
 
 ## Tests
 
-Golden HLSL output tests, expected-error tests, malformed-input tests, and a
-D3D12 cube comparison that consumes generated vertex and pixel HLSL.
+Golden HLSL and reflection tests, permutation and cache corruption tests,
+parallel library and hot-reload tests, and a D3D12 sample using generated HLSL.
 
 ## Budgets
 
-Incremental shader compile within 1 s on the target machine; cache hits avoid recompilation.
+Shader source changes publish within 1 s on the target machine; cache hits avoid
+front-end recompilation.
 
 ## Roadmap
 

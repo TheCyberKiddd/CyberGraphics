@@ -26,10 +26,10 @@ deliberate, so the architecture is visible from the start.
 | [`cyber_jobs`](cyber_jobs/) | 1 | 12 | service | active | cyber_core<br>cyber_memory<br>cyber_platform<br>cyber_perf | 5 |
 | [`cyber_stability`](cyber_stability/) | 1 | 13 | service | planned | cyber_core<br>cyber_memory<br>cyber_platform<br>cyber_perf | 2, 15, 40 |
 | [`cyber_rhi`](cyber_rhi/) | 2 | 20 | graphics | active | cyber_core<br>cyber_math<br>cyber_memory<br>cyber_platform<br>cyber_jobs<br>cyber_perf<br>cyber_stability | 10, 11, 12, 13, 14, 15, 34, 35 |
-| [`cyber_shaders`](cyber_shaders/) | 2 | 21 | graphics | active | cyber_core<br>cyber_math<br>cyber_memory<br>cyber_platform<br>cyber_jobs | 16, 17 |
+| [`cyber_shaders`](cyber_shaders/) | 2 | 21 | graphics | active | cyber_core<br>cyber_memory<br>cyber_platform<br>cyber_jobs | 16, 17 |
 | [`cyber_assets`](cyber_assets/) | 2 | 22 | graphics | planned | cyber_core<br>cyber_math<br>cyber_memory<br>cyber_platform<br>cyber_jobs<br>cyber_rhi | 9, 24, 33 |
 | [`cyber_scene`](cyber_scene/) | 2 | 23 | graphics | planned | cyber_core<br>cyber_math<br>cyber_memory<br>cyber_jobs<br>cyber_assets | 22, 23 |
-| [`cyber_renderer`](cyber_renderer/) | 3 | 30 | graphics | planned | cyber_core<br>cyber_math<br>cyber_memory<br>cyber_jobs<br>cyber_perf<br>cyber_stability<br>cyber_rhi<br>cyber_shaders<br>cyber_assets<br>cyber_scene | 18, 19, 20, 21, 22, 23, 26, 27, 28, 29, 30, 31, 32, 33, 37 |
+| [`cyber_renderer`](cyber_renderer/) | 3 | 30 | graphics | active | cyber_core<br>cyber_memory<br>cyber_jobs<br>cyber_rhi<br>cyber_shaders | 17, 18, 19, 20, 21, 22, 23, 26, 27, 28, 29, 30, 31, 32, 33, 37 |
 | [`cyber_ui`](cyber_ui/) | 3 | 31 | graphics | planned | cyber_core<br>cyber_math<br>cyber_memory<br>cyber_perf<br>cybergraphics_api | 38 |
 | [`cyber_capture`](cyber_capture/) | 3 | 32 | service | planned | cyber_core<br>cyber_memory<br>cyber_platform<br>cyber_rhi | 39 |
 | [`cyber_graphics`](cyber_graphics/) | 4 | 40 | product | planned | cyber_core<br>cyber_math<br>cyber_memory<br>cyber_platform<br>cyber_jobs<br>cyber_perf<br>cyber_stability<br>cyber_rhi<br>cyber_shaders<br>cyber_assets<br>cyber_scene<br>cyber_renderer<br>cybergraphics_api | 14, 15, 25 |

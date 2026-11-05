@@ -1,50 +1,45 @@
-# Handoff — Phase 16
+# Handoff — Phase 17
 
 ## Current state
 
-- Phase 15 is complete. The Intel HD Graphics 530 sample-path RTV heap-kind bug
-  was fixed, the D3D12 sample submits and presents, and the capture evidence is
-  consistent with the implementation.
-- Phase 16 is complete. ADR 0002 is preserved; the guide now points to ADR 0019.
-  The design, ADR, allocator-backed compiler, diagnostics, compiler tests, and
-  generated-HLSL D3D12 cube integration are implemented and validated.
-- Last verified commit: `b9cb94318897287c3b714605b7a7acc57872f14a`. Current work
-  remains uncommitted.
-- Debug, Profile, Release, Shipping, and Debug-ASan test suites each pass
-  87/87. Structure, layer, formatting, diff, and Profile package-consumer checks
-  pass.
-- Native `BeginEvent`, `EndEvent`, and `SetMarker` calls remain isolated in
-  `engines/cyber_rhi/src/d3d12/gpu_markers.cpp`. Debug/Profile enable these;
-  Release/Shipping compile them out. No PIX runtime or other renderer
-  dependency was added.
-- The Intel HD Graphics 530 failure was not a general D3D12 command-list issue.
-  A native D3D12 probe succeeded, the swapchain RTV was corrected, and the
-  sample now clears to blue and presents successfully.
-- Phase 16 validation: Debug, Release, and Debug-ASan each pass 88/88; structure,
-  layer, package consumer, `git diff --check`, and targeted formatting pass.
-  The full formatter passes after formatting the two affected Phase 15 files
-  with the owner's direction.
+- Phase 17 implementation and validation are complete and included in this
+  commit.
+- Baseline before Phase 17: `b9cb94318897287c3b714605b7a7acc57872f14a`.
+- Debug, Profile, Release, Shipping, and Debug-ASan each pass 96/96 tests.
+  The Profile package consumer, structure check, layer check, formatter, and
+  `git diff --check` pass.
+- The D3D12 live-reload self-test passes on the Intel HD Graphics 530:
+  valid edit 48 ms, syntax-error rejection 49 ms (previous pipeline retained),
+  restore 84 ms. The permutation report is generated.
 
-## Capture status
+## Decisions and known gaps
 
-- RenderDoc capture `%TEMP%\CyberGraphicsPhase15\d3d12-markers-fixed_frame20135.rdc`
-  was reviewed. Its event tree shows `Clear Pass` with `Clear backbuffer` beneath
-  it, and the preview shows the blue frame.
-- PIX capture `%TEMP%\CyberGraphicsPhase15\d3d12-markers-fixed.wpix` opens and
-  shows the nested `Clear Pass` region in the Graphics Queue tree. The capture
-  reaches presentation and its screenshot is blue. The UI does not expose the raw
-  native `SetMarker` call as a separate visible event, which is consistent with
-  Microsoft's guidance that the underlying support API is not a user-facing PIX
-  event; the nested debug-region labels remain the capture-visible evidence.
-- PIX event-list export still requires Windows Developer Mode. The repository did
-  not enable it for this phase.
-- Leave `diagnosing-low-phase-6-sample-frame-rate.json` untouched; it is
-  unrelated and untracked.
-- Phase 15 is accepted; the stale roadmap, status, changelog, ADR 0018, and
-  Phase 15 design-note claims have been reconciled with the capture evidence.
+- Reflection is produced by `cyber_shaders`; `cyber_renderer` converts it to
+  RHI layouts and publishes rebuilt pipelines only at frame boundaries.
+- Permutations are limited to eight boolean keywords. Cache entries include
+  compiler/source/permutation/target identity and validated checksums.
+- File watching uses timestamp polling. The cache stores HLSL/reflection, not
+  backend bytecode. Renderer layout building currently rejects storage-texture
+  bindings and constant buffers other than the 128-byte `b0, space0` block.
+- D3D12 live-reload evidence covers one Intel adapter, not a hardware matrix.
+- The existing untracked `diagnosing-low-phase-6-sample-frame-rate.json` is
+  unrelated and remains untouched.
+
+## Files changed
+
+- Shader compiler, cache, reflection, permutation, library, and tests:
+  `engines/cyber_shaders/`.
+- Renderer reflected layouts, hot pipelines, and tests:
+  `engines/cyber_renderer/`.
+- Empty RHI pipeline-layout support and regression test:
+  `engines/cyber_rhi/`.
+- Root/module/sample CMake wiring, `engines/modules.json`, and generated
+  `engines/MODULES.md`.
+- Phase 17 design, ADR 0020, reading notes, implementation summary, report,
+  roadmap/status, changelog, README, and hot-reload sample.
 
 ## Exact next step
 
-Continue with Phase 17, reflection, permutations, and hot reload. Keep the
-current uncommitted work intact; `diagnosing-low-phase-6-sample-frame-rate.json`
-remains unrelated and must stay untouched.
+Read the Phase 18 material-system work package and write its design note before
+starting implementation. Do not begin Phase 18 code until that design step is
+complete.

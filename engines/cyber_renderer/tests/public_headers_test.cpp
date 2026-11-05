@@ -1,0 +1,24 @@
+#include <cyber/renderer/hot_pipeline.h>
+#include <cyber/renderer/reflected_layout.h>
+#include <cyber/test/test.h>
+
+#include <type_traits>
+
+using namespace cyber::renderer;
+
+CG_TEST(renderer_public_headers)
+{
+    static_assert(std::is_trivially_copyable_v<ReflectedLayout>);
+    static_assert(std::is_trivially_copyable_v<ReflectedVertexLayout>);
+    static_assert(!std::is_copy_constructible_v<HotGraphicsPipeline>);
+    static_assert(std::is_move_constructible_v<HotGraphicsPipeline>);
+
+    CG_EXPECT_EQ(kMaxReflectedPushConstantBytes, u32{128});
+    CG_EXPECT_EQ(ToRhiStage(cyber::shaders::Stage::Pixel), cyber::rhi::ShaderStage::Pixel);
+
+    HotGraphicsPipeline empty;
+    CG_EXPECT_FALSE(empty.Current().IsValid());
+    CG_EXPECT_FALSE(empty.HasBuilt());
+    CG_EXPECT_EQ(empty.Layout().bindingCounts[0], u32{0});
+    CG_EXPECT_TRUE(empty.LastError() == nullptr);
+}

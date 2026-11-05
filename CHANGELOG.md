@@ -8,6 +8,12 @@ semantic versioning once a public API exists.
 
 ### Added
 
+- Phase 17 implementation and local validation: compiler-owned shader
+  reflection, bounded keyword permutations, checksummed on-disk cache,
+  job-system compilation and file watching, renderer-side reflected layouts and
+  asynchronous frame-boundary pipeline swaps, and the D3D12 live-reload sample.
+  All five Windows presets pass 96/96 tests; the package consumer and live
+  D3D12 edit/error/restore self-test pass.
 - Phase 16 complete: `cyber_shaders` compiles a bounded typed Cyber shader
   language to HLSL with source diagnostics, and the D3D12 cube comparison uses
   the generated stages. Debug, Release, and Debug-ASan pass 88/88; package,

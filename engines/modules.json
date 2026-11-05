@@ -225,9 +225,9 @@
       "layer": 2,
       "order": 21,
       "status": "active",
-      "purpose": "Shader language, lexer, parser, type checker, IR, HLSL/SPIR-V/MSL code generation, reflection, and permutation cache.",
+      "purpose": "Typed Cyber shader language and HLSL compiler, compiler-owned reflection, keyword permutations, checksummed on-disk cache, job-system compilation, and file watching.",
       "public_api": "include/cyber/shaders/",
-      "depends": ["cyber_core", "cyber_math", "cyber_memory", "cyber_platform", "cyber_jobs"],
+      "depends": ["cyber_core", "cyber_memory", "cyber_platform", "cyber_jobs"],
       "forbidden": ["cyber_renderer", "cyber_graphics"],
       "invariants": [
         "Compiler errors carry file, line, and column.",
@@ -238,8 +238,8 @@
         "Direct DXIL generation in the first pass.",
         "Material parameter UI."
       ],
-      "tests": "Golden compile tests, expected-error tests, fuzz tests, and reflection layout tests.",
-      "budgets": "Incremental shader compile within 1 s on the target machine; cache hits avoid recompilation.",
+      "tests": "Golden compile and reflection tests, permutation and cache corruption tests, parallel library reload tests, and a D3D12 hot-reload sample.",
+      "budgets": "Shader source changes publish within 1 s on the target machine; cache hits avoid front-end recompilation.",
       "roadmap": [16, 17]
     },
     {
@@ -296,34 +296,24 @@
       "kind": "graphics",
       "layer": 3,
       "order": 30,
-      "status": "planned",
-      "purpose": "Renderer architecture: render graph, passes, materials, PBR, shadows, IBL, post-processing, GI, and GPU-driven rendering.",
+      "status": "active",
+      "purpose": "Phase 17 renderer-side shader integration: compiler-reflected RHI layouts, asynchronous graphics pipelines, frame-boundary publication, fallbacks, and deferred retirement; later phases add render graphs, materials, and lighting.",
       "public_api": "include/cyber/renderer/",
-      "depends": [
-        "cyber_core",
-        "cyber_math",
-        "cyber_memory",
-        "cyber_jobs",
-        "cyber_perf",
-        "cyber_stability",
-        "cyber_rhi",
-        "cyber_shaders",
-        "cyber_assets",
-        "cyber_scene"
-      ],
+      "depends": ["cyber_core", "cyber_memory", "cyber_jobs", "cyber_rhi", "cyber_shaders"],
       "forbidden": ["cyber_graphics", "cyber_ui", "tools"],
       "invariants": [
         "All GPU work goes through cyber_rhi; no backend headers.",
         "Passes declare reads and writes; barriers are graph-generated.",
+        "Pipeline changes publish only at frame boundaries and retired GPU objects survive the frames-in-flight interval.",
         "No game logic, only render proxies."
       ],
       "non_goals": [
         "Product plugin ABI (cyber_graphics).",
         "Editor integration."
       ],
-      "tests": "Graph culling and aliasing tests, golden images, per-pass GPU timings, and scene benchmarks.",
+      "tests": "Null-backend reflected-layout and hot-pipeline tests; later phases add graph culling, golden images, GPU timings, and scene benchmarks.",
       "budgets": "Per-pass GPU budgets live in docs/perf. Frame-time percentiles are tracked.",
-      "roadmap": [18, 19, 20, 21, 22, 23, 26, 27, 28, 29, 30, 31, 32, 33, 37]
+      "roadmap": [17, 18, 19, 20, 21, 22, 23, 26, 27, 28, 29, 30, 31, 32, 33, 37]
     },
     {
       "name": "cyber_ui",

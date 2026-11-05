@@ -19,7 +19,14 @@ this document does not replace that roadmap or change any phase checkbox.
 - **Phase 16:** complete. The compiler emits HLSL used by the D3D12 cube
   comparison; Debug, Release, and Debug-ASan each pass 88/88, the package,
   structure, and layer checks pass, and the repository-wide formatter passes.
-- **Phases 17-44:** not started.
+- **Phase 17:** complete. Compiler-owned
+  reflection, permutations, disk cache, asynchronous compilation and pipeline
+  swaps, and the D3D12 live-reload sample are implemented. Debug, Profile,
+  Release, Shipping, and Debug-ASan each pass 96/96; package, structure, layer,
+  formatting, and live-reload checks pass. The valid edit, syntax-error
+  rejection, and restore measured 48 ms, 49 ms, and 84 ms on this PC. Its
+  implementation and evidence are included in the Phase 17 commit.
+- **Phases 18-44:** not started.
 - **Current PC:** Windows 10 Pro 22H2, Intel Core i5-6400 (4 cores), Intel HD
   Graphics 530 (1 GiB reported), Intel driver `31.0.101.2125` dated
   2023-05-24. The marker sample now submits and presents on this adapter after
@@ -79,8 +86,8 @@ this document does not replace that roadmap or change any phase checkbox.
 
 | Phase | Status | Intended outcome |
 |---|---|---|
-| 16. Shader language and compiler strategy | Active | ADR 0019, the language design, compiler, source diagnostics, tests, and generated-HLSL cube integration are in place. The repository-wide formatter still flags unrelated pre-existing Phase 15 changes; keep the phase unchecked until resolved. |
-| 17. Reflection, permutations, and hot reload | Not started | Compiler reflection, bounded/stable permutations, shader cache, background compile, and live reload. |
+| 16. Shader language and compiler strategy | Complete | ADR 0019, the language design, compiler, source diagnostics, tests, and generated-HLSL cube integration are complete; Phase 16 evidence is recorded in its report. |
+| 17. Reflection, permutations, and hot reload | Complete | Compiler-owned reflection, bounded/stable permutations, checksummed cache, job-system compilation, reflected renderer layouts, async frame-boundary swaps, and D3D12 live reload. All five Windows presets pass 96/96; the valid edit, syntax rejection, and restore pass in 48/49/84 ms on the Intel HD 530. |
 | 18. Material system | Not started | Material definitions/instances, parameter blocks, textures, render state, and sorted draws. |
 | 19. Constant streaming and bindless resources | Not started | Per-frame constants, dynamic offsets, descriptors, bindless resources, and measured high draw-count submission. |
 
@@ -167,12 +174,13 @@ this document does not replace that roadmap or change any phase checkbox.
 - Earlier Phase 15 evidence records Debug, Profile, Release, Shipping, and
   Debug-ASan at 87/87 each; structure/layer checks and the Profile package
   consumer also passed.
-- The Phase 15 implementation and the recent low-power sample change are
-  **uncommitted**. Preserve them when rebuilding the roadmap.
+- The Phase 15 implementation, Phase 17 implementation and documentation, and
+  recent low-power sample change are **uncommitted**. Preserve them when
+  rebuilding the roadmap.
 - `diagnosing-low-phase-6-sample-frame-rate.json` is unrelated and untracked;
   leave it alone.
 
 ## Immediate next step
 
-Phase 16 is accepted. Continue with Phase 17, reflection, permutations, and hot
-reload, following the graphics roadmap and build guide.
+Phase 17 is complete. Begin Phase 18 only after reading its work package and
+writing the required design note for the material system.

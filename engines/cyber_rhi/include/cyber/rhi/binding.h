@@ -179,7 +179,7 @@ struct PushConstantRange
 struct PipelineLayoutDesc
 {
     // Group layout per slot, indexed by `BindGroupSlot`. An invalid handle means
-    // the slot is unused. At least one slot must be used.
+    // the slot is unused; all slots may be unused for a shader with no bindings.
     BindGroupLayoutHandle groups[kBindGroupSlotCount];
     // Push-constant ranges. Up to `kMaxPushConstantRanges`, or none.
     memory::Span<const PushConstantRange> pushConstants{};

@@ -1,0 +1,9 @@
+shader pixel HotReload {
+    keyword TINT;
+    input float4 position @builtin(position);
+    when TINT {
+        return float4(0.8, 0.2, 0.9, 1.0);
+    } else {
+        return float4(0.2, 0.55, 0.9, 1.0);
+    }
+}

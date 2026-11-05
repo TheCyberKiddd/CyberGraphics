@@ -3,6 +3,7 @@
 
 #include <array>
 #include <limits>
+#include <memory>
 #include <utility>
 
 namespace cyber::shaders
@@ -13,15 +14,25 @@ namespace
 using cyber::core::Result;
 using cyber::core::usize;
 using cyber::memory::DynamicArray;
+using cyber::memory::Span;
 using cyber::memory::String;
 using cyber::memory::StringView;
 
 constexpr usize kMaximumSourceBytes = 1024U * 1024U;
 constexpr usize kMaximumTokens = 16384;
 constexpr usize kMaximumDeclarations = 32;
-constexpr usize kMaximumExpressions = 128;
+constexpr usize kMaximumExpressions = 256;
 constexpr usize kMaximumStatements = 128;
 constexpr usize kMaximumNesting = 32;
+constexpr usize kMaximumWhenNesting = 8;
+constexpr usize kMaximumShaderNameLength = 48;
+constexpr usize kMaximumEnabledKeywords = 64;
+// cs_5_x limits from the numthreads reference: X and Y up to 1024, Z up to 64,
+// and at most 1024 threads in a group.
+constexpr u32 kMaximumThreadsXY = 1024;
+constexpr u32 kMaximumThreadsZ = 64;
+constexpr u32 kMaximumThreadsPerGroup = 1024;
+constexpr u32 kRegisterBytes = 16;
 
 enum class TokenKind : u8
 {
@@ -56,8 +67,10 @@ enum class Type : u8
     Float3,
     Float4,
     Float4x4,
+    Uint3,
     Texture2D,
     Sampler,
+    StorageTexture2D,
 };
 
 enum class DeclarationKind : u8
@@ -67,6 +80,7 @@ enum class DeclarationKind : u8
     Uniform,
     Texture,
     Sampler,
+    StorageTexture,
 };
 
 struct Declaration
@@ -82,7 +96,7 @@ struct Declaration
     char registerClass = '\0';
     bool hasLocation = false;
     bool hasRegister = false;
-    bool isPosition = false;
+    Builtin builtin = Builtin::None;
 };
 
 enum class ExpressionKind : u8
@@ -98,7 +112,8 @@ struct Expression
     ExpressionKind kind = ExpressionKind::Identifier;
     StringView name{};
     u32 left = 0;
-    std::array<u32, 3> arguments{};
+    // Four covers the widest constructor, float4(x, y, z, w).
+    std::array<u32, 4> arguments{};
     u32 argumentCount = 0;
     u32 line = 1;
     u32 column = 1;
@@ -108,6 +123,7 @@ enum class StatementKind : u8
 {
     Assignment,
     Return,
+    Store,
 };
 
 struct Statement
@@ -119,10 +135,20 @@ struct Statement
     u32 column = 1;
 };
 
+struct Keyword
+{
+    StringView name{};
+    bool enabled = false;
+};
+
 struct Program
 {
     Stage stage = Stage::Vertex;
     StringView name{};
+    std::array<u32, 3> threads{};
+    bool hasThreads = false;
+    std::array<Keyword, kMaxKeywords> keywords{};
+    usize keywordCount = 0;
     std::array<Declaration, kMaximumDeclarations> declarations{};
     std::array<Expression, kMaximumExpressions> expressions{};
     std::array<Statement, kMaximumStatements> statements{};
@@ -131,11 +157,53 @@ struct Program
     usize statementCount = 0;
 };
 
+// Owns one Program in the caller's allocator. The program is several tens of
+// kilobytes, which is too much for a worker thread's stack.
+class ProgramStorage
+{
+public:
+    explicit ProgramStorage(cyber::memory::Allocator& allocator) noexcept : m_allocator(allocator)
+    {
+        void* memory = allocator.Allocate(sizeof(Program), alignof(Program));
+        if (memory != nullptr)
+        {
+            m_program = std::construct_at(static_cast<Program*>(memory));
+        }
+    }
+
+    ~ProgramStorage()
+    {
+        if (m_program != nullptr)
+        {
+            std::destroy_at(m_program);
+            m_allocator.Deallocate(m_program);
+        }
+    }
+
+    ProgramStorage(const ProgramStorage&) = delete;
+    ProgramStorage& operator=(const ProgramStorage&) = delete;
+
+    [[nodiscard]] Program* Get() const noexcept
+    {
+        return m_program;
+    }
+
+private:
+    cyber::memory::Allocator& m_allocator;
+    Program* m_program = nullptr;
+};
+
+[[nodiscard]] Diagnostic MakeDiagnostic(DiagnosticKind kind, StringView sourceName, u32 line,
+                                        u32 column, const char* message) noexcept
+{
+    return Diagnostic{kind, sourceName, line, column, message};
+}
+
 [[nodiscard]] Result<CompiledShader, Diagnostic>
 Fail(DiagnosticKind kind, StringView sourceName, u32 line, u32 column, const char* message) noexcept
 {
     return Result<CompiledShader, Diagnostic>::Err(
-        Diagnostic{kind, sourceName, line, column, message});
+        MakeDiagnostic(kind, sourceName, line, column, message));
 }
 
 [[nodiscard]] bool IsIdentifierStart(char value) noexcept
@@ -182,6 +250,16 @@ Fail(DiagnosticKind kind, StringView sourceName, u32 line, u32 column, const cha
             }
             continue;
         }
+        // Line comments run to the end of the line and are not tokens.
+        if (current == '/' && offset + 1 < source.Size() && source[offset + 1] == '/')
+        {
+            while (offset < source.Size() && source[offset] != '\n')
+            {
+                ++offset;
+                ++column;
+            }
+            continue;
+        }
 
         const usize start = offset;
         const u32 startLine = line;
@@ -198,6 +276,12 @@ Fail(DiagnosticKind kind, StringView sourceName, u32 line, u32 column, const cha
                 ++offset;
                 ++column;
             } while (offset < source.Size() && IsIdentifierPart(source[offset]));
+            if (offset - start > kMaxNameLength)
+            {
+                diagnostic = MakeDiagnostic(DiagnosticKind::Unsupported, sourceName, startLine,
+                                            startColumn, "identifier is longer than 63 bytes");
+                return false;
+            }
         }
         else if (IsDigit(current))
         {
@@ -213,8 +297,8 @@ Fail(DiagnosticKind kind, StringView sourceName, u32 line, u32 column, const cha
                 ++column;
                 if (offset >= source.Size() || !IsDigit(source[offset]))
                 {
-                    diagnostic = Diagnostic{DiagnosticKind::Lexical, sourceName, startLine,
-                                            startColumn, "invalid numeric literal"};
+                    diagnostic = MakeDiagnostic(DiagnosticKind::Lexical, sourceName, startLine,
+                                                startColumn, "invalid numeric literal");
                     return false;
                 }
                 do
@@ -259,8 +343,8 @@ Fail(DiagnosticKind kind, StringView sourceName, u32 line, u32 column, const cha
                 token.kind = TokenKind::Equal;
                 break;
             default:
-                diagnostic = Diagnostic{DiagnosticKind::Lexical, sourceName, startLine, startColumn,
-                                        "unsupported character"};
+                diagnostic = MakeDiagnostic(DiagnosticKind::Lexical, sourceName, startLine,
+                                            startColumn, "unsupported character");
                 return false;
             }
             ++offset;
@@ -270,14 +354,14 @@ Fail(DiagnosticKind kind, StringView sourceName, u32 line, u32 column, const cha
         token.text = source.Substr(start, offset - start);
         if (tokens.Size() >= kMaximumTokens)
         {
-            diagnostic = Diagnostic{DiagnosticKind::Unsupported, sourceName, startLine, startColumn,
-                                    "shader token limit exceeded"};
+            diagnostic = MakeDiagnostic(DiagnosticKind::Unsupported, sourceName, startLine,
+                                        startColumn, "shader token limit exceeded");
             return false;
         }
         if (!tokens.TryPushBack(token))
         {
-            diagnostic = Diagnostic{DiagnosticKind::OutOfMemory, sourceName, startLine, startColumn,
-                                    "unable to allocate compiler tokens"};
+            diagnostic = MakeDiagnostic(DiagnosticKind::OutOfMemory, sourceName, startLine,
+                                        startColumn, "unable to allocate compiler tokens");
             return false;
         }
     }
@@ -289,17 +373,236 @@ Fail(DiagnosticKind kind, StringView sourceName, u32 line, u32 column, const cha
     if (!tokens.TryPushBack(end))
     {
         diagnostic =
-            Diagnostic{DiagnosticKind::OutOfMemory, sourceName, line, column, "out of memory"};
+            MakeDiagnostic(DiagnosticKind::OutOfMemory, sourceName, line, column, "out of memory");
         return false;
     }
+    return true;
+}
+
+// HLSL keywords and reserved words from Microsoft's "Keywords" and "Reserved
+// Words" appendices, plus the names the generator itself emits. A declared
+// name from this list would make the generated HLSL fail to compile, so it is
+// rejected at its source location instead.
+constexpr const char* kReservedNames[] = {
+    "AppendStructuredBuffer",
+    "BlendState",
+    "Buffer",
+    "ByteAddressBuffer",
+    "CompileShader",
+    "ComputeShader",
+    "ConsumeStructuredBuffer",
+    "DepthStencilState",
+    "DepthStencilView",
+    "DomainShader",
+    "GeometryShader",
+    "Hullshader",
+    "Input",
+    "InputPatch",
+    "LineStream",
+    "NULL",
+    "Output",
+    "OutputPatch",
+    "PixelShader",
+    "PointStream",
+    "RWBuffer",
+    "RWByteAddressBuffer",
+    "RWStructuredBuffer",
+    "RWTexture1D",
+    "RWTexture1DArray",
+    "RWTexture2D",
+    "RWTexture2DArray",
+    "RWTexture3D",
+    "RasterizerState",
+    "RenderTargetView",
+    "SamplerComparisonState",
+    "SamplerState",
+    "StructuredBuffer",
+    "Texture1D",
+    "Texture1DArray",
+    "Texture2D",
+    "Texture2DArray",
+    "Texture2DMS",
+    "Texture2DMSArray",
+    "Texture3D",
+    "TextureCube",
+    "TextureCubeArray",
+    "TriangleStream",
+    "VertexShader",
+    "asm",
+    "asm_fragment",
+    "auto",
+    "break",
+    "case",
+    "catch",
+    "cbuffer",
+    "centroid",
+    "char",
+    "class",
+    "column_major",
+    "compile",
+    "compile_fragment",
+    "const",
+    "const_cast",
+    "continue",
+    "default",
+    "delete",
+    "discard",
+    "do",
+    "dynamic_cast",
+    "else",
+    "enum",
+    "explicit",
+    "export",
+    "extern",
+    "false",
+    "for",
+    "friend",
+    "fxgroup",
+    "goto",
+    "groupshared",
+    "if",
+    "in",
+    "inline",
+    "inout",
+    "input",
+    "interface",
+    "line",
+    "lineadj",
+    "linear",
+    "long",
+    "main",
+    "matrix",
+    "mutable",
+    "namespace",
+    "new",
+    "nointerpolation",
+    "noperspective",
+    "operator",
+    "out",
+    "output",
+    "packoffset",
+    "pass",
+    "pixelfragment",
+    "point",
+    "precise",
+    "private",
+    "protected",
+    "public",
+    "register",
+    "reinterpret_cast",
+    "return",
+    "row_major",
+    "sample",
+    "sampler",
+    "shared",
+    "short",
+    "signed",
+    "sizeof",
+    "snorm",
+    "stateblock",
+    "stateblock_state",
+    "static",
+    "static_cast",
+    "string",
+    "struct",
+    "switch",
+    "tbuffer",
+    "technique",
+    "technique10",
+    "technique11",
+    "template",
+    "texture",
+    "this",
+    "throw",
+    "triangle",
+    "triangleadj",
+    "true",
+    "try",
+    "typedef",
+    "typename",
+    "uniform",
+    "union",
+    "unorm",
+    "unsigned",
+    "using",
+    "vector",
+    "vertexfragment",
+    "virtual",
+    "void",
+    "volatile",
+    "while",
+};
+
+// Scalar, vector, and matrix spellings of HLSL's numeric types: `float`,
+// `float3`, `float4x4`, `min16int2`, and so on.
+constexpr const char* kNumericTypeBases[] = {
+    "bool",       "double",   "dword",      "float",    "half",      "int",
+    "min10float", "min12int", "min16float", "min16int", "min16uint", "uint",
+};
+
+[[nodiscard]] bool IsDimension(char value) noexcept
+{
+    return value >= '1' && value <= '4';
+}
+
+[[nodiscard]] bool IsReservedName(StringView name) noexcept
+{
+    if (name.StartsWith("SV_") || name.StartsWith("sv_") || name.StartsWith("__"))
+    {
+        return true;
+    }
+    for (const char* reserved : kReservedNames)
+    {
+        if (name == StringView(reserved))
+        {
+            return true;
+        }
+    }
+    for (const char* base : kNumericTypeBases)
+    {
+        const StringView prefix(base);
+        if (!name.StartsWith(prefix))
+        {
+            continue;
+        }
+        const StringView suffix = name.Substr(prefix.Size());
+        if (suffix.Empty() || (suffix.Size() == 1 && IsDimension(suffix[0])) ||
+            (suffix.Size() == 3 && IsDimension(suffix[0]) && suffix[1] == 'x' &&
+             IsDimension(suffix[2])))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+[[nodiscard]] bool ParseDigits(StringView text, u32& value) noexcept
+{
+    if (text.Empty())
+    {
+        return false;
+    }
+    u32 parsed = 0;
+    for (usize index = 0; index < text.Size(); ++index)
+    {
+        const char digit = text[index];
+        if (!IsDigit(digit) ||
+            parsed > (std::numeric_limits<u32>::max() - static_cast<u32>(digit - '0')) / 10U)
+        {
+            return false;
+        }
+        parsed = parsed * 10U + static_cast<u32>(digit - '0');
+    }
+    value = parsed;
     return true;
 }
 
 class Parser
 {
 public:
-    Parser(const DynamicArray<Token>& tokens, StringView sourceName) noexcept
-        : m_tokens(tokens), m_sourceName(sourceName)
+    Parser(const DynamicArray<Token>& tokens, StringView sourceName,
+           Span<const StringView> enabled) noexcept
+        : m_tokens(tokens), m_sourceName(sourceName), m_enabled(enabled)
     {
     }
 
@@ -317,9 +620,14 @@ public:
         {
             program.stage = Stage::Pixel;
         }
+        else if (MatchIdentifier("compute"))
+        {
+            program.stage = Stage::Compute;
+        }
         else
         {
-            SetError(DiagnosticKind::Syntax, Current(), "expected 'vertex' or 'pixel' stage");
+            SetError(DiagnosticKind::Syntax, Current(),
+                     "expected 'vertex', 'pixel', or 'compute' stage");
             return SetDiagnostic(diagnostic);
         }
 
@@ -328,69 +636,32 @@ public:
             SetError(DiagnosticKind::Syntax, Current(), "expected shader name");
             return SetDiagnostic(diagnostic);
         }
-        program.name = Advance().text;
+        const Token& name = Advance();
+        if (name.text.Size() > kMaximumShaderNameLength)
+        {
+            SetError(DiagnosticKind::Unsupported, name, "shader name is longer than 48 bytes");
+            return SetDiagnostic(diagnostic);
+        }
+        if (!CheckName(name))
+        {
+            return SetDiagnostic(diagnostic);
+        }
+        program.name = name.text;
+        if (Check(TokenKind::At))
+        {
+            if (!ParseThreads(program))
+            {
+                return SetDiagnostic(diagnostic);
+            }
+        }
         if (!Expect(TokenKind::LeftBrace, "expected '{' after shader name"))
         {
             return SetDiagnostic(diagnostic);
         }
 
-        while (!Check(TokenKind::RightBrace) && !Check(TokenKind::End))
+        if (!ParseBody(program, true, 0))
         {
-            if (CheckOutputAssignment())
-            {
-                if (!ParseAssignment(program))
-                {
-                    return SetDiagnostic(diagnostic);
-                }
-            }
-            else if (MatchIdentifier("input"))
-            {
-                if (!ParseTypedDeclaration(DeclarationKind::Input, program))
-                {
-                    return SetDiagnostic(diagnostic);
-                }
-            }
-            else if (MatchIdentifier("output"))
-            {
-                if (!ParseTypedDeclaration(DeclarationKind::Output, program))
-                {
-                    return SetDiagnostic(diagnostic);
-                }
-            }
-            else if (MatchIdentifier("uniform"))
-            {
-                if (!ParseTypedDeclaration(DeclarationKind::Uniform, program))
-                {
-                    return SetDiagnostic(diagnostic);
-                }
-            }
-            else if (MatchIdentifier("texture2d"))
-            {
-                if (!ParseResourceDeclaration(DeclarationKind::Texture, program))
-                {
-                    return SetDiagnostic(diagnostic);
-                }
-            }
-            else if (MatchIdentifier("sampler"))
-            {
-                if (!ParseResourceDeclaration(DeclarationKind::Sampler, program))
-                {
-                    return SetDiagnostic(diagnostic);
-                }
-            }
-            else if (MatchIdentifier("return"))
-            {
-                if (!ParseReturn(program))
-                {
-                    return SetDiagnostic(diagnostic);
-                }
-            }
-            else
-            {
-                SetError(DiagnosticKind::Syntax, Current(),
-                         "expected a declaration, output assignment, or return");
-                return SetDiagnostic(diagnostic);
-            }
+            return SetDiagnostic(diagnostic);
         }
 
         if (!Expect(TokenKind::RightBrace, "expected '}' after shader body") ||
@@ -426,20 +697,24 @@ private:
         return Current().kind == kind;
     }
 
+    [[nodiscard]] bool CheckNext(TokenKind kind) const noexcept
+    {
+        return m_position + 1 < m_tokens.Size() && m_tokens[m_position + 1].kind == kind;
+    }
+
+    [[nodiscard]] bool CheckIdentifier(StringView text) const noexcept
+    {
+        return Check(TokenKind::Identifier) && Current().text == text;
+    }
+
     [[nodiscard]] bool MatchIdentifier(StringView text) noexcept
     {
-        if (Check(TokenKind::Identifier) && Current().text == text)
+        if (CheckIdentifier(text))
         {
             static_cast<void>(Advance());
             return true;
         }
         return false;
-    }
-
-    [[nodiscard]] bool CheckOutputAssignment() const noexcept
-    {
-        return Check(TokenKind::Identifier) && Current().text == "output" &&
-               m_position + 1 < m_tokens.Size() && m_tokens[m_position + 1].kind == TokenKind::Dot;
     }
 
     [[nodiscard]] bool ExpectIdentifier(StringView text, const char* message) noexcept
@@ -463,11 +738,21 @@ private:
         return false;
     }
 
+    [[nodiscard]] bool Match(TokenKind kind) noexcept
+    {
+        if (Check(kind))
+        {
+            static_cast<void>(Advance());
+            return true;
+        }
+        return false;
+    }
+
     void SetError(DiagnosticKind kind, const Token& token, const char* message) noexcept
     {
         if (m_error.message == nullptr)
         {
-            m_error = Diagnostic{kind, m_sourceName, token.line, token.column, message};
+            m_error = MakeDiagnostic(kind, m_sourceName, token.line, token.column, message);
         }
     }
 
@@ -475,6 +760,233 @@ private:
     {
         diagnostic = m_error;
         return false;
+    }
+
+    // Rejects a declared name the generated HLSL could not use.
+    [[nodiscard]] bool CheckName(const Token& token) noexcept
+    {
+        if (IsReservedName(token.text))
+        {
+            SetError(DiagnosticKind::Type, token, "name is reserved by HLSL or the generator");
+            return false;
+        }
+        return true;
+    }
+
+    [[nodiscard]] bool IsEnabled(StringView name) const noexcept
+    {
+        for (usize index = 0; index < m_enabled.Size(); ++index)
+        {
+            if (m_enabled[index] == name)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // `@threads(X, Y, Z)` after a compute shader's name.
+    [[nodiscard]] bool ParseThreads(Program& program) noexcept
+    {
+        const Token at = Advance();
+        if (!CheckIdentifier("threads"))
+        {
+            SetError(DiagnosticKind::Unsupported, Current(), "unsupported shader attribute");
+            return false;
+        }
+        static_cast<void>(Advance());
+        if (program.stage != Stage::Compute)
+        {
+            SetError(DiagnosticKind::Type, at, "only compute shaders declare @threads");
+            return false;
+        }
+        if (!Expect(TokenKind::LeftParen, "expected '(' after threads"))
+        {
+            return false;
+        }
+        for (u32 axis = 0; axis < 3; ++axis)
+        {
+            if (axis != 0 && !Expect(TokenKind::Comma, "@threads needs three dimensions"))
+            {
+                return false;
+            }
+            if (!ParseUnsigned(program.threads[axis]))
+            {
+                return false;
+            }
+        }
+        if (!Expect(TokenKind::RightParen, "expected ')' after thread dimensions"))
+        {
+            return false;
+        }
+        const u32 x = program.threads[0];
+        const u32 y = program.threads[1];
+        const u32 z = program.threads[2];
+        const bool inRange = x >= 1 && y >= 1 && z >= 1 && x <= kMaximumThreadsXY &&
+                             y <= kMaximumThreadsXY && z <= kMaximumThreadsZ &&
+                             static_cast<u64>(x) * y * z <= kMaximumThreadsPerGroup;
+        if (!inRange)
+        {
+            SetError(DiagnosticKind::Type, at,
+                     "thread group exceeds cs_5_x limits (x, y <= 1024, z <= 64, total <= 1024)");
+            return false;
+        }
+        program.hasThreads = true;
+        return true;
+    }
+
+    // Items until the closing brace of the current block. The brace itself is
+    // left for the caller. `active` is false inside a `when` branch the current
+    // permutation does not select; such items are parsed and then discarded.
+    [[nodiscard]] bool ParseBody(Program& program, bool active, usize whenDepth) noexcept
+    {
+        while (!Check(TokenKind::RightBrace) && !Check(TokenKind::End))
+        {
+            if (!ParseItem(program, active, whenDepth))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    [[nodiscard]] bool ParseItem(Program& program, bool active, usize whenDepth) noexcept
+    {
+        if (CheckIdentifier("keyword"))
+        {
+            if (whenDepth != 0)
+            {
+                SetError(DiagnosticKind::Syntax, Current(),
+                         "keywords must be declared at shader scope");
+                return false;
+            }
+            static_cast<void>(Advance());
+            return ParseKeyword(program);
+        }
+        if (MatchIdentifier("when"))
+        {
+            return ParseWhen(program, active, whenDepth);
+        }
+        if (CheckIdentifier("output") && CheckNext(TokenKind::Dot))
+        {
+            return ParseAssignment(program, active);
+        }
+        if (CheckIdentifier("store") && CheckNext(TokenKind::LeftParen))
+        {
+            return ParseStore(program, active);
+        }
+        if (MatchIdentifier("input"))
+        {
+            return ParseTypedDeclaration(DeclarationKind::Input, program, active);
+        }
+        if (MatchIdentifier("output"))
+        {
+            return ParseTypedDeclaration(DeclarationKind::Output, program, active);
+        }
+        if (MatchIdentifier("uniform"))
+        {
+            return ParseTypedDeclaration(DeclarationKind::Uniform, program, active);
+        }
+        if (MatchIdentifier("texture2d"))
+        {
+            return ParseResourceDeclaration(DeclarationKind::Texture, program, active);
+        }
+        if (MatchIdentifier("sampler"))
+        {
+            return ParseResourceDeclaration(DeclarationKind::Sampler, program, active);
+        }
+        if (MatchIdentifier("rwtexture2d"))
+        {
+            return ParseResourceDeclaration(DeclarationKind::StorageTexture, program, active);
+        }
+        if (MatchIdentifier("return"))
+        {
+            return ParseReturn(program, active);
+        }
+        SetError(DiagnosticKind::Syntax, Current(),
+                 "expected a declaration, keyword, when block, assignment, store, or return");
+        return false;
+    }
+
+    [[nodiscard]] bool ParseKeyword(Program& program) noexcept
+    {
+        if (!Check(TokenKind::Identifier))
+        {
+            SetError(DiagnosticKind::Syntax, Current(), "expected keyword name");
+            return false;
+        }
+        const Token name = Advance();
+        if (!CheckName(name))
+        {
+            return false;
+        }
+        for (usize index = 0; index < program.keywordCount; ++index)
+        {
+            if (program.keywords[index].name == name.text)
+            {
+                SetError(DiagnosticKind::Type, name, "duplicate keyword");
+                return false;
+            }
+        }
+        if (program.keywordCount >= program.keywords.size())
+        {
+            SetError(DiagnosticKind::Unsupported, name, "keyword limit exceeded (8 per shader)");
+            return false;
+        }
+        if (!Expect(TokenKind::Semicolon, "expected ';' after keyword"))
+        {
+            return false;
+        }
+        program.keywords[program.keywordCount++] = Keyword{name.text, IsEnabled(name.text)};
+        return true;
+    }
+
+    // `when NAME { ... } else { ... }`. Both branches are always parsed.
+    [[nodiscard]] bool ParseWhen(Program& program, bool active, usize whenDepth) noexcept
+    {
+        const Token& whenToken = m_tokens[m_position - 1];
+        if (whenDepth + 1 > kMaximumWhenNesting)
+        {
+            SetError(DiagnosticKind::Unsupported, whenToken, "when nesting limit exceeded");
+            return false;
+        }
+        if (!Check(TokenKind::Identifier))
+        {
+            SetError(DiagnosticKind::Syntax, Current(), "expected keyword after 'when'");
+            return false;
+        }
+        const Token name = Advance();
+        const Keyword* keyword = nullptr;
+        for (usize index = 0; index < program.keywordCount; ++index)
+        {
+            if (program.keywords[index].name == name.text)
+            {
+                keyword = &program.keywords[index];
+            }
+        }
+        if (keyword == nullptr)
+        {
+            SetError(DiagnosticKind::Type, name,
+                     "unknown keyword; declare it with 'keyword' first");
+            return false;
+        }
+        const bool selected = keyword->enabled;
+        if (!Expect(TokenKind::LeftBrace, "expected '{' after when keyword") ||
+            !ParseBody(program, active && selected, whenDepth + 1) ||
+            !Expect(TokenKind::RightBrace, "expected '}' after when block"))
+        {
+            return false;
+        }
+        if (MatchIdentifier("else"))
+        {
+            if (!Expect(TokenKind::LeftBrace, "expected '{' after else") ||
+                !ParseBody(program, active && !selected, whenDepth + 1) ||
+                !Expect(TokenKind::RightBrace, "expected '}' after else block"))
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     [[nodiscard]] bool ParseType(Type& type) noexcept
@@ -506,6 +1018,10 @@ private:
         {
             type = Type::Float4x4;
         }
+        else if (token.text == "uint3")
+        {
+            type = Type::Uint3;
+        }
         else
         {
             SetError(DiagnosticKind::Unsupported, token, "unsupported shader type");
@@ -514,7 +1030,8 @@ private:
         return true;
     }
 
-    [[nodiscard]] bool ParseTypedDeclaration(DeclarationKind kind, Program& program) noexcept
+    [[nodiscard]] bool ParseTypedDeclaration(DeclarationKind kind, Program& program,
+                                             bool active) noexcept
     {
         Declaration declaration{};
         declaration.kind = kind;
@@ -528,19 +1045,27 @@ private:
             }
             return false;
         }
+        if (!CheckName(Current()))
+        {
+            return false;
+        }
         declaration.name = Advance().text;
         if (!ParseAttribute(declaration) || !Expect(TokenKind::Semicolon, "expected ';'"))
         {
             return false;
         }
-        return AddDeclaration(program, declaration);
+        return !active || AddDeclaration(program, declaration);
     }
 
-    [[nodiscard]] bool ParseResourceDeclaration(DeclarationKind kind, Program& program) noexcept
+    [[nodiscard]] bool ParseResourceDeclaration(DeclarationKind kind, Program& program,
+                                                bool active) noexcept
     {
         Declaration declaration{};
         declaration.kind = kind;
-        declaration.type = kind == DeclarationKind::Texture ? Type::Texture2D : Type::Sampler;
+        declaration.type =
+            kind == DeclarationKind::Texture
+                ? Type::Texture2D
+                : (kind == DeclarationKind::Sampler ? Type::Sampler : Type::StorageTexture2D);
         declaration.line = m_tokens[m_position - 1].line;
         declaration.column = m_tokens[m_position - 1].column;
         if (!Check(TokenKind::Identifier))
@@ -548,12 +1073,16 @@ private:
             SetError(DiagnosticKind::Syntax, Current(), "expected resource name");
             return false;
         }
+        if (!CheckName(Current()))
+        {
+            return false;
+        }
         declaration.name = Advance().text;
         if (!ParseAttribute(declaration) || !Expect(TokenKind::Semicolon, "expected ';'"))
         {
             return false;
         }
-        return AddDeclaration(program, declaration);
+        return !active || AddDeclaration(program, declaration);
     }
 
     [[nodiscard]] bool ParseAttribute(Declaration& declaration) noexcept
@@ -585,15 +1114,21 @@ private:
         }
         if (attribute.text == "builtin")
         {
-            if (!MatchIdentifier("position") ||
-                !Expect(TokenKind::RightParen, "expected ')' after builtin"))
+            if (MatchIdentifier("position"))
+            {
+                declaration.builtin = Builtin::Position;
+            }
+            else if (MatchIdentifier("dispatch_thread_id"))
+            {
+                declaration.builtin = Builtin::DispatchThreadId;
+            }
+            else
             {
                 SetError(DiagnosticKind::Syntax, Current(),
-                         "only the position builtin is supported");
+                         "expected builtin 'position' or 'dispatch_thread_id'");
                 return false;
             }
-            declaration.isPosition = true;
-            return true;
+            return Expect(TokenKind::RightParen, "expected ')' after builtin");
         }
         if (attribute.text == "register")
         {
@@ -633,27 +1168,6 @@ private:
         return false;
     }
 
-    [[nodiscard]] bool ParseDigits(StringView text, u32& value) noexcept
-    {
-        if (text.Empty())
-        {
-            return false;
-        }
-        u32 parsed = 0;
-        for (usize index = 0; index < text.Size(); ++index)
-        {
-            const char digit = text[index];
-            if (!IsDigit(digit) ||
-                parsed > (std::numeric_limits<u32>::max() - static_cast<u32>(digit - '0')) / 10U)
-            {
-                return false;
-            }
-            parsed = parsed * 10U + static_cast<u32>(digit - '0');
-        }
-        value = parsed;
-        return true;
-    }
-
     [[nodiscard]] bool ParseUnsigned(u32& value) noexcept
     {
         if (!Check(TokenKind::Number))
@@ -681,18 +1195,29 @@ private:
         return true;
     }
 
-    [[nodiscard]] bool Match(TokenKind kind) noexcept
+    // Records a statement whose expressions are already parsed. An inactive
+    // statement releases the expression slots it used, so discarded branches do
+    // not count against the expression limit.
+    [[nodiscard]] bool CommitStatement(Program& program, const Statement& statement, bool active,
+                                       usize expressionMark) noexcept
     {
-        if (Check(kind))
+        if (!active)
         {
-            static_cast<void>(Advance());
+            program.expressionCount = expressionMark;
             return true;
         }
-        return false;
+        if (program.statementCount >= program.statements.size())
+        {
+            SetError(DiagnosticKind::Unsupported, Current(), "statement limit exceeded");
+            return false;
+        }
+        program.statements[program.statementCount++] = statement;
+        return true;
     }
 
-    [[nodiscard]] bool ParseAssignment(Program& program) noexcept
+    [[nodiscard]] bool ParseAssignment(Program& program, bool active) noexcept
     {
+        const usize mark = program.expressionCount;
         const Token start = Current();
         u32 target = 0;
         if (!ParseExpression(program, target, 0) || !Expect(TokenKind::Equal, "expected '='"))
@@ -705,40 +1230,39 @@ private:
         {
             return false;
         }
-        if (program.statementCount >= program.statements.size())
-        {
-            SetError(DiagnosticKind::Unsupported, Current(), "statement limit exceeded");
-            return false;
-        }
-        program.statements[program.statementCount++] =
-            Statement{StatementKind::Assignment, target, value, start.line, start.column};
-        return true;
+        return CommitStatement(
+            program, Statement{StatementKind::Assignment, target, value, start.line, start.column},
+            active, mark);
     }
 
-    [[nodiscard]] bool AddStatement(Program& program, Statement statement) noexcept
+    [[nodiscard]] bool ParseStore(Program& program, bool active) noexcept
     {
-        if (statement.kind == StatementKind::Return)
+        const usize mark = program.expressionCount;
+        const Token start = Current();
+        u32 call = 0;
+        if (!ParseExpression(program, call, 0) ||
+            !Expect(TokenKind::Semicolon, "expected ';' after store"))
         {
-            if (!ParseExpression(program, statement.expression, 0) ||
-                !Expect(TokenKind::Semicolon, "expected ';' after return"))
-            {
-                return false;
-            }
-        }
-        if (program.statementCount >= program.statements.size())
-        {
-            SetError(DiagnosticKind::Unsupported, Current(), "statement limit exceeded");
             return false;
         }
-        program.statements[program.statementCount++] = statement;
-        return true;
+        return CommitStatement(
+            program, Statement{StatementKind::Store, call, call, start.line, start.column}, active,
+            mark);
     }
 
-    [[nodiscard]] bool ParseReturn(Program& program) noexcept
+    [[nodiscard]] bool ParseReturn(Program& program, bool active) noexcept
     {
+        const usize mark = program.expressionCount;
         const Token start = m_tokens[m_position - 1];
-        return AddStatement(program,
-                            Statement{StatementKind::Return, 0, 0, start.line, start.column});
+        u32 value = 0;
+        if (!ParseExpression(program, value, 0) ||
+            !Expect(TokenKind::Semicolon, "expected ';' after return"))
+        {
+            return false;
+        }
+        return CommitStatement(program,
+                               Statement{StatementKind::Return, 0, value, start.line, start.column},
+                               active, mark);
     }
 
     [[nodiscard]] bool ParseExpression(Program& program, u32& expression, usize nesting) noexcept
@@ -840,14 +1364,10 @@ private:
 
     const DynamicArray<Token>& m_tokens;
     StringView m_sourceName;
+    Span<const StringView> m_enabled;
     usize m_position = 0;
     Diagnostic m_error{};
 };
-
-[[nodiscard]] bool IsSame(StringView lhs, StringView rhs) noexcept
-{
-    return lhs == rhs;
-}
 
 [[nodiscard]] const Declaration* FindDeclaration(const Program& program, DeclarationKind kind,
                                                  StringView name) noexcept
@@ -855,7 +1375,7 @@ private:
     for (usize index = 0; index < program.declarationCount; ++index)
     {
         const Declaration& declaration = program.declarations[index];
-        if (declaration.kind == kind && IsSame(declaration.name, name))
+        if (declaration.kind == kind && declaration.name == name)
         {
             return &declaration;
         }
@@ -871,13 +1391,20 @@ private:
         const Declaration& declaration = program.declarations[index];
         if ((declaration.kind == DeclarationKind::Uniform ||
              declaration.kind == DeclarationKind::Texture ||
-             declaration.kind == DeclarationKind::Sampler) &&
-            IsSame(declaration.name, name))
+             declaration.kind == DeclarationKind::Sampler ||
+             declaration.kind == DeclarationKind::StorageTexture) &&
+            declaration.name == name)
         {
             return &declaration;
         }
     }
     return nullptr;
+}
+
+[[nodiscard]] bool IsFloatValue(Type type) noexcept
+{
+    return type == Type::Float || type == Type::Float2 || type == Type::Float3 ||
+           type == Type::Float4;
 }
 
 [[nodiscard]] Type ExpressionType(const Program& program, u32 index, StringView sourceName,
@@ -892,15 +1419,16 @@ private:
     {
         if (expression.name == "input" || expression.name == "output")
         {
-            diagnostic = Diagnostic{DiagnosticKind::Type, sourceName, expression.line,
-                                    expression.column, "use a declared member of input or output"};
+            diagnostic =
+                MakeDiagnostic(DiagnosticKind::Type, sourceName, expression.line, expression.column,
+                               "use a declared member of input or output");
             return Type::Invalid;
         }
         const Declaration* declaration = FindNameDeclaration(program, expression.name);
         if (declaration == nullptr)
         {
-            diagnostic = Diagnostic{DiagnosticKind::Type, sourceName, expression.line,
-                                    expression.column, "unknown shader name"};
+            diagnostic = MakeDiagnostic(DiagnosticKind::Type, sourceName, expression.line,
+                                        expression.column, "unknown shader name");
             return Type::Invalid;
         }
         return declaration->type;
@@ -911,8 +1439,8 @@ private:
         if (base.kind != ExpressionKind::Identifier ||
             (base.name != "input" && base.name != "output"))
         {
-            diagnostic = Diagnostic{DiagnosticKind::Type, sourceName, expression.line,
-                                    expression.column, "member access is limited to stage IO"};
+            diagnostic = MakeDiagnostic(DiagnosticKind::Type, sourceName, expression.line,
+                                        expression.column, "member access is limited to stage IO");
             return Type::Invalid;
         }
         const DeclarationKind kind =
@@ -920,14 +1448,14 @@ private:
         const Declaration* declaration = FindDeclaration(program, kind, expression.name);
         if (declaration == nullptr || (base.name == "output" && program.stage != Stage::Vertex))
         {
-            diagnostic = Diagnostic{DiagnosticKind::Type, sourceName, expression.line,
-                                    expression.column, "unknown stage IO member"};
+            diagnostic = MakeDiagnostic(DiagnosticKind::Type, sourceName, expression.line,
+                                        expression.column, "unknown stage IO member");
             return Type::Invalid;
         }
         return declaration->type;
     }
 
-    std::array<Type, 3> arguments{};
+    std::array<Type, 4> arguments{};
     for (u32 argument = 0; argument < expression.argumentCount; ++argument)
     {
         arguments[argument] =
@@ -960,8 +1488,9 @@ private:
                 components += 4;
                 break;
             default:
-                diagnostic = Diagnostic{DiagnosticKind::Type, sourceName, expression.line,
-                                        expression.column, "invalid vector constructor argument"};
+                diagnostic =
+                    MakeDiagnostic(DiagnosticKind::Type, sourceName, expression.line,
+                                   expression.column, "invalid vector constructor argument");
                 return Type::Invalid;
             }
         }
@@ -969,8 +1498,8 @@ private:
         if (components != expected)
         {
             diagnostic =
-                Diagnostic{DiagnosticKind::Type, sourceName, expression.line, expression.column,
-                           "vector constructor component count mismatch"};
+                MakeDiagnostic(DiagnosticKind::Type, sourceName, expression.line, expression.column,
+                               "vector constructor component count mismatch");
             return Type::Invalid;
         }
         return target;
@@ -989,6 +1518,12 @@ private:
         {
             return Type::Float4;
         }
+        // Component-wise product of two values of the same float type.
+        if (expression.argumentCount == 2 && IsFloatValue(arguments[0]) &&
+            arguments[0] == arguments[1])
+        {
+            return arguments[0];
+        }
     }
     else if (expression.name == "sample")
     {
@@ -999,9 +1534,148 @@ private:
         }
     }
 
-    diagnostic = Diagnostic{DiagnosticKind::Type, sourceName, expression.line, expression.column,
-                            "function or constructor has invalid arguments"};
+    diagnostic = MakeDiagnostic(DiagnosticKind::Type, sourceName, expression.line,
+                                expression.column, "function or constructor has invalid arguments");
     return Type::Invalid;
+}
+
+[[nodiscard]] bool ValidateStore(const Program& program, const Statement& statement,
+                                 StringView sourceName, Diagnostic& diagnostic) noexcept
+{
+    const Expression& call = program.expressions[statement.expression];
+    if (program.stage != Stage::Compute || call.kind != ExpressionKind::Call ||
+        call.name != "store")
+    {
+        diagnostic = MakeDiagnostic(DiagnosticKind::Type, sourceName, statement.line,
+                                    statement.column, "store is only valid in a compute shader");
+        return false;
+    }
+    if (call.argumentCount != 3)
+    {
+        diagnostic = MakeDiagnostic(DiagnosticKind::Type, sourceName, call.line, call.column,
+                                    "store takes a storage texture, a uint3 id, and a float4");
+        return false;
+    }
+    const Expression& target = program.expressions[call.arguments[0]];
+    const Declaration* declaration =
+        target.kind == ExpressionKind::Identifier
+            ? FindDeclaration(program, DeclarationKind::StorageTexture, target.name)
+            : nullptr;
+    if (declaration == nullptr)
+    {
+        diagnostic = MakeDiagnostic(DiagnosticKind::Type, sourceName, target.line, target.column,
+                                    "store target must be a declared rwtexture2d");
+        return false;
+    }
+    if (ExpressionType(program, call.arguments[1], sourceName, diagnostic) != Type::Uint3)
+    {
+        if (diagnostic.message == nullptr)
+        {
+            diagnostic = MakeDiagnostic(DiagnosticKind::Type, sourceName, call.line, call.column,
+                                        "store coordinate must be a uint3");
+        }
+        return false;
+    }
+    if (ExpressionType(program, call.arguments[2], sourceName, diagnostic) != Type::Float4)
+    {
+        if (diagnostic.message == nullptr)
+        {
+            diagnostic = MakeDiagnostic(DiagnosticKind::Type, sourceName, call.line, call.column,
+                                        "store value must be a float4");
+        }
+        return false;
+    }
+    return true;
+}
+
+[[nodiscard]] bool ValidateDeclaration(const Program& program, const Declaration& declaration,
+                                       StringView sourceName, Diagnostic& diagnostic) noexcept
+{
+    const auto fail = [&](const char* message) noexcept
+    {
+        diagnostic = MakeDiagnostic(DiagnosticKind::Type, sourceName, declaration.line,
+                                    declaration.column, message);
+        return false;
+    };
+
+    switch (declaration.kind)
+    {
+    case DeclarationKind::Input:
+        if (declaration.hasRegister)
+        {
+            return fail("stage inputs do not take a register");
+        }
+        if (program.stage == Stage::Compute)
+        {
+            if (declaration.builtin != Builtin::DispatchThreadId ||
+                declaration.type != Type::Uint3 || declaration.hasLocation)
+            {
+                return fail("compute inputs must be a uint3 @builtin(dispatch_thread_id)");
+            }
+            return true;
+        }
+        if (declaration.builtin == Builtin::Position)
+        {
+            if (program.stage != Stage::Pixel || declaration.type != Type::Float4 ||
+                declaration.hasLocation)
+            {
+                return fail("only pixel inputs may read the float4 position builtin");
+            }
+            return true;
+        }
+        if (declaration.builtin != Builtin::None || !declaration.hasLocation ||
+            !IsFloatValue(declaration.type))
+        {
+            return fail("stage inputs require a scalar/vector location");
+        }
+        return true;
+    case DeclarationKind::Output:
+        if (program.stage != Stage::Vertex || declaration.hasRegister ||
+            !IsFloatValue(declaration.type) || declaration.builtin == Builtin::DispatchThreadId ||
+            (declaration.builtin == Builtin::None && !declaration.hasLocation) ||
+            (declaration.builtin == Builtin::Position &&
+             (declaration.type != Type::Float4 || declaration.hasLocation)))
+        {
+            return fail("invalid vertex output declaration");
+        }
+        return true;
+    case DeclarationKind::Uniform:
+    case DeclarationKind::Texture:
+    case DeclarationKind::Sampler:
+    case DeclarationKind::StorageTexture:
+        break;
+    }
+
+    char expectedClass = 'b';
+    switch (declaration.kind)
+    {
+    case DeclarationKind::Texture:
+        expectedClass = 't';
+        break;
+    case DeclarationKind::Sampler:
+        expectedClass = 's';
+        break;
+    case DeclarationKind::StorageTexture:
+        expectedClass = 'u';
+        break;
+    default:
+        break;
+    }
+    if (!declaration.hasRegister || declaration.registerClass != expectedClass ||
+        declaration.hasLocation || declaration.builtin != Builtin::None)
+    {
+        return fail("resource uses the wrong register class");
+    }
+    if (declaration.kind == DeclarationKind::Uniform &&
+        !(IsFloatValue(declaration.type) || declaration.type == Type::Float4x4))
+    {
+        return fail("uniforms must be float, float2, float3, float4, or float4x4");
+    }
+    if (declaration.kind == DeclarationKind::StorageTexture && program.stage != Stage::Compute)
+    {
+        return fail("rwtexture2d is only available to compute shaders");
+    }
+    return true;
 }
 
 [[nodiscard]] bool ValidateProgram(const Program& program, StringView sourceName,
@@ -1010,51 +1684,25 @@ private:
     usize inputCount = 0;
     usize outputCount = 0;
     usize returnCount = 0;
+    usize storeCount = 0;
     std::array<bool, kMaximumDeclarations> outputAssigned{};
+
+    if (program.stage == Stage::Compute && !program.hasThreads)
+    {
+        diagnostic = MakeDiagnostic(DiagnosticKind::Type, sourceName, 1, 1,
+                                    "compute shader requires @threads(x, y, z)");
+        return false;
+    }
 
     for (usize index = 0; index < program.declarationCount; ++index)
     {
         const Declaration& declaration = program.declarations[index];
-        if (declaration.kind == DeclarationKind::Input)
+        if (!ValidateDeclaration(program, declaration, sourceName, diagnostic))
         {
-            ++inputCount;
-            const bool positionInput = program.stage == Stage::Pixel && declaration.isPosition &&
-                                       declaration.type == Type::Float4;
-            if ((!declaration.hasLocation && !positionInput) || declaration.hasRegister ||
-                (declaration.isPosition && !positionInput) || declaration.type == Type::Float4x4)
-            {
-                diagnostic =
-                    Diagnostic{DiagnosticKind::Type, sourceName, declaration.line,
-                               declaration.column, "stage inputs require a scalar/vector location"};
-                return false;
-            }
+            return false;
         }
-        else if (declaration.kind == DeclarationKind::Output)
-        {
-            ++outputCount;
-            if (program.stage != Stage::Vertex ||
-                (!declaration.hasLocation && !declaration.isPosition) || declaration.hasRegister ||
-                (declaration.isPosition && declaration.type != Type::Float4))
-            {
-                diagnostic = Diagnostic{DiagnosticKind::Type, sourceName, declaration.line,
-                                        declaration.column, "invalid vertex output declaration"};
-                return false;
-            }
-        }
-        else
-        {
-            const char expectedClass =
-                declaration.kind == DeclarationKind::Uniform
-                    ? 'b'
-                    : (declaration.kind == DeclarationKind::Texture ? 't' : 's');
-            if (!declaration.hasRegister || declaration.registerClass != expectedClass)
-            {
-                diagnostic =
-                    Diagnostic{DiagnosticKind::Type, sourceName, declaration.line,
-                               declaration.column, "resource uses the wrong register class"};
-                return false;
-            }
-        }
+        inputCount += declaration.kind == DeclarationKind::Input ? 1U : 0U;
+        outputCount += declaration.kind == DeclarationKind::Output ? 1U : 0U;
 
         for (usize prior = 0; prior < index; ++prior)
         {
@@ -1065,8 +1713,8 @@ private:
                 (other.kind == DeclarationKind::Input || other.kind == DeclarationKind::Output);
             if (declaration.name == other.name && (!bothIo || declaration.kind == other.kind))
             {
-                diagnostic = Diagnostic{DiagnosticKind::Type, sourceName, declaration.line,
-                                        declaration.column, "duplicate shader resource name"};
+                diagnostic = MakeDiagnostic(DiagnosticKind::Type, sourceName, declaration.line,
+                                            declaration.column, "duplicate shader resource name");
                 return false;
             }
             if (declaration.kind == other.kind &&
@@ -1074,19 +1722,23 @@ private:
                  declaration.kind == DeclarationKind::Output) &&
                 ((declaration.hasLocation && other.hasLocation &&
                   declaration.location == other.location) ||
-                 (declaration.isPosition && other.isPosition)))
+                 (declaration.builtin != Builtin::None && declaration.builtin == other.builtin)))
             {
-                diagnostic = Diagnostic{DiagnosticKind::Type, sourceName, declaration.line,
-                                        declaration.column, "duplicate stage IO location"};
+                diagnostic = MakeDiagnostic(DiagnosticKind::Type, sourceName, declaration.line,
+                                            declaration.column, "duplicate stage IO location");
                 return false;
             }
-            if (declaration.registerClass == other.registerClass &&
+            // Uniforms naming the same register are members of one constant
+            // buffer; every other register may be used once.
+            const bool sameConstantBuffer = declaration.kind == DeclarationKind::Uniform &&
+                                            other.kind == DeclarationKind::Uniform;
+            if (!sameConstantBuffer && declaration.hasRegister && other.hasRegister &&
+                declaration.registerClass == other.registerClass &&
                 declaration.registerIndex == other.registerIndex &&
-                declaration.registerSpace == other.registerSpace && declaration.hasRegister &&
-                other.hasRegister)
+                declaration.registerSpace == other.registerSpace)
             {
-                diagnostic = Diagnostic{DiagnosticKind::Type, sourceName, declaration.line,
-                                        declaration.column, "duplicate resource register"};
+                diagnostic = MakeDiagnostic(DiagnosticKind::Type, sourceName, declaration.line,
+                                            declaration.column, "duplicate resource register");
                 return false;
             }
         }
@@ -1094,8 +1746,14 @@ private:
 
     if (inputCount == 0 || (program.stage == Stage::Vertex && outputCount == 0))
     {
-        diagnostic = Diagnostic{DiagnosticKind::Type, sourceName, 1, 1,
-                                "shader stage requires declared inputs and outputs"};
+        diagnostic = MakeDiagnostic(DiagnosticKind::Type, sourceName, 1, 1,
+                                    "shader stage requires declared inputs and outputs");
+        return false;
+    }
+    if (inputCount > kMaxStageVariables || outputCount > kMaxStageVariables)
+    {
+        diagnostic = MakeDiagnostic(DiagnosticKind::Unsupported, sourceName, 1, 1,
+                                    "stage IO limit exceeded (16 inputs and 16 outputs)");
         return false;
     }
 
@@ -1107,9 +1765,9 @@ private:
             ++returnCount;
             if (program.stage != Stage::Pixel || statementIndex + 1 != program.statementCount)
             {
-                diagnostic =
-                    Diagnostic{DiagnosticKind::Type, sourceName, statement.line, statement.column,
-                               "return is only valid at the end of a pixel shader"};
+                diagnostic = MakeDiagnostic(DiagnosticKind::Type, sourceName, statement.line,
+                                            statement.column,
+                                            "return is only valid at the end of a pixel shader");
                 return false;
             }
             const Type result =
@@ -1118,9 +1776,18 @@ private:
             {
                 if (diagnostic.message == nullptr)
                 {
-                    diagnostic = Diagnostic{DiagnosticKind::Type, sourceName, statement.line,
-                                            statement.column, "pixel shader must return float4"};
+                    diagnostic =
+                        MakeDiagnostic(DiagnosticKind::Type, sourceName, statement.line,
+                                       statement.column, "pixel shader must return float4");
                 }
+                return false;
+            }
+        }
+        else if (statement.kind == StatementKind::Store)
+        {
+            ++storeCount;
+            if (!ValidateStore(program, statement, sourceName, diagnostic))
+            {
                 return false;
             }
         }
@@ -1130,16 +1797,17 @@ private:
             if (target.kind != ExpressionKind::Member ||
                 program.expressions[target.left].name != "output" || program.stage != Stage::Vertex)
             {
-                diagnostic = Diagnostic{DiagnosticKind::Type, sourceName, statement.line,
-                                        statement.column, "only vertex outputs may be assigned"};
+                diagnostic =
+                    MakeDiagnostic(DiagnosticKind::Type, sourceName, statement.line,
+                                   statement.column, "only vertex outputs may be assigned");
                 return false;
             }
             const Declaration* declaration =
                 FindDeclaration(program, DeclarationKind::Output, target.name);
             if (declaration == nullptr)
             {
-                diagnostic = Diagnostic{DiagnosticKind::Type, sourceName, target.line,
-                                        target.column, "unknown vertex output"};
+                diagnostic = MakeDiagnostic(DiagnosticKind::Type, sourceName, target.line,
+                                            target.column, "unknown vertex output");
                 return false;
             }
             const Type value =
@@ -1148,8 +1816,9 @@ private:
             {
                 if (diagnostic.message == nullptr)
                 {
-                    diagnostic = Diagnostic{DiagnosticKind::Type, sourceName, statement.line,
-                                            statement.column, "output assignment type mismatch"};
+                    diagnostic =
+                        MakeDiagnostic(DiagnosticKind::Type, sourceName, statement.line,
+                                       statement.column, "output assignment type mismatch");
                 }
                 return false;
             }
@@ -1161,8 +1830,14 @@ private:
 
     if (program.stage == Stage::Pixel && returnCount != 1)
     {
-        diagnostic =
-            Diagnostic{DiagnosticKind::Type, sourceName, 1, 1, "pixel shader requires one return"};
+        diagnostic = MakeDiagnostic(DiagnosticKind::Type, sourceName, 1, 1,
+                                    "pixel shader requires one return");
+        return false;
+    }
+    if (program.stage == Stage::Compute && storeCount == 0)
+    {
+        diagnostic = MakeDiagnostic(DiagnosticKind::Type, sourceName, 1, 1,
+                                    "compute shader requires at least one store");
         return false;
     }
     if (program.stage == Stage::Vertex)
@@ -1175,21 +1850,103 @@ private:
             {
                 if (!outputAssigned[index])
                 {
-                    diagnostic = Diagnostic{DiagnosticKind::Type, sourceName, declaration.line,
-                                            declaration.column, "vertex output is not assigned"};
+                    diagnostic =
+                        MakeDiagnostic(DiagnosticKind::Type, sourceName, declaration.line,
+                                       declaration.column, "vertex output is not assigned");
                     return false;
                 }
-                hasPosition = hasPosition || declaration.isPosition;
+                hasPosition = hasPosition || declaration.builtin == Builtin::Position;
             }
         }
         if (!hasPosition)
         {
-            diagnostic = Diagnostic{DiagnosticKind::Type, sourceName, 1, 1,
-                                    "vertex shader requires a position builtin output"};
+            diagnostic = MakeDiagnostic(DiagnosticKind::Type, sourceName, 1, 1,
+                                        "vertex shader requires a position builtin output");
             return false;
         }
     }
     return true;
+}
+
+[[nodiscard]] ValueType ToValueType(Type type) noexcept
+{
+    switch (type)
+    {
+    case Type::Float2:
+        return ValueType::Float2;
+    case Type::Float3:
+        return ValueType::Float3;
+    case Type::Float4:
+        return ValueType::Float4;
+    case Type::Float4x4:
+        return ValueType::Float4x4;
+    case Type::Uint3:
+        return ValueType::Uint3;
+    default:
+        return ValueType::Float;
+    }
+}
+
+[[nodiscard]] ReflectedName CopyName(StringView text) noexcept
+{
+    ReflectedName name{};
+    const usize size = text.Size() < kMaxNameLength ? text.Size() : kMaxNameLength;
+    for (usize index = 0; index < size; ++index)
+    {
+        name.text[index] = text[index];
+    }
+    name.size = static_cast<u8>(size);
+    return name;
+}
+
+// Byte offset of every uniform inside its constant buffer, following the HLSL
+// packing rules: 4-byte alignment, no straddling of a 16-byte register, and a
+// matrix starting a new register. Indexed by declaration.
+struct ConstantLayout
+{
+    std::array<u32, kMaximumDeclarations> offsets{};
+    // Index of the first uniform of the buffer this declaration belongs to.
+    std::array<usize, kMaximumDeclarations> bufferOf{};
+    // Bytes used so far by the buffer whose first uniform is at this index.
+    std::array<u32, kMaximumDeclarations> bufferBytes{};
+};
+
+[[nodiscard]] u32 AlignUp(u32 value, u32 alignment) noexcept
+{
+    return (value + alignment - 1U) / alignment * alignment;
+}
+
+void ComputeConstantLayout(const Program& program, ConstantLayout& layout) noexcept
+{
+    for (usize index = 0; index < program.declarationCount; ++index)
+    {
+        const Declaration& declaration = program.declarations[index];
+        if (declaration.kind != DeclarationKind::Uniform)
+        {
+            continue;
+        }
+        usize buffer = index;
+        for (usize prior = 0; prior < index; ++prior)
+        {
+            const Declaration& other = program.declarations[prior];
+            if (other.kind == DeclarationKind::Uniform &&
+                other.registerIndex == declaration.registerIndex &&
+                other.registerSpace == declaration.registerSpace)
+            {
+                buffer = layout.bufferOf[prior];
+                break;
+            }
+        }
+        layout.bufferOf[index] = buffer;
+        const u32 size = ValueTypeSize(ToValueType(declaration.type));
+        u32 cursor = layout.bufferBytes[buffer];
+        if (declaration.type == Type::Float4x4 || (cursor % kRegisterBytes) + size > kRegisterBytes)
+        {
+            cursor = AlignUp(cursor, kRegisterBytes);
+        }
+        layout.offsets[index] = cursor;
+        layout.bufferBytes[buffer] = cursor + size;
+    }
 }
 
 [[nodiscard]] const char* TypeName(Type type) noexcept
@@ -1206,10 +1963,14 @@ private:
         return "float4";
     case Type::Float4x4:
         return "float4x4";
+    case Type::Uint3:
+        return "uint3";
     case Type::Texture2D:
         return "Texture2D<float4>";
     case Type::Sampler:
         return "SamplerState";
+    case Type::StorageTexture2D:
+        return "RWTexture2D<float4>";
     case Type::Invalid:
         break;
     }
@@ -1249,6 +2010,29 @@ private:
     return output.TryAppend(StringView(buffer, size));
 }
 
+// Ordinal of the constant buffer whose first uniform is `first`.
+[[nodiscard]] u32 ConstantBufferOrdinal(const Program& program, const ConstantLayout& layout,
+                                        usize first) noexcept
+{
+    u32 ordinal = 0;
+    for (usize index = 0; index < first; ++index)
+    {
+        if (program.declarations[index].kind == DeclarationKind::Uniform &&
+            layout.bufferOf[index] == index)
+        {
+            ++ordinal;
+        }
+    }
+    return ordinal;
+}
+
+[[nodiscard]] bool AppendConstantBufferName(const Program& program, u32 ordinal,
+                                            String& output) noexcept
+{
+    return Append(output, program.name) && Append(output, "_Uniforms") &&
+           AppendNumber(output, ordinal);
+}
+
 [[nodiscard]] bool EmitExpression(const Program& program, u32 index, String& output) noexcept
 {
     const Expression& expression = program.expressions[index];
@@ -1269,6 +2053,23 @@ private:
                    EmitExpression(program, expression.arguments[1], output) &&
                    Append(output, ", ") &&
                    EmitExpression(program, expression.arguments[2], output) && Append(output, ")");
+        }
+        if (expression.name == "mul" && expression.argumentCount == 2)
+        {
+            // A matrix product keeps HLSL's mul; a component-wise product is
+            // emitted as an operator so its meaning does not depend on types.
+            const Expression& lhs = program.expressions[expression.arguments[0]];
+            const Declaration* matrix = lhs.kind == ExpressionKind::Identifier
+                                            ? FindNameDeclaration(program, lhs.name)
+                                            : nullptr;
+            if (matrix == nullptr || matrix->type != Type::Float4x4)
+            {
+                return Append(output, "(") &&
+                       EmitExpression(program, expression.arguments[0], output) &&
+                       Append(output, " * ") &&
+                       EmitExpression(program, expression.arguments[1], output) &&
+                       Append(output, ")");
+            }
         }
         if (!Append(output, expression.name) || !Append(output, "("))
         {
@@ -1310,9 +2111,16 @@ private:
         {
             return false;
         }
-        if (declaration.isPosition)
+        if (declaration.builtin == Builtin::Position)
         {
             if (!Append(output, "SV_Position"))
+            {
+                return false;
+            }
+        }
+        else if (declaration.builtin == Builtin::DispatchThreadId)
+        {
+            if (!Append(output, "SV_DispatchThreadID"))
             {
                 return false;
             }
@@ -1329,51 +2137,82 @@ private:
     return Append(output, "};\n");
 }
 
-[[nodiscard]] bool EmitBindings(const Program& program, String& output) noexcept
+[[nodiscard]] bool AppendRegister(String& output, char registerClass, u32 index, u32 space) noexcept
 {
-    usize uniformIndex = 0;
+    if (!Append(output, " : register(") || !Append(output, registerClass) ||
+        !AppendNumber(output, index))
+    {
+        return false;
+    }
+    if (space != 0 && (!Append(output, ", space") || !AppendNumber(output, space)))
+    {
+        return false;
+    }
+    return Append(output, ")");
+}
+
+[[nodiscard]] bool EmitConstantBuffer(const Program& program, const ConstantLayout& layout,
+                                      usize first, String& output) noexcept
+{
+    const Declaration& head = program.declarations[first];
+    if (!Append(output, "cbuffer ") ||
+        !AppendConstantBufferName(program, ConstantBufferOrdinal(program, layout, first), output) ||
+        !AppendRegister(output, 'b', head.registerIndex, head.registerSpace) ||
+        !Append(output, "\n{\n"))
+    {
+        return false;
+    }
+    constexpr char kComponents[] = {'x', 'y', 'z', 'w'};
+    for (usize index = first; index < program.declarationCount; ++index)
+    {
+        const Declaration& declaration = program.declarations[index];
+        if (declaration.kind != DeclarationKind::Uniform || layout.bufferOf[index] != first)
+        {
+            continue;
+        }
+        const u32 offset = layout.offsets[index];
+        const u32 component = (offset % kRegisterBytes) / 4U;
+        if (!Append(output, "    ") || !Append(output, TypeName(declaration.type)) ||
+            !Append(output, " ") || !Append(output, declaration.name) ||
+            !Append(output, " : packoffset(c") || !AppendNumber(output, offset / kRegisterBytes))
+        {
+            return false;
+        }
+        if (component != 0 && (!Append(output, '.') || !Append(output, kComponents[component])))
+        {
+            return false;
+        }
+        if (!Append(output, ");\n"))
+        {
+            return false;
+        }
+    }
+    return Append(output, "};\n");
+}
+
+[[nodiscard]] bool EmitBindings(const Program& program, const ConstantLayout& layout,
+                                String& output) noexcept
+{
     for (usize index = 0; index < program.declarationCount; ++index)
     {
         const Declaration& declaration = program.declarations[index];
         if (declaration.kind == DeclarationKind::Uniform)
         {
-            if (!Append(output, "cbuffer ") || !Append(output, program.name) ||
-                !Append(output, "_Uniforms") ||
-                !AppendNumber(output, static_cast<u32>(uniformIndex)) ||
-                !Append(output, " : register(b") ||
-                !AppendNumber(output, declaration.registerIndex))
+            if (layout.bufferOf[index] == index &&
+                !EmitConstantBuffer(program, layout, index, output))
             {
                 return false;
             }
-            if (declaration.registerSpace != 0 &&
-                (!Append(output, ", space") || !AppendNumber(output, declaration.registerSpace)))
-            {
-                return false;
-            }
-            if (!Append(output, ")\n{\n    ") || !Append(output, TypeName(declaration.type)) ||
-                !Append(output, " ") || !Append(output, declaration.name) ||
-                !Append(output, ";\n};\n"))
-            {
-                return false;
-            }
-            ++uniformIndex;
         }
         else if (declaration.kind == DeclarationKind::Texture ||
-                 declaration.kind == DeclarationKind::Sampler)
+                 declaration.kind == DeclarationKind::Sampler ||
+                 declaration.kind == DeclarationKind::StorageTexture)
         {
             if (!Append(output, TypeName(declaration.type)) || !Append(output, " ") ||
-                !Append(output, declaration.name) || !Append(output, " : register(") ||
-                !Append(output, declaration.registerClass) ||
-                !AppendNumber(output, declaration.registerIndex))
-            {
-                return false;
-            }
-            if (declaration.registerSpace != 0 &&
-                (!Append(output, ", space") || !AppendNumber(output, declaration.registerSpace)))
-            {
-                return false;
-            }
-            if (!Append(output, ");\n"))
+                !Append(output, declaration.name) ||
+                !AppendRegister(output, declaration.registerClass, declaration.registerIndex,
+                                declaration.registerSpace) ||
+                !Append(output, ";\n"))
             {
                 return false;
             }
@@ -1382,13 +2221,14 @@ private:
     return true;
 }
 
-[[nodiscard]] bool EmitHlsl(const Program& program, String& output) noexcept
+[[nodiscard]] bool EmitHlsl(const Program& program, const ConstantLayout& layout,
+                            String& output) noexcept
 {
     if (program.stage == Stage::Vertex)
     {
         if (!EmitDeclarations(program, DeclarationKind::Input, output) ||
             !EmitDeclarations(program, DeclarationKind::Output, output) ||
-            !EmitBindings(program, output) ||
+            !EmitBindings(program, layout, output) ||
             !Append(output, "Output main(Input input)\n{\n    Output output;\n"))
         {
             return false;
@@ -1406,8 +2246,33 @@ private:
         return Append(output, "    return output;\n}\n");
     }
 
+    if (program.stage == Stage::Compute)
+    {
+        if (!EmitDeclarations(program, DeclarationKind::Input, output) ||
+            !EmitBindings(program, layout, output) || !Append(output, "[numthreads(") ||
+            !AppendNumber(output, program.threads[0]) || !Append(output, ", ") ||
+            !AppendNumber(output, program.threads[1]) || !Append(output, ", ") ||
+            !AppendNumber(output, program.threads[2]) ||
+            !Append(output, ")]\nvoid main(Input input)\n{\n"))
+        {
+            return false;
+        }
+        for (usize index = 0; index < program.statementCount; ++index)
+        {
+            const Expression& call = program.expressions[program.statements[index].expression];
+            if (!Append(output, "    ") || !EmitExpression(program, call.arguments[0], output) ||
+                !Append(output, "[") || !EmitExpression(program, call.arguments[1], output) ||
+                !Append(output, ".xy] = ") || !EmitExpression(program, call.arguments[2], output) ||
+                !Append(output, ";\n"))
+            {
+                return false;
+            }
+        }
+        return Append(output, "}\n");
+    }
+
     if (!EmitDeclarations(program, DeclarationKind::Input, output) ||
-        !EmitBindings(program, output) ||
+        !EmitBindings(program, layout, output) ||
         !Append(output, "float4 main(Input input) : SV_Target\n{\n    return "))
     {
         return false;
@@ -1424,46 +2289,306 @@ private:
     return false;
 }
 
+void BuildReflection(const Program& program, const ConstantLayout& layout,
+                     Reflection& reflection) noexcept
+{
+    reflection = Reflection{};
+    reflection.stage = program.stage;
+    if (program.stage == Stage::Compute)
+    {
+        reflection.threadGroupSize = program.threads;
+    }
+    for (usize index = 0; index < program.keywordCount; ++index)
+    {
+        reflection.keywords[reflection.keywordCount++] = CopyName(program.keywords[index].name);
+    }
+
+    for (usize index = 0; index < program.declarationCount; ++index)
+    {
+        const Declaration& declaration = program.declarations[index];
+        switch (declaration.kind)
+        {
+        case DeclarationKind::Input:
+        case DeclarationKind::Output:
+        {
+            StageVariable variable{};
+            variable.name = CopyName(declaration.name);
+            variable.type = ToValueType(declaration.type);
+            variable.builtin = declaration.builtin;
+            variable.location = declaration.hasLocation ? declaration.location : 0;
+            if (declaration.kind == DeclarationKind::Input)
+            {
+                reflection.inputs[reflection.inputCount++] = variable;
+            }
+            else
+            {
+                reflection.outputs[reflection.outputCount++] = variable;
+            }
+            break;
+        }
+        case DeclarationKind::Uniform:
+        {
+            if (layout.bufferOf[index] != index)
+            {
+                break;
+            }
+            ResourceBinding binding{};
+            // The generated cbuffer name always fits: shader names are capped at
+            // 48 bytes and the suffix adds at most 9 + 2 digits.
+            char nameBuffer[kMaxNameLength + 1]{};
+            usize nameSize = 0;
+            for (usize character = 0; character < program.name.Size(); ++character)
+            {
+                nameBuffer[nameSize++] = program.name[character];
+            }
+            constexpr char kSuffix[] = "_Uniforms";
+            for (usize character = 0; character + 1 < sizeof(kSuffix); ++character)
+            {
+                nameBuffer[nameSize++] = kSuffix[character];
+            }
+            u32 ordinal = ConstantBufferOrdinal(program, layout, index);
+            char digits[10]{};
+            usize digitCount = 0;
+            do
+            {
+                digits[digitCount++] = static_cast<char>('0' + ordinal % 10U);
+                ordinal /= 10U;
+            } while (ordinal > 0);
+            while (digitCount > 0 && nameSize < kMaxNameLength)
+            {
+                nameBuffer[nameSize++] = digits[--digitCount];
+            }
+            binding.name = CopyName(StringView(nameBuffer, nameSize));
+            binding.kind = ResourceKind::ConstantBuffer;
+            binding.registerIndex = declaration.registerIndex;
+            binding.registerSpace = declaration.registerSpace;
+            binding.sizeBytes = AlignUp(layout.bufferBytes[index], kRegisterBytes);
+            binding.firstMember = reflection.memberCount;
+            for (usize member = index; member < program.declarationCount; ++member)
+            {
+                const Declaration& uniform = program.declarations[member];
+                if (uniform.kind != DeclarationKind::Uniform || layout.bufferOf[member] != index ||
+                    reflection.memberCount >= kMaxConstantMembers)
+                {
+                    continue;
+                }
+                ConstantMember& reflected = reflection.members[reflection.memberCount++];
+                reflected.name = CopyName(uniform.name);
+                reflected.type = ToValueType(uniform.type);
+                reflected.offsetBytes = layout.offsets[member];
+                reflected.sizeBytes = ValueTypeSize(reflected.type);
+                ++binding.memberCount;
+            }
+            reflection.resources[reflection.resourceCount++] = binding;
+            break;
+        }
+        case DeclarationKind::Texture:
+        case DeclarationKind::Sampler:
+        case DeclarationKind::StorageTexture:
+        {
+            ResourceBinding binding{};
+            binding.name = CopyName(declaration.name);
+            binding.kind =
+                declaration.kind == DeclarationKind::Texture
+                    ? ResourceKind::SampledTexture
+                    : (declaration.kind == DeclarationKind::Sampler ? ResourceKind::Sampler
+                                                                    : ResourceKind::StorageTexture);
+            binding.registerIndex = declaration.registerIndex;
+            binding.registerSpace = declaration.registerSpace;
+            reflection.resources[reflection.resourceCount++] = binding;
+            break;
+        }
+        }
+    }
+}
+
+// Lex and parse into `program`. Shared by compilation and keyword scanning.
+[[nodiscard]] bool Frontend(StringView sourceName, StringView source,
+                            Span<const StringView> enabled, cyber::memory::Allocator& allocator,
+                            Program& program, Diagnostic& diagnostic) noexcept
+{
+    if (source.Data() == nullptr || source.Empty())
+    {
+        diagnostic =
+            MakeDiagnostic(DiagnosticKind::Syntax, sourceName, 1, 1, "shader source is empty");
+        return false;
+    }
+    if (source.Size() > kMaximumSourceBytes)
+    {
+        diagnostic = MakeDiagnostic(DiagnosticKind::Unsupported, sourceName, 1, 1,
+                                    "shader source size limit exceeded");
+        return false;
+    }
+    DynamicArray<Token> tokens(allocator);
+    if (!Lex(source, sourceName, tokens, diagnostic))
+    {
+        return false;
+    }
+    Parser parser(tokens, sourceName, enabled);
+    return parser.Parse(program, diagnostic);
+}
+
 }  // namespace
+
+const char* StageName(Stage stage) noexcept
+{
+    switch (stage)
+    {
+    case Stage::Vertex:
+        return "vertex";
+    case Stage::Pixel:
+        return "pixel";
+    case Stage::Compute:
+        return "compute";
+    }
+    return "unknown";
+}
+
+u32 ValueTypeSize(ValueType type) noexcept
+{
+    switch (type)
+    {
+    case ValueType::Float:
+        return 4;
+    case ValueType::Float2:
+        return 8;
+    case ValueType::Float3:
+    case ValueType::Uint3:
+        return 12;
+    case ValueType::Float4:
+        return 16;
+    case ValueType::Float4x4:
+        return 64;
+    }
+    return 0;
+}
+
+const char* ValueTypeName(ValueType type) noexcept
+{
+    switch (type)
+    {
+    case ValueType::Float:
+        return "float";
+    case ValueType::Float2:
+        return "float2";
+    case ValueType::Float3:
+        return "float3";
+    case ValueType::Float4:
+        return "float4";
+    case ValueType::Float4x4:
+        return "float4x4";
+    case ValueType::Uint3:
+        return "uint3";
+    }
+    return "unknown";
+}
+
+const char* ResourceKindName(ResourceKind kind) noexcept
+{
+    switch (kind)
+    {
+    case ResourceKind::ConstantBuffer:
+        return "constant_buffer";
+    case ResourceKind::SampledTexture:
+        return "sampled_texture";
+    case ResourceKind::Sampler:
+        return "sampler";
+    case ResourceKind::StorageTexture:
+        return "storage_texture";
+    }
+    return "unknown";
+}
 
 Result<CompiledShader, Diagnostic> CompileHlsl(StringView sourceName, StringView source,
                                                cyber::memory::Allocator& allocator) noexcept
 {
-    if (source.Data() == nullptr || source.Empty())
+    return CompileHlsl(sourceName, source, CompileOptions{}, allocator);
+}
+
+Result<CompiledShader, Diagnostic> CompileHlsl(StringView sourceName, StringView source,
+                                               const CompileOptions& options,
+                                               cyber::memory::Allocator& allocator) noexcept
+{
+    if (options.keywords.Size() > kMaximumEnabledKeywords)
     {
-        return Fail(DiagnosticKind::Syntax, sourceName, 1, 1, "shader source is empty");
+        return Fail(DiagnosticKind::Permutation, sourceName, 1, 1,
+                    "too many enabled keywords in one permutation");
     }
-    if (source.Size() > kMaximumSourceBytes)
+    ProgramStorage storage(allocator);
+    Program* program = storage.Get();
+    if (program == nullptr)
     {
-        return Fail(DiagnosticKind::Unsupported, sourceName, 1, 1,
-                    "shader source size limit exceeded");
+        return Fail(DiagnosticKind::OutOfMemory, sourceName, 1, 1,
+                    "unable to allocate the shader program");
     }
 
-    DynamicArray<Token> tokens(allocator);
     Diagnostic diagnostic{};
-    if (!Lex(source, sourceName, tokens, diagnostic))
+    if (!Frontend(sourceName, source, options.keywords, allocator, *program, diagnostic))
     {
         return Result<CompiledShader, Diagnostic>::Err(diagnostic);
     }
 
-    Program program{};
-    Parser parser(tokens, sourceName);
-    if (!parser.Parse(program, diagnostic))
+    PermutationKey permutation{};
+    for (usize index = 0; index < options.keywords.Size(); ++index)
     {
-        return Result<CompiledShader, Diagnostic>::Err(diagnostic);
+        bool declared = false;
+        for (usize keyword = 0; keyword < program->keywordCount; ++keyword)
+        {
+            if (program->keywords[keyword].name == options.keywords[index])
+            {
+                declared = true;
+                permutation.mask |= 1U << keyword;
+            }
+        }
+        if (!declared)
+        {
+            return Fail(DiagnosticKind::Permutation, sourceName, 1, 1,
+                        "enabled keyword is not declared by the shader");
+        }
     }
-    if (!ValidateProgram(program, sourceName, diagnostic))
+    permutation.hash = HashKeywordSet(options.keywords);
+
+    if (!ValidateProgram(*program, sourceName, diagnostic))
     {
         return Result<CompiledShader, Diagnostic>::Err(diagnostic);
     }
 
-    CompiledShader compiled{program.stage, String(allocator)};
-    if (!EmitHlsl(program, compiled.hlsl))
+    ConstantLayout layout{};
+    ComputeConstantLayout(*program, layout);
+
+    CompiledShader compiled{program->stage, String(allocator), Reflection{}, permutation};
+    if (!EmitHlsl(*program, layout, compiled.hlsl))
     {
         return Fail(DiagnosticKind::OutOfMemory, sourceName, 1, 1,
                     "unable to allocate generated HLSL");
     }
+    BuildReflection(*program, layout, compiled.reflection);
     return Result<CompiledShader, Diagnostic>::Ok(std::move(compiled));
+}
+
+Result<KeywordList, Diagnostic> ScanKeywords(StringView sourceName, StringView source,
+                                             cyber::memory::Allocator& allocator) noexcept
+{
+    ProgramStorage storage(allocator);
+    Program* program = storage.Get();
+    if (program == nullptr)
+    {
+        return Result<KeywordList, Diagnostic>::Err(
+            MakeDiagnostic(DiagnosticKind::OutOfMemory, sourceName, 1, 1,
+                           "unable to allocate the shader program"));
+    }
+    Diagnostic diagnostic{};
+    if (!Frontend(sourceName, source, Span<const StringView>{}, allocator, *program, diagnostic))
+    {
+        return Result<KeywordList, Diagnostic>::Err(diagnostic);
+    }
+    KeywordList list{};
+    list.stage = program->stage;
+    for (usize index = 0; index < program->keywordCount; ++index)
+    {
+        list.names[list.count++] = CopyName(program->keywords[index].name);
+    }
+    return Result<KeywordList, Diagnostic>::Ok(list);
 }
 
 }  // namespace cyber::shaders
