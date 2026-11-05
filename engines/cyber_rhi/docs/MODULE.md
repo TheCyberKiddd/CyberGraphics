@@ -33,14 +33,15 @@ private headers.
 | `pipeline.h` | Vertex layout, topology, rasterizer, blend, multisample, depth-stencil state, `GraphicsPipelineDesc`, `ComputePipelineDesc`, `PipelineCacheDesc`, and the stable description hashes. |
 | `resource_state.h` | `ResourceState` and its set rules, `BufferBarrier`, `TextureBarrier`, `ResolveSubresourceRange`. |
 | `render_pass.h` | `LoadOp`, `StoreOp`, clear values, color and depth attachments, `RenderPassDesc`, `RenderPassInfo`, and the structural validator. |
-| `command_list.h` | Draw, dispatch, and copy arguments, index formats, viewport and scissor, `CommandListDesc`, the recording state machine, `CommandListStats`, `CommandListInterface`, and `CommandList`. |
+| `command_list.h` | Draw, dispatch, copy, timestamp, debug-label, and point-marker commands, index formats, viewport and scissor, `CommandListDesc`, the recording state machine, `CommandListStats`, `CommandListInterface`, and `CommandList`. |
 | `submission.h` | `FenceSignal`, `GpuWait`, `SubmitDesc`, `SubmissionInfo`, and the submission validator. |
+| `timestamp.h` | `TimestampQueryHeapDesc` for per-frame GPU timestamp slots. |
 | `swapchain.h` | `PresentMode`, `SwapChainDesc`, `SwapChainFrame`, `SwapChainInfo`, `SwapChainInterface`, and `SwapChain`. |
 | `frame_ring.h` | `FrameRingDesc`, `FrameSlot`, and `FrameRing`: frames in flight over one timeline. |
 | `retirement.h` | `RetireKind`, `RetireEntry`, and `RetirementQueue`: destruction keyed by fence value. |
 | `d3d12.h` | `IsD3D12CompiledIn()` and `D3D12Backend()`: the Direct3D 12 entry point, built only when `CYBER_RHI_ENABLE_D3D12` is on. |
-| `backend.h` | `Backend`, `DeviceInterface` (device, fence, resource, barrier, command list, submission, and swapchain entries), `DeviceCreation`, `EnumerateAdapters`, `NullBackend`. |
-| `device.h` | `Device`: queues, timeline fences, buffers, textures, views, samplers, host access, state queries, transitions, command lists, submission, swapchains, and `WaitIdle`. |
+| `backend.h` | `Backend`, `DeviceInterface` (device, fence, resource, barrier, command list, submission, query heap, timestamp readback, leak report, and swapchain entries, plus the debug-only `objectName` read-back), `ObjectKind`, `ObjectRef`, `ObjectNameInfo`, `DeviceCreation`, `EnumerateAdapters`, `NullBackend`. |
+| `device.h` | `Device`: queues, timeline fences, buffers, textures, views, samplers, timestamp query heaps and readback, memory statistics, leak reports, host access, state queries, transitions, command lists, submission, swapchains, `WaitIdle`, and the debug-only `ObjectName` read-back. |
 | `rhi.h` | Umbrella include. |
 
 ## Dependencies
@@ -97,6 +98,13 @@ readback reads, and the barrier path with per-subresource texture state — and
 `rhi_d3d12_binding`: HLSL compiled through the SDK's `D3DCompile`, bind group
 layouts and groups filling one contiguous block of the shader-visible heap, and
 pipeline layouts serialized into root signatures.
+
+Phase 15 adds GPU heap allocation and transient reuse, a shared RHI validation
+wrapper, driver-backed object names, native D3D12 pass markers, timestamp
+readback, and named leak reporting. `rhi_device_lost` forces removal on WARP
+through `ID3D12Device5::RemoveDevice`, verifies sticky `ErrorCode::DeviceLost`
+results and logged DRED/queue diagnostics, and confirms that destruction remains
+available for cleanup after removal.
 
 ## Budgets
 

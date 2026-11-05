@@ -14,6 +14,7 @@
 #include <cyber/rhi/resource_state.h>
 #include <cyber/rhi/shader.h>
 #include <cyber/rhi/texture.h>
+#include <cyber/rhi/timestamp.h>
 
 namespace cyber::rhi
 {
@@ -341,6 +342,14 @@ struct CommandListInterface
     Status<Error> (*beginDebugLabel)(void* internal, const char* label) noexcept;
     // Closes the innermost open label.
     Status<Error> (*endDebugLabel)(void* internal) noexcept;
+    // Emits a point marker with no matching begin or end.
+    Status<Error> (*setDebugMarker)(void* internal, const char* label) noexcept;
+    // Writes a timestamp into one slot of a query heap.
+    Status<Error> (*writeTimestamp)(void* internal, TimestampQueryHeapHandle heap,
+                                    u32 queryIndex) noexcept;
+    // Resolves a contiguous range into the heap's readback storage.
+    Status<Error> (*resolveTimestamps)(void* internal, TimestampQueryHeapHandle heap,
+                                       u32 firstQuery, u32 queryCount) noexcept;
     // The open pass, or a value with `valid` false when none is open. Never
     // fails, so a caller can query it to size a viewport.
     RenderPassInfo (*currentRenderPass)(const void* internal) noexcept;
@@ -523,12 +532,38 @@ public:
     [[nodiscard]] Status<Error> PushConstants(ShaderStageMask stages, u32 offsetBytes,
                                               memory::Span<const memory::Byte> data) noexcept;
 
-    // Opens a named debug region. Never fails on a backend without
-    // `Feature::DebugMarkers`; the label is simply not emitted.
+    /// Opens a named debug region.
+    /// @param label Non-empty borrowed label that remains valid during the call.
+    /// @return Success, or `InvalidArgument` when recording is not active or the
+    /// label is empty.
     [[nodiscard]] Status<Error> BeginDebugLabel(const char* label) noexcept;
 
-    // Closes the innermost debug region.
+    /// Closes the innermost debug region.
+    /// @return Success, or `InvalidArgument` when recording is not active or no
+    /// label is open.
     [[nodiscard]] Status<Error> EndDebugLabel() noexcept;
+
+    /// Emits a point marker without opening a region.
+    /// @param label Non-empty borrowed label.
+    /// @return Success, or `InvalidArgument` when recording is not active or the
+    /// label is empty.
+    [[nodiscard]] Status<Error> SetDebugMarker(const char* label) noexcept;
+
+    /// Records a GPU timestamp at this point in the command stream.
+    /// @param heap Live query heap handle.
+    /// @param queryIndex Slot to write.
+    /// @return Success, or an error when the list, heap, queue, or index is
+    /// invalid. Read the value only after a completion fence reaches its value.
+    [[nodiscard]] Status<Error> WriteTimestamp(TimestampQueryHeapHandle heap,
+                                               u32 queryIndex) noexcept;
+
+    /// Resolves a contiguous range into the heap's readback storage.
+    /// @param heap Live query heap handle.
+    /// @param firstQuery First query index to resolve.
+    /// @param queryCount Number of consecutive queries; must be non-zero.
+    /// @return Success, or an error when the list, heap, or range is invalid.
+    [[nodiscard]] Status<Error> ResolveTimestamps(TimestampQueryHeapHandle heap, u32 firstQuery,
+                                                  u32 queryCount) noexcept;
 
 private:
     friend class Device;
@@ -544,6 +579,10 @@ private:
     CommandListHandle m_handle;
     CommandListState m_state = CommandListState::Initial;
     QueueKind m_queue = QueueKind::Graphics;
+    // True when `BeginRenderPass` opened the pass's own debug label and the
+    // matching `EndRenderPass` owes it one close. `BeginDebugLabel` inside a
+    // pass nests inside it; this flag is only the RHI-emitted one.
+    bool m_passLabelOpen = false;
 };
 
 // Checks the parts of a draw call that need no access to bound resources: a

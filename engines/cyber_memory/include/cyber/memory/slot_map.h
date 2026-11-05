@@ -136,6 +136,37 @@ public:
         return m_size;
     }
 
+    // Visits each live entry once, pairing its current generation-counted
+    // handle with the stored value. Entries removed during visitation are not
+    // supported.
+    template <typename Visitor>
+    void ForEach(Visitor&& visitor) noexcept(noexcept(visitor(HandleType{}, std::declval<T&>())))
+    {
+        for (usize index = 0; index < m_slots.Size(); ++index)
+        {
+            Slot& slot = m_slots[index];
+            if (slot.occupied)
+            {
+                visitor(HandleType{static_cast<u32>(index), slot.generation}, slot.value);
+            }
+        }
+    }
+
+    // Const overload of `ForEach`.
+    template <typename Visitor>
+    void ForEach(Visitor&& visitor) const
+        noexcept(noexcept(visitor(HandleType{}, std::declval<const T&>())))
+    {
+        for (usize index = 0; index < m_slots.Size(); ++index)
+        {
+            const Slot& slot = m_slots[index];
+            if (slot.occupied)
+            {
+                visitor(HandleType{static_cast<u32>(index), slot.generation}, slot.value);
+            }
+        }
+    }
+
     [[nodiscard]] usize Capacity() const noexcept
     {
         return m_slots.Capacity();

@@ -383,7 +383,7 @@ Tips
 • SPIR-V is a public binary format, so writing your own SPIR-V generator later is realistic; writing D3D12's bytecode (DXIL) directly is a much larger project, so emitting HLSL text is the practical route.
 • Read the Metal Shading Language specification now so the language you design can map to it later.
 • Fuzz the parser: a compiler that crashes on bad input is a poor first impression.
-Write down: docs/design/phase-16-shader-language.md (grammar and decisions) and docs/adr/0002-shader-strategy.md.
+Write down: docs/design/phase-16-shader-language.md (grammar and decisions) and docs/adr/0019-shader-strategy.md.
 Done when: a small shader in your language compiles to HLSL, drives the cube sample, and reports errors with file, line, and column.
 
 ### Phase 17: Reflection, permutations, and hot reload

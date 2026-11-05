@@ -7,8 +7,14 @@ reading a bound texture that is sampled bilinearly.
 
 The frame is rendered `--supersample` times larger per axis and box-filtered
 down, which is how the silhouette is antialiased until the rasterizer has
-multisample coverage. The window starts at 2 and lowers the factor until the
-offscreen target fits 2560x1440; `--supersample 1` turns it off for speed.
+multisample coverage. The window defaults to 1x rendering for CPU performance;
+set `--supersample 2` or `--supersample 4` to trade speed for smoother edges.
+The sample lowers the requested factor as needed to keep its offscreen target
+within 2560x1440.
+
+This software-renderer sample does not require D3D12 and is the visual fallback
+on systems where the GPU driver cannot create a D3D12 device or command list.
+It is a separate CPU path; it does not produce GPU marker captures.
 
 ## Build and run
 

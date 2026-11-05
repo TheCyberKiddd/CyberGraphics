@@ -1,8 +1,9 @@
 # Phase 15 — GPU memory and debug tooling
 
-Date: 2026-10-27
-Status: drafts landed for increments 1–2 (allocator: 813bb45; reclamation and
-quarantine: 39d3395); remaining increments are in progress
+Date: 2026-11-01
+Status: accepted. Increments 1–7 and the full build/test matrix are complete;
+the Intel sample-path failure is fixed and PIX/RenderDoc capture evidence is
+recorded.
 Related: ADR 0018 (GPU memory allocator and the validation layer), ADR 0006
 (memory allocation and handles), ADR 0013 (RHI object model), ADR 0014 (resource
 model), ADR 0016 (command recording), ADR 0017 (D3D12 backend),
@@ -21,6 +22,43 @@ because it survives into a release build and because it names the resource.
 The done-when line is three things: a deliberately wrong barrier is caught with a
 clear message, GPU pass timings are visible, and the leak report names a
 deliberately leaked resource.
+
+### Reopened hardware-compatibility investigation
+
+The owner approved a compatibility-first investigation of the Intel HD
+Graphics 530's initial D3D12 failure (`DXGI_ERROR_DRIVER_INTERNAL_ERROR`,
+`0x887A0020`). A small native D3D12 probe successfully created a device, direct
+queue, command allocator, and command list on this adapter. This ruled out a
+general inability to create D3D12 command lists on the host. Inspection then
+found a sample-path bug: the swapchain backbuffer RTV had been allocated from
+the shader-resource descriptor heap and its view was tagged with the wrong heap
+kind. Routing it through the RTV heap and tagging it as a render-target view
+fixed the sample. It now submits and presents frames on the Intel adapter.
+
+The compatibility renderer selector and software RHI backend remain future
+roadmap work; do not make a failed GPU path look successful.
+
+For compatibility decisions, consult Unreal Engine's public [RHI],
+[feature-levels], and [scalability] documentation as an architecture reference.
+Apply the relevant principles—backend abstraction, explicit capability tiers,
+and adjustable quality—without copying source. CyberGraphics' automatic
+retry/fallback policy is its own requirement; do not assume Unreal retries a
+failed device at runtime.
+
+[RHI]: https://dev.epicgames.com/documentation/en-us/unreal-engine/rendering-hardware-interface-in-unreal-engine
+[feature-levels]: https://dev.epicgames.com/documentation/en-us/unreal-engine/feature-levels-in-unreal-engine
+[scalability]: https://dev.epicgames.com/documentation/en-us/unreal-engine/scalability-reference-for-unreal-engine
+
+The native sample-path failure is fixed and confirmed on the local Intel
+adapter. PIX's captured screenshot is blue and its event list reaches `Present`,
+but the raw native point-marker call is not shown as a named event. Microsoft
+documents D3D12 `SetMarker` as an internal support method and directs PIX users
+to WinPixEventRuntime; CyberGraphics does not add that runtime dependency.
+Therefore the sample uses nested begin/end debug regions for the capture
+acceptance labels, while the point-marker API remains covered by the RHI
+recording tests. Fresh PIX and RenderDoc captures show the nested `Clear Pass`
+and `Clear backbuffer` labels and the blue presented frame. The raw point marker
+is not claimed as a separate visible capture event.
 
 ## What it deliberately leaves out
 
@@ -49,7 +87,7 @@ Public (`include/cyber/rhi/`), each one argued in ADR 0018:
 | `ErrorCode::DeviceLost` | A removed device is a recoverable, reportable state, not an `Internal` failure, and the caller has to be able to tell it apart. |
 | `MemoryLifetime { Retained, Transient }` on `BufferDesc` and `TextureDesc` | The allocator may only reuse memory the caller has declared it will not need forever. Defaulting to `Retained` keeps every existing description valid and keeps today's behaviour. |
 | `MemoryStats` and `Device::MemoryStats()` | The fragmentation report the build guide asks for. A caller reads it; nothing else depends on it. |
-| `QueryHeapDesc`, `Device::CreateQueryHeap`/`DestroyQueryHeap`, `CommandList::WriteTimestamp`, `Device::ResolveTimestamps`, `Device::TimestampFrequency` | Pass timings, in the shape the frame ring already uses: write this frame, read the previous frame's results. |
+| `TimestampQueryHeapDesc`, `Device::CreateTimestampQueryHeap`/`DestroyTimestampQueryHeap`, `CommandList::WriteTimestamp`/`ResolveTimestamps`, `Device::ReadTimestamps`, `Device::TimestampFrequency` | Pass timings, in the shape the frame ring already uses: write and resolve this frame, read the previous frame's results after its fence. |
 | `Device::ReportLeaks()` | The leak report, callable at shutdown and from a test. |
 
 `ValidationLevel` already exists in `DeviceDesc` with the phase's meaning
@@ -141,20 +179,42 @@ completes the coverage (heaps, allocators, query heaps, and the swapchain's
 images) and asserts it through `ID3D12Object::GetPrivateData`, which is the only
 honest way to test a name: query it back.
 
-Pass markers come from the RHI itself: `BeginRenderPass` opens a labelled PIX
-event named after the pass's attachments, and the command list's explicit
-`BeginDebugLabel`/`EndDebugLabel` nest inside it. That ordering is what makes a
-capture readable, and it is why the marker is emitted at the RHI level rather
-than left to each caller.
+The assert needs a read-back path, so the device table gains one additive,
+debug-only entry: `objectName`, keyed by an `ObjectRef` (an `ObjectKind` plus the
+packed form of any typed handle), returning an `ObjectNameInfo` with the name
+the driver has for that object and a `named` flag. A kind with no driver object
+to name (a view, a sampler, or a bind group in D3D12) reports `named == false`
+instead of inventing a name, and a stale handle reports the same. The read-back
+is honest the same way the layer's rule set is: the D3D12 implementation reads
+the name back through `GetPrivateData(WKPDID_D3DDebugObjectNameW)`, the slot the
+API's own `SetName` writes, so what a test sees is what a capture would show,
+not what the backend's bookkeeping copied. The public form is `Device::ObjectName`.
 
-Timestamps use a query heap per frame in flight, in a ring the same shape as the
-command-allocation ring: frame N writes its timestamps, frame N+1 resolves frame
-N's, and the results are read only after the fence that guards frame N is
-reached. `Feature::TimestampQueries` is advertised only when
-`CheckFeatureSupport` says the adapter has `D3D12_FEATURE_D3D12_OPTIONS3`
-timestamp support, and the test reports that it skipped when a driver does not —
-WARP's answer differs between driver versions, and a test that pretends to
-measure pass timings on WARP would be a lie either way.
+The RHI opens a labelled region around each labelled render pass, with explicit
+`BeginDebugLabel`/`EndDebugLabel` regions nested inside it. A pass without a
+label gets no region, which is the caller's choice and not an error. The null
+backend records this ordering for validation and tests.
+
+D3D12 pass and nested labels use the native
+`ID3D12GraphicsCommandList::BeginEvent`/`EndEvent` calls, and point markers use
+`SetMarker`. The isolated `GpuMarker` helper consistently uses the legacy ANSI
+format (`Metadata = 1`, byte length including the null terminator), balances
+open regions through RAII, and keeps native calls out of other engine code.
+`CYBER_GPU_MARKERS` enables the calls in Debug and Profile builds and compiles
+them to no-ops in Release and Shipping. The owner explicitly chose the native
+path to avoid a third-party runtime dependency. Because Microsoft documents
+these methods as internal support methods and recommends WinPixEventRuntime,
+the project records the actual capture-visible begin/end labels separately from
+the RHI tests that verify point-marker recording and native call behavior.
+
+Timestamps use one query heap per frame in flight, in a ring the same shape as
+the command-allocation ring. `WriteTimestamp` and `ResolveTimestamps` are
+commands on the list, so GPU ordering is explicit and the readback copy happens
+without stalling the CPU. `ReadTimestamps` requires a fence and value signalled
+after the resolving list and returns `NotFound` until that fence is reached.
+`Feature::TimestampQueries` is advertised only when the graphics queue reports
+a non-zero frequency; unsupported adapters report zero and reject query-heap
+creation rather than fabricate timings.
 
 ### The leak report
 
@@ -172,28 +232,34 @@ are named and that nothing else is.
 
 The removal path has three parts, in this order:
 
-1. **Notice it.** `Submit`, `Present`, and `WaitFence` check for
+1. **Notice it.** `Submit`, `Present`, `WaitFence`, and `WaitIdle` check for
    `DXGI_ERROR_DEVICE_REMOVED`, `DXGI_ERROR_DEVICE_RESET`, and
    `D3D12_ERROR_DRIVER_VERSION_MISMATCH` on the call's `HRESULT` and on
-   `ID3D12Device::GetDeviceRemovedReason`.
+   `ID3D12Device::GetDeviceRemovedReason`. A per-device atomic state preserves
+   the first removal reason. Later resource creation, host access, and submission
+   operations return `ErrorCode::DeviceLost`; destroy operations remain available
+   so callers can release CPU-side bookkeeping and COM references safely.
 2. **Say why.** Query `ID3D12DeviceRemovedExtendedData` for the auto-breadcrumb
    and page-fault data when the interface exists, and log the reason code, the
    last submission's fence values, and the DRED breadcrumbs on the `Rhi`
-   channel at error level. A removed device with no diagnostics is the worst
-   version of this failure.
-3. **Stay removed.** The device records the state, every later call returns
-   `ErrorCode::DeviceLost` naming the original reason, and nothing tries to
-   recreate itself: resource recreation is a caller's policy, and a device that
-   silently recreated its objects would leave every handle the caller holds
-   stale but valid-looking.
+   channel at error level. DRED settings are process-global, so the backend does
+   not change them; it records the diagnostic output the host/runtime made
+   available. Reason and queue fence diagnostics are always logged. A removed
+   device with no diagnostics is the worst version of this failure.
+3. **Stay removed.** The device records the state and later resource creation,
+   host access, submission, presentation, and wait operations return
+   `ErrorCode::DeviceLost` naming the original reason. Destroy operations remain
+   available for cleanup; value-only diagnostic queries keep their documented
+   invalid/zero result shape. Nothing tries to recreate itself: resource
+   recreation is a caller's policy, and a device that silently recreated its
+   objects would leave every handle the caller holds stale but valid-looking.
 
 The test forces a removal rather than provoking a hang: `ID3D12Device5` exposes
-`RemoveDevice` when the debug layer is on, which is the same path a real
-removal takes and is available on CI. When the interface or the debug layer is
-absent the test reports that it skipped the forced-removal case and still checks
-the state machine — a device told it is lost stays lost — by driving the same
-recording path with the fault injected through the device's fault flag, which
-is `ValidationLevel::Exhaustive`-only and documented as such.
+`RemoveDevice` on supported D3D12 runtimes. It uses the WARP adapter, verifies
+the reason and DRED/queue diagnostics, checks sticky failure for later resource
+creation and waits, and destroys a pre-existing resource after removal to prove
+cleanup remains possible. Runtimes that do not expose `ID3D12Device5` report a
+test skip; they do not get a substitute fault-injection path.
 
 ## Alternatives considered
 
@@ -230,9 +296,10 @@ is `ValidationLevel::Exhaustive`-only and documented as such.
 - **WARP's timestamps.** If WARP cannot answer, the feature is untestable on the
   adapter CI has. The test reports the skip, and the number the phase's report
   cites comes from the hardware adapter when the machine has one.
-- **DRED availability.** `ID3D12DeviceRemovedExtendedData` needs a recent SDK
-  and a debug layer. The path degrades to the reason code and the fence values,
-  which is still more than a bare `HRESULT`.
+- **DRED availability.** The interface and useful output depend on the Windows
+  runtime and driver; breadcrumb and page-fault collection may not be enabled.
+  The backend does not change DRED's process-global settings. It degrades to the
+  reason code and fence values, which is still more than a bare `HRESULT`.
 
 ## Test plan
 
@@ -240,10 +307,10 @@ is `ValidationLevel::Exhaustive`-only and documented as such.
 |---|---|
 | `rhi_gpu_memory` | Sub-allocation, alignment, growth, per-class separation, dedicated heaps for oversized requests, the statistics and fragmentation numbers, and reuse of a released transient's memory. |
 | `rhi_validation_errors` | The deliberate-error list: a missing barrier, a barrier with the wrong source state, a draw with an unbound group, a destroy while in flight, and a transient reuse before its fence — each caught, each naming the resource. |
-| `rhi_debug_markers` | Names read back through `GetPrivateData`, markers emitted with markers enabled, and no failure when they are not. |
+| `rhi_debug_markers` | Names read back through `GetPrivateData`, pass-marker and point-marker ordering on the validation backend, and D3D12 capability reporting for the active build configuration. |
 | `rhi_timestamps` | A written range resolves after its fence, the frequency is non-zero, and the API refuses to read a heap the GPU may still be filling. |
 | `rhi_leak_report` | A leaked buffer and texture are named with their kind and size, and a device that leaks nothing reports zero. |
-| `rhi_device_lost` | A forced removal reports `DeviceLost` with a reason, every later call stays failed, and a device with no removal never reports one. |
+| `rhi_device_lost` | A forced WARP removal reports `DeviceLost` with its reason and diagnostics, subsequent resource creation and waits remain failed, and an existing resource can still be destroyed. |
 | `rhi_d3d12_conformance` | The existing D3D12 suite still passes with the validation layer in front of the backend, which is the evidence that the layer is transparent. |
 
 ## Sources
@@ -253,6 +320,10 @@ is `ValidationLevel::Exhaustive`-only and documented as such.
   `ID3D12Heap` budgeting, and the resource-alignment constants.
 - Microsoft, *Understanding the Direct3D 12 debug layer*: GPU-based validation,
   DRED, and `ID3D12DeviceRemovedExtendedData`.
+- Microsoft, [*ID3D12GraphicsCommandList::BeginEvent*](https://learn.microsoft.com/en-us/windows/win32/api/d3d12/nf-d3d12-id3d12graphicscommandlist-beginevent)
+  and [*WinPixEventRuntime*](https://devblogs.microsoft.com/pix/winpixeventruntime/):
+  D3D12 event methods are internal support methods and capture events use the
+  PIX runtime.
 - Microsoft, *PIX on Windows* and *RenderDoc* documentation: what a capture
   needs in order to be readable — names, markers, and pass structure.
 - Khronos, *Vulkan 1.3 specification*, memory allocation and aliasing chapters:
@@ -264,4 +335,4 @@ is `ValidationLevel::Exhaustive`-only and documented as such.
   budget.
 
 Read for the second document this phase writes, `docs/debugging.md`: it lands
-with increment 4, when there are names and markers for it to describe.
+with increment 4 and records the capture-visible label behavior and limitation.

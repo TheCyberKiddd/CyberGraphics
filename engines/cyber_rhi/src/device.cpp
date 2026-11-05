@@ -29,6 +29,9 @@ namespace
            interface.queue != nullptr && interface.createFence != nullptr &&
            interface.destroyFence != nullptr && interface.signalFence != nullptr &&
            interface.waitFence != nullptr && interface.fenceValue != nullptr &&
+           interface.createTimestampQueryHeap != nullptr &&
+           interface.destroyTimestampQueryHeap != nullptr && interface.readTimestamps != nullptr &&
+           interface.timestampFrequency != nullptr && interface.reportLeaks != nullptr &&
            interface.waitIdle != nullptr && interface.createBuffer != nullptr &&
            interface.destroyBuffer != nullptr && interface.bufferInfo != nullptr &&
            interface.writeBuffer != nullptr && interface.readBuffer != nullptr &&
@@ -72,8 +75,9 @@ namespace
            interface.clearColorTexture != nullptr &&
            interface.clearDepthStencilTexture != nullptr && interface.barrier != nullptr &&
            interface.pushConstants != nullptr && interface.beginDebugLabel != nullptr &&
-           interface.endDebugLabel != nullptr && interface.currentRenderPass != nullptr &&
-           interface.stats != nullptr;
+           interface.endDebugLabel != nullptr && interface.setDebugMarker != nullptr &&
+           interface.writeTimestamp != nullptr && interface.resolveTimestamps != nullptr &&
+           interface.currentRenderPass != nullptr && interface.stats != nullptr;
 }
 
 [[nodiscard]] bool SwapChainInterfaceIsComplete(const SwapChainInterface& interface) noexcept
@@ -205,6 +209,83 @@ MemoryStats Device::MemoryStats() const noexcept
     return m_interface->memoryStats(m_internal);
 }
 
+Result<TimestampQueryHeapHandle, Error>
+Device::CreateTimestampQueryHeap(const TimestampQueryHeapDesc& desc) noexcept
+{
+    if (!IsValid() || m_interface->createTimestampQueryHeap == nullptr)
+    {
+        return Result<TimestampQueryHeapHandle, Error>::Err(
+            Error{core::ErrorCode::InvalidArgument, "device is empty"});
+    }
+    if (desc.queryCount == 0)
+    {
+        return Result<TimestampQueryHeapHandle, Error>::Err(
+            Error{core::ErrorCode::InvalidArgument, "timestamp query count is zero"});
+    }
+    if (!Capabilities().features.Has(Feature::TimestampQueries))
+    {
+        return Result<TimestampQueryHeapHandle, Error>::Err(
+            Error{core::ErrorCode::Unsupported, "timestamp queries are not supported"});
+    }
+
+    TimestampQueryHeapHandle heap;
+    const Status<Error> created = m_interface->createTimestampQueryHeap(m_internal, desc, &heap);
+    if (!created)
+    {
+        return Result<TimestampQueryHeapHandle, Error>::Err(created.Error());
+    }
+    if (!heap.IsValid())
+    {
+        return Result<TimestampQueryHeapHandle, Error>::Err(
+            Error{core::ErrorCode::Internal, "backend returned an invalid timestamp query heap"});
+    }
+    return Result<TimestampQueryHeapHandle, Error>::Ok(heap);
+}
+
+Status<Error> Device::DestroyTimestampQueryHeap(TimestampQueryHeapHandle heap) noexcept
+{
+    if (!IsValid() || m_interface->destroyTimestampQueryHeap == nullptr)
+    {
+        return StatusError(core::ErrorCode::InvalidArgument, "device is empty");
+    }
+    return m_interface->destroyTimestampQueryHeap(m_internal, heap);
+}
+
+Status<Error> Device::ReadTimestamps(TimestampQueryHeapHandle heap, u32 firstQuery, u32 queryCount,
+                                     FenceHandle completionFence, u64 completionValue,
+                                     memory::Span<u64> out) const noexcept
+{
+    if (!IsValid() || m_interface->readTimestamps == nullptr)
+    {
+        return StatusError(core::ErrorCode::InvalidArgument, "device is empty");
+    }
+    if (queryCount == 0 || out.Size() < queryCount)
+    {
+        return StatusError(core::ErrorCode::InvalidArgument,
+                           "timestamp output span is smaller than the requested range");
+    }
+    return m_interface->readTimestamps(m_internal, heap, firstQuery, queryCount, completionFence,
+                                       completionValue, out);
+}
+
+u64 Device::TimestampFrequency(QueueKind queue) const noexcept
+{
+    if (!IsValid() || m_interface->timestampFrequency == nullptr)
+    {
+        return 0;
+    }
+    return m_interface->timestampFrequency(m_internal, queue);
+}
+
+u32 Device::ReportLeaks() const noexcept
+{
+    if (!IsValid() || m_interface->reportLeaks == nullptr)
+    {
+        return 0;
+    }
+    return m_interface->reportLeaks(m_internal);
+}
+
 QueueHandle Device::Queue(QueueKind kind) const noexcept
 {
     if (!IsValid() || m_interface->queue == nullptr)
@@ -310,6 +391,18 @@ BufferInfo Device::BufferInfoOf(BufferHandle buffer) const noexcept
         return BufferInfo{};
     }
     return m_interface->bufferInfo(m_internal, buffer);
+}
+
+// A debug name is a read like every other `*InfoOf`: an unnamed result covers a
+// stale handle, an unlabelled object, and a kind the backend cannot name, so
+// the call stays allocation-free and error-free.
+ObjectNameInfo Device::ObjectName(const ObjectRef& object) const noexcept
+{
+    if (!IsValid() || m_interface->objectName == nullptr)
+    {
+        return ObjectNameInfo{};
+    }
+    return m_interface->objectName(m_internal, object);
 }
 
 Status<Error> Device::WriteBuffer(BufferHandle buffer, u64 offset,

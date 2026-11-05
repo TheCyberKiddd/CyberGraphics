@@ -7,7 +7,7 @@
 cyber_add_test(
     NAME backend_compare
     SOURCES backend_compare_test.cpp
-    DEPENDS rhi memory software_renderer platform
+    DEPENDS rhi shaders memory software_renderer platform
 )
 
 # The two images the phase's done-when line names are written here on every run,

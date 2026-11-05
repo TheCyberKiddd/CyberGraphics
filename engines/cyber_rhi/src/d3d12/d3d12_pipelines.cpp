@@ -708,6 +708,11 @@ Status<Error> D3D12CreateGraphicsPipeline(void* internal, const GraphicsPipeline
     }
 
     auto& device = *static_cast<D3D12Device*>(internal);
+    const Status<Error> healthy = DeviceLostStatus(device);
+    if (!healthy)
+    {
+        return healthy;
+    }
     const std::lock_guard<std::mutex> lock(device.mutex);
 
     const D3D12PipelineLayoutSlot* pipelineLayout = Resolve(device, desc.layout);
@@ -859,6 +864,11 @@ Status<Error> D3D12CreateComputePipeline(void* internal, const ComputePipelineDe
     }
 
     auto& device = *static_cast<D3D12Device*>(internal);
+    const Status<Error> healthy = DeviceLostStatus(device);
+    if (!healthy)
+    {
+        return healthy;
+    }
     const std::lock_guard<std::mutex> lock(device.mutex);
 
     if (!device.capabilities.features.Has(Feature::Compute))
@@ -1007,6 +1017,11 @@ Status<Error> D3D12CreatePipelineCache(void* internal, const PipelineCacheDesc& 
     }
 
     auto& device = *static_cast<D3D12Device*>(internal);
+    const Status<Error> healthy = DeviceLostStatus(device);
+    if (!healthy)
+    {
+        return healthy;
+    }
     const std::lock_guard<std::mutex> lock(device.mutex);
 
     // `ID3D12PipelineLibrary` is the API's own persistence mechanism: it stores

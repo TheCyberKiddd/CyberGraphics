@@ -267,6 +267,31 @@ CG_TEST(memory_slot_map)
     CG_EXPECT_FALSE(slots.Remove(Handle<int>{}));
     CG_EXPECT_TRUE(slots.TryReserve(128));
     CG_EXPECT_TRUE(slots.Capacity() >= 128);
+
+    u32 visited = 0;
+    slots.ForEach(
+        [&visited](Handle<int> handle, int& value) noexcept
+        {
+            ++visited;
+            if (handle.index != 0 || value != 40)
+            {
+                visited = 0;
+            }
+        });
+    CG_EXPECT_EQ(visited, u32{1});
+
+    const SlotMap<int>& constSlots = slots;
+    visited = 0;
+    constSlots.ForEach(
+        [&visited](Handle<int> handle, const int& value) noexcept
+        {
+            ++visited;
+            if (handle.index != 0 || value != 40)
+            {
+                visited = 0;
+            }
+        });
+    CG_EXPECT_EQ(visited, u32{1});
 }
 
 namespace

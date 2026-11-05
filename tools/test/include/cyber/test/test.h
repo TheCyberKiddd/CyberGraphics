@@ -64,6 +64,7 @@ void RegisterTest(const char* name, const char* file, int line, TestFunction fun
 void Expect(bool condition, std::string_view expression, const char* file, int line);
 void Fail(std::string_view message, const char* file, int line);
 void Require(bool condition, std::string_view expression, const char* file, int line);
+void Skip(std::string_view message, const char* file, int line);
 
 int RunAll(const Options& options);
 void PrintUsage();
@@ -127,6 +128,13 @@ inline bool CStringEquals(const char* lhs, const char* rhs) noexcept
     } while (false)
 
 #define CG_FAIL(message) ::cyber::test::Fail((message), __FILE__, __LINE__)
+
+#define CG_SKIP(message)                                                                           \
+    do                                                                                             \
+    {                                                                                              \
+        ::cyber::test::Skip((message), __FILE__, __LINE__);                                        \
+        return;                                                                                    \
+    } while (false)
 
 #define CG_REQUIRE(expression)                                                                     \
     do                                                                                             \

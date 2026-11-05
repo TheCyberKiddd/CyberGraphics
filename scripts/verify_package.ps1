@@ -29,7 +29,13 @@ if (Test-Path $consumerDir) {
     Remove-Item -Recurse -Force $consumerDir
 }
 
-$buildType = if ($Preset -eq 'release' -or $Preset -eq 'shipping') { 'Release' } else { 'Debug' }
+$buildType = if ($Preset -eq 'release' -or $Preset -eq 'shipping') {
+    'Release'
+} elseif ($Preset -eq 'profile') {
+    'RelWithDebInfo'
+} else {
+    'Debug'
+}
 
 & cmake --preset $Preset
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

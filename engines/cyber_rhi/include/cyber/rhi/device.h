@@ -26,6 +26,7 @@ namespace cyber::rhi
 using cyber::core::Error;
 using cyber::core::Result;
 using cyber::core::Status;
+using cyber::core::u32;
 using cyber::core::u64;
 
 // The GPU device: the owner of every RHI object and the only way to create or
@@ -98,6 +99,43 @@ public:
     // has allocated nothing, and a backend that does not drive a heap all return
     // a zeroed value, so a caller never needs a validity flag.
     [[nodiscard]] MemoryStats MemoryStats() const noexcept;
+
+    /// Creates a timestamp query heap owned by this device.
+    /// @param desc Number of queries and an optional borrowed label.
+    /// @return The new handle, or `Unsupported`, `InvalidArgument`,
+    /// `OutOfRange`, or `Internal` when creation fails.
+    [[nodiscard]] Result<TimestampQueryHeapHandle, Error>
+    CreateTimestampQueryHeap(const TimestampQueryHeapDesc& desc) noexcept;
+
+    /// Destroys a timestamp query heap.
+    /// @param heap Live heap handle owned by this device.
+    /// @return Success, or `InvalidArgument` for a stale handle. The caller must
+    /// ensure submitted work can no longer access the heap.
+    [[nodiscard]] Status<Error> DestroyTimestampQueryHeap(TimestampQueryHeapHandle heap) noexcept;
+
+    /// Reads query values after the resolve list has completed.
+    /// @param heap Live timestamp heap handle.
+    /// @param firstQuery First query index to read.
+    /// @param queryCount Number of consecutive values to read.
+    /// @param completionFence Fence signalled after the resolve list.
+    /// @param completionValue Required fence value; an unreached value returns
+    /// `NotFound` without waiting.
+    /// @param out Writable span with at least `queryCount` elements.
+    /// @return Success, or `NotFound`, `InvalidArgument`, or `OutOfRange`.
+    [[nodiscard]] Status<Error> ReadTimestamps(TimestampQueryHeapHandle heap, u32 firstQuery,
+                                               u32 queryCount, FenceHandle completionFence,
+                                               u64 completionValue,
+                                               memory::Span<u64> out) const noexcept;
+
+    /// Returns timestamp ticks per second for a queue.
+    /// @param queue Queue class to query.
+    /// @return Frequency in ticks per second, or zero when unsupported.
+    [[nodiscard]] u64 TimestampFrequency(QueueKind queue) const noexcept;
+
+    /// Logs each live buffer and texture and returns their count.
+    /// @return Number of live resources reported. This is a diagnostic, not a
+    /// per-frame query.
+    [[nodiscard]] u32 ReportLeaks() const noexcept;
 
     // Handle of the queue for `kind`, or an invalid handle when this device has
     // no such queue. Queue handles live as long as the device.
@@ -292,6 +330,14 @@ public:
     // Kind and description hash of a live pipeline. A stale handle returns a
     // value with `valid` false.
     [[nodiscard]] PipelineInfo PipelineInfoOf(PipelineHandle pipeline) const noexcept;
+
+    // The debug name one object shows in a capture, read back from the backend's
+    // own name slot rather than from bookkeeping. This is a debugging surface:
+    // it answers what a capture or a leak report would show, and it is the way a
+    // test asserts a label. A kind with no nameable driver object, an unnamed
+    // object, and a stale handle all return a value with `named` false, so the
+    // call never has to be wrapped in a `Result`. Never allocates.
+    [[nodiscard]] ObjectNameInfo ObjectName(const ObjectRef& object) const noexcept;
 
     // Transitions every barrier in both spans and records the new state. Every
     // barrier is validated before any is applied: a batch with one bad barrier

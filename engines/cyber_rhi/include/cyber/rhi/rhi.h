@@ -21,3 +21,4 @@
 #include <cyber/rhi/retirement.h>
 #include <cyber/rhi/submission.h>
 #include <cyber/rhi/swapchain.h>
+#include <cyber/rhi/timestamp.h>

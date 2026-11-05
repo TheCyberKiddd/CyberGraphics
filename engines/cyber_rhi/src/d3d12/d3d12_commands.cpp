@@ -1,5 +1,7 @@
 #include "d3d12_internal.h"
 
+#include <cyber/core/log.h>
+
 #if defined(CYBER_RHI_HAS_D3D12)
 
 #include <cyber/rhi/command_list.h>
@@ -7,6 +9,7 @@
 #include <cyber/rhi/resource_state.h>
 #include <cyber/rhi/submission.h>
 
+#include <cstdio>
 #include <cstring>
 
 namespace cyber::rhi::detail
@@ -121,6 +124,10 @@ inline constexpr u32 kScratchDescriptor = 0;
 
 void SetHeaps(D3D12CommandListSlot& list, D3D12Device& device) noexcept
 {
+    if (list.queue == QueueKind::Copy)
+    {
+        return;
+    }
     ID3D12DescriptorHeap* heaps[2] = {device.viewHeap, device.samplerHeap};
     list.list->SetDescriptorHeaps(2, heaps);
 }
@@ -349,6 +356,10 @@ Status<Error> Begin(void* internal) noexcept
     list.pass = RenderPassInfo{};
     list.passOpen = false;
     list.labelDepth = 0;
+    for (u32 marker = 0; marker < kMaxGpuMarkerDepth; ++marker)
+    {
+        list.markers[marker].End();
+    }
     list.pipeline = PipelineHandle{};
     list.pipelineKind = PipelineKind::Graphics;
     list.layout = PipelineLayoutHandle{};
@@ -387,8 +398,26 @@ Status<Error> End(void* internal) noexcept
         return StatusError(ErrorCode::InvalidArgument,
                            "d3d12 backend: a debug label is still open");
     }
-    if (FAILED(list->list->Close()))
+    const HRESULT closed = list->list->Close();
+    if (FAILED(closed))
     {
+        CG_LOG(Error, Rhi, "d3d12 backend: command list close returned HRESULT 0x%08X",
+               static_cast<unsigned int>(closed));
+        if (closed == E_INVALIDARG)
+        {
+            return StatusError(ErrorCode::Internal,
+                               "d3d12 backend: command list close failed with E_INVALIDARG");
+        }
+        if (closed == DXGI_ERROR_DEVICE_REMOVED)
+        {
+            return StatusError(ErrorCode::Internal,
+                               "d3d12 backend: command list close failed after device removal");
+        }
+        if (closed == DXGI_ERROR_DEVICE_RESET)
+        {
+            return StatusError(ErrorCode::Internal,
+                               "d3d12 backend: command list close failed after device reset");
+        }
         return StatusError(ErrorCode::Internal, "d3d12 backend: command list close failed");
     }
     list->state = CommandListState::Ended;
@@ -402,6 +431,10 @@ void Reset(void* internal) noexcept
         return;
     }
     auto& list = *static_cast<D3D12CommandListSlot*>(internal);
+    for (u32 marker = list.labelDepth; marker > 0; --marker)
+    {
+        list.markers[marker - 1].End();
+    }
     if (list.list != nullptr && list.state == CommandListState::Recording)
     {
         // A list abandoned mid-recording is closed so its allocator can be reset
@@ -1543,17 +1576,25 @@ Status<Error> PushConstants(void* internal, ShaderStageMask stages, u32 offsetBy
     return Status<Error>::Ok();
 }
 
-Status<Error> BeginDebugLabel(void* internal, const char*) noexcept
+Status<Error> BeginDebugLabel(void* internal, const char* label) noexcept
 {
     if (internal == nullptr)
     {
         return StatusError(ErrorCode::InvalidArgument, "d3d12 backend: command list is null");
     }
     auto& list = *static_cast<D3D12CommandListSlot*>(internal);
-    // Direct3D 12 has no event API of its own: markers come from the PIX event
-    // runtime, which is a third-party library this project does not link. The
-    // label is counted so a caller can see it was accepted, and nothing pretends
-    // to have reached a debugger.
+    if (list.state != CommandListState::Recording || list.list == nullptr || label == nullptr ||
+        label[0] == '\0')
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "d3d12 backend: a debug label needs a recording list and a name");
+    }
+    if (list.labelDepth >= kMaxGpuMarkerDepth)
+    {
+        return StatusError(ErrorCode::OutOfRange,
+                           "d3d12 backend: debug label nesting exceeds the supported depth");
+    }
+    list.markers[list.labelDepth].Begin(list.list, label);
     ++list.labelDepth;
     ++list.stats.debugLabels;
     return Status<Error>::Ok();
@@ -1570,7 +1611,88 @@ Status<Error> EndDebugLabel(void* internal) noexcept
     {
         return StatusError(ErrorCode::InvalidArgument, "d3d12 backend: no debug label is open");
     }
+    list.markers[list.labelDepth - 1].End();
     --list.labelDepth;
+    return Status<Error>::Ok();
+}
+
+Status<Error> SetDebugMarker(void* internal, const char* label) noexcept
+{
+    Error error{};
+    D3D12CommandListSlot* list = Recording(internal, &error);
+    if (list == nullptr)
+    {
+        return Status<Error>::Err(error);
+    }
+    if (label == nullptr || label[0] == '\0')
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "d3d12 backend: a point marker needs a non-empty name");
+    }
+    GpuMarker::Set(list->list, label);
+    return Status<Error>::Ok();
+}
+
+Status<Error> WriteTimestamp(void* internal, TimestampQueryHeapHandle heap, u32 queryIndex) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "d3d12 backend: command list is null");
+    }
+    auto& list = *static_cast<D3D12CommandListSlot*>(internal);
+    if (list.state != CommandListState::Recording || list.list == nullptr || list.device == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "d3d12 backend: timestamp write requires a recording list");
+    }
+    if (list.queue == QueueKind::Copy)
+    {
+        return StatusError(ErrorCode::Unsupported,
+                           "d3d12 backend: timestamp queries are unsupported on copy queues");
+    }
+    D3D12TimestampQueryHeapSlot* queries = Resolve(*list.device, heap);
+    if (queries == nullptr || queryIndex >= queries->desc.queryCount)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "d3d12 backend: timestamp heap or query index is invalid");
+    }
+    list.list->EndQuery(queries->queries, D3D12_QUERY_TYPE_TIMESTAMP, queryIndex);
+    return Status<Error>::Ok();
+}
+
+Status<Error> ResolveTimestamps(void* internal, TimestampQueryHeapHandle heap, u32 firstQuery,
+                                u32 queryCount) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "d3d12 backend: command list is null");
+    }
+    auto& list = *static_cast<D3D12CommandListSlot*>(internal);
+    if (list.state != CommandListState::Recording || list.list == nullptr || list.device == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "d3d12 backend: timestamp resolve requires a recording list");
+    }
+    if (list.queue == QueueKind::Copy)
+    {
+        return StatusError(ErrorCode::Unsupported,
+                           "d3d12 backend: timestamp queries are unsupported on copy queues");
+    }
+    D3D12TimestampQueryHeapSlot* queries = Resolve(*list.device, heap);
+    if (queries == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "d3d12 backend: timestamp heap handle is stale or invalid");
+    }
+    if (queryCount == 0 || firstQuery >= queries->desc.queryCount ||
+        queryCount > queries->desc.queryCount - firstQuery)
+    {
+        return StatusError(ErrorCode::OutOfRange,
+                           "d3d12 backend: timestamp resolve range exceeds the query heap");
+    }
+    list.list->ResolveQueryData(queries->queries, D3D12_QUERY_TYPE_TIMESTAMP, firstQuery,
+                                queryCount, queries->readback,
+                                static_cast<u64>(firstQuery) * sizeof(u64));
     return Status<Error>::Ok();
 }
 
@@ -1625,6 +1747,9 @@ CommandListStats Stats(const void* internal) noexcept
         value.pushConstants = &PushConstants;
         value.beginDebugLabel = &BeginDebugLabel;
         value.endDebugLabel = &EndDebugLabel;
+        value.setDebugMarker = &SetDebugMarker;
+        value.writeTimestamp = &WriteTimestamp;
+        value.resolveTimestamps = &ResolveTimestamps;
         value.currentRenderPass = &CurrentRenderPass;
         value.stats = &Stats;
         return value;
@@ -1651,6 +1776,11 @@ Status<Error> D3D12CreateCommandList(void* internal, const CommandListDesc& desc
         return StatusError(ErrorCode::InvalidArgument, "d3d12 backend: queue class is invalid");
     }
     auto& device = *static_cast<D3D12Device*>(internal);
+    const Status<Error> healthy = DeviceLostStatus(device);
+    if (!healthy)
+    {
+        return healthy;
+    }
     const std::lock_guard<std::mutex> lock(device.mutex);
     if (device.queues[static_cast<u32>(desc.queue)].queue == nullptr)
     {
@@ -1660,24 +1790,51 @@ Status<Error> D3D12CreateCommandList(void* internal, const CommandListDesc& desc
 
     const D3D12_COMMAND_LIST_TYPE type = ToListType(desc.queue);
     ID3D12CommandAllocator* allocator = nullptr;
-    if (FAILED(device.device->CreateCommandAllocator(type, __uuidof(ID3D12CommandAllocator),
-                                                     reinterpret_cast<void**>(&allocator))) ||
-        allocator == nullptr)
+    const HRESULT allocatorResult = device.device->CreateCommandAllocator(
+        type, __uuidof(ID3D12CommandAllocator), reinterpret_cast<void**>(&allocator));
+    if (FAILED(allocatorResult) || allocator == nullptr)
     {
+        if (allocator != nullptr)
+        {
+            allocator->Release();
+        }
+        const Status<Error> lost = DetectDeviceLost(device, allocatorResult);
+        if (!lost)
+        {
+            return lost;
+        }
         return StatusError(ErrorCode::Internal, "d3d12 backend: command allocator creation failed");
     }
     ID3D12GraphicsCommandList* list = nullptr;
-    if (FAILED(device.device->CreateCommandList(0, type, allocator, nullptr,
-                                                __uuidof(ID3D12GraphicsCommandList),
-                                                reinterpret_cast<void**>(&list))) ||
-        list == nullptr)
+    const HRESULT listResult = device.device->CreateCommandList(0, type, allocator, nullptr,
+                                                                __uuidof(ID3D12GraphicsCommandList),
+                                                                reinterpret_cast<void**>(&list));
+    if (FAILED(listResult) || list == nullptr)
     {
+        if (list != nullptr)
+        {
+            list->Release();
+        }
         allocator->Release();
+        const Status<Error> lost = DetectDeviceLost(device, listResult);
+        if (!lost)
+        {
+            return lost;
+        }
         return StatusError(ErrorCode::Internal, "d3d12 backend: command list creation failed");
     }
     // A list starts open; closing it here makes `begin` the only way to record.
     (void)list->Close();
     NameObject(list, desc.label);
+    // The allocator is named only when the list itself is: a nameless list has
+    // nothing to attach the allocator's record to, and an unnamed allocator in
+    // a capture is the honest state of that.
+    if (desc.label != nullptr && desc.label[0] != '\0')
+    {
+        char allocatorName[144]{};
+        std::snprintf(allocatorName, sizeof(allocatorName), "%.127s allocator", desc.label);
+        NameObject(allocator, allocatorName);
+    }
 
     u32 index = kInvalidHandleIndex;
     if (device.freeCommandListSlots.Size() > 0)
@@ -1733,6 +1890,11 @@ Status<Error> D3D12DestroyCommandList(void* internal, CommandListHandle handle) 
         return StatusError(ErrorCode::InvalidArgument,
                            "d3d12 backend: command list handle is stale or invalid");
     }
+    for (u32 marker = slot->labelDepth; marker > 0; --marker)
+    {
+        slot->markers[marker - 1].End();
+    }
+    slot->labelDepth = 0;
     if (slot->list != nullptr)
     {
         slot->list->Release();
@@ -1760,6 +1922,11 @@ void ReleaseCommandLists(D3D12Device& device) noexcept
     for (u32 index = 0; index < device.commandLists.Size(); ++index)
     {
         D3D12CommandListSlot& slot = device.commandLists[index];
+        for (u32 marker = slot.labelDepth; marker > 0; --marker)
+        {
+            slot.markers[marker - 1].End();
+        }
+        slot.labelDepth = 0;
         if (slot.list != nullptr)
         {
             slot.list->Release();
@@ -1800,6 +1967,11 @@ Status<Error> D3D12Submit(void* internal, const SubmitDesc& desc) noexcept
     }
 
     auto& device = *static_cast<D3D12Device*>(internal);
+    const Status<Error> healthy = DeviceLostStatus(device);
+    if (!healthy)
+    {
+        return healthy;
+    }
     const std::lock_guard<std::mutex> lock(device.mutex);
     const u32 queueIndex = static_cast<u32>(desc.queue);
     D3D12Queue& queue = device.queues[queueIndex];
@@ -1814,11 +1986,16 @@ Status<Error> D3D12Submit(void* internal, const SubmitDesc& desc) noexcept
     // destroy can return its bytes immediately.
     if (device.transientTracker == nullptr)
     {
-        if (FAILED(
-                device.device->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence),
-                                           reinterpret_cast<void**>(&device.transientTracker))) ||
-            device.transientTracker == nullptr)
+        const HRESULT created =
+            device.device->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence),
+                                       reinterpret_cast<void**>(&device.transientTracker));
+        if (FAILED(created) || device.transientTracker == nullptr)
         {
+            const Status<Error> lost = DetectDeviceLost(device, created);
+            if (!lost)
+            {
+                return lost;
+            }
             return StatusError(ErrorCode::Internal,
                                "d3d12 backend: transient lifetime tracker creation failed");
         }
@@ -1859,8 +2036,14 @@ Status<Error> D3D12Submit(void* internal, const SubmitDesc& desc) noexcept
             return StatusError(ErrorCode::InvalidArgument,
                                "d3d12 backend: submission waits on a stale fence");
         }
-        if (FAILED(queue.queue->Wait(fence->fence, wait.value)))
+        const HRESULT waited = queue.queue->Wait(fence->fence, wait.value);
+        if (FAILED(waited))
         {
+            const Status<Error> lost = DetectDeviceLost(device, waited);
+            if (!lost)
+            {
+                return lost;
+            }
             return StatusError(ErrorCode::Internal, "d3d12 backend: queue wait failed");
         }
     }
@@ -1870,8 +2053,15 @@ Status<Error> D3D12Submit(void* internal, const SubmitDesc& desc) noexcept
     // The tracker's next epoch marks this submission's end. The signal is
     // queued before the epoch is published, so a destroy can never defer
     // against an epoch that was never signalled.
-    if (FAILED(queue.queue->Signal(device.transientTracker, device.transientEpoch + 1)))
+    const HRESULT trackerSignal =
+        queue.queue->Signal(device.transientTracker, device.transientEpoch + 1);
+    if (FAILED(trackerSignal))
     {
+        const Status<Error> lost = DetectDeviceLost(device, trackerSignal);
+        if (!lost)
+        {
+            return lost;
+        }
         return StatusError(ErrorCode::Internal,
                            "d3d12 backend: transient lifetime tracker signal failed");
     }
@@ -1887,8 +2077,14 @@ Status<Error> D3D12Submit(void* internal, const SubmitDesc& desc) noexcept
             return StatusError(ErrorCode::InvalidArgument,
                                "d3d12 backend: submission signals a stale fence");
         }
-        if (FAILED(queue.queue->Signal(fence->fence, signal.value)))
+        const HRESULT signalResult = queue.queue->Signal(fence->fence, signal.value);
+        if (FAILED(signalResult))
         {
+            const Status<Error> lost = DetectDeviceLost(device, signalResult);
+            if (!lost)
+            {
+                return lost;
+            }
             return StatusError(ErrorCode::Internal, "d3d12 backend: queue signal failed");
         }
         if (signal.value > fence->value)

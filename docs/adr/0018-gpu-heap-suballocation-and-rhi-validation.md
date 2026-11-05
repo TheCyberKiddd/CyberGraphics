@@ -1,7 +1,7 @@
 # 0018 — GPU heap sub-allocation and one RHI-level validation layer
 
-- **Status:** proposed
-- **Date:** 2026-10-27
+- **Status:** accepted
+- **Date:** 2026-11-05
 - **Deciders:** @TheCyberKiddd
 - **Related:** Phase 15, [design note](../design/phase-15-gpu-memory-debug.md),
   ADR 0006 (memory allocation and handles), ADR 0013 (RHI object model), ADR 0014
@@ -73,11 +73,14 @@ resource.
    lifetime fields, `MemoryStats`/`Device::MemoryStats()`, the query-heap and
    timestamp calls, and `Device::ReportLeaks()`. No existing call changes
    meaning, and no existing description becomes invalid.
-7. **A removed device stays removed.** Submission, present, and fence waits
-   detect removal, report the reason and the DRED breadcrumbs on the `Rhi`
-   channel, and every later call returns `DeviceLost`. The backend never
-   recreates itself: a device that silently rebuilt its objects would leave
-   every handle its caller holds stale but valid-looking.
+7. **A removed device stays removed.** Submission, present, fence waits, and
+   idle waits detect removal and report the reason, queue fence values, and
+   available DRED data on the `Rhi` channel. Resource creation, host access,
+   and further submission operations return sticky `DeviceLost` errors;
+   destruction remains available for safe cleanup. DRED settings are
+   process-global, so the backend does not mutate them. It never recreates
+   itself: silently rebuilding would leave every caller-held handle stale but
+   valid-looking.
 
 ## Consequences
 
@@ -135,8 +138,13 @@ resource.
 - The phase lands in the seven increments the design note lists, each with its
   own test and its own commit; the roadmap checkbox waits for the leak-report
   and timings evidence the done-when line asks for.
-- `docs/debugging.md` lands with increment 4, when names and markers exist for it
-  to describe.
+- `docs/debugging.md` describes the marker implementation: owner-approved
+  native D3D12 event calls isolated in `GpuMarker`, enabled in Debug/Profile and
+  no-op in Release/Shipping. The implementation uses no external runtime.
+  Microsoft's documented recommendation is WinPixEventRuntime; the project
+  intentionally keeps that dependency out. PIX and RenderDoc captures confirm
+  the nested pass labels and blue presented frame. The raw point-marker API is
+  covered by RHI tests and is not exposed as a separate visible PIX event.
 - Phase 20 consumes `MemoryLifetime::Transient` and the allocator's statistics;
   if the graph needs an allocation API the RHI does not have, that is a
   follow-up ADR rather than a field added quietly.

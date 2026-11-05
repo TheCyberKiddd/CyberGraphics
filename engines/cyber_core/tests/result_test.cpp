@@ -149,6 +149,7 @@ CG_TEST(error_code_names)
     CG_EXPECT_STREQ(cyber::core::ErrorCodeName(ErrorCode::ParseError), "parse_error");
     CG_EXPECT_STREQ(cyber::core::ErrorCodeName(ErrorCode::Overflow), "overflow");
     CG_EXPECT_STREQ(cyber::core::ErrorCodeName(ErrorCode::Internal), "internal");
+    CG_EXPECT_STREQ(cyber::core::ErrorCodeName(ErrorCode::DeviceLost), "device_lost");
     CG_EXPECT_TRUE(cyber::core::IsOk(ErrorCode::Ok));
     CG_EXPECT_FALSE(cyber::core::IsOk(ErrorCode::Internal));
 }

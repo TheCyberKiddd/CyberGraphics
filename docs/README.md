@@ -20,6 +20,7 @@ a phase actually works.
 | [math-conventions.md](math-conventions.md) | Handedness, matrices, depth, units, color. |
 | [coding-standard.md](coding-standard.md) | Naming, headers, ownership, style. |
 | [glossary.md](glossary.md) | Terms used in code and docs. |
+| [debugging.md](debugging.md) | D3D12 validation, object labels, and PIX/RenderDoc capture notes. |
 
 ## Working documents
 
@@ -30,6 +31,7 @@ a phase actually works.
 | [adr/](adr/) | Architecture decision records. |
 | [notes/](notes/) | Reading notes and sources for each phase. |
 | [reports/](reports/) | Phase reports with evidence for the done-when line. |
+| [graphics/PHASE_15.md](graphics/PHASE_15.md) | Phase 15 implementation summary and capture status. |
 | [specs/](specs/) | RHI, shader language, and asset format specifications. |
 | [testing/](testing/) | Test layers, golden images, sanitizers, and CI gates. |
 | [perf/](perf/) | Performance log and budgets. |

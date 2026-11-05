@@ -1536,6 +1536,52 @@ Status<Error> WrDestroySwapChain(void* internal, SwapChainHandle swapchain) noex
     return device->real->destroySwapChain(device->realInternal, swapchain);
 }
 
+ObjectNameInfo WrObjectName(const void* internal, const ObjectRef& object) noexcept
+{
+    const auto* device = static_cast<const ValidatingDevice*>(internal);
+    CG_ASSERT(device != nullptr && device->real != nullptr);
+    return device->real->objectName(device->realInternal, object);
+}
+
+Status<Error> WrCreateTimestampQueryHeap(void* internal, const TimestampQueryHeapDesc& desc,
+                                         TimestampQueryHeapHandle* out) noexcept
+{
+    const auto* device = static_cast<const ValidatingDevice*>(internal);
+    CG_ASSERT(device != nullptr && device->real != nullptr);
+    return device->real->createTimestampQueryHeap(device->realInternal, desc, out);
+}
+
+Status<Error> WrDestroyTimestampQueryHeap(void* internal, TimestampQueryHeapHandle heap) noexcept
+{
+    const auto* device = static_cast<const ValidatingDevice*>(internal);
+    CG_ASSERT(device != nullptr && device->real != nullptr);
+    return device->real->destroyTimestampQueryHeap(device->realInternal, heap);
+}
+
+Status<Error> WrReadTimestamps(void* internal, TimestampQueryHeapHandle heap, u32 firstQuery,
+                               u32 queryCount, FenceHandle completionFence, u64 completionValue,
+                               memory::Span<u64> out) noexcept
+{
+    auto* device = static_cast<ValidatingDevice*>(internal);
+    CG_ASSERT(device != nullptr && device->real != nullptr);
+    return device->real->readTimestamps(device->realInternal, heap, firstQuery, queryCount,
+                                        completionFence, completionValue, out);
+}
+
+u64 WrTimestampFrequency(const void* internal, QueueKind queue) noexcept
+{
+    const auto* device = static_cast<const ValidatingDevice*>(internal);
+    CG_ASSERT(device != nullptr && device->real != nullptr);
+    return device->real->timestampFrequency(device->realInternal, queue);
+}
+
+u32 WrReportLeaks(const void* internal) noexcept
+{
+    const auto* device = static_cast<const ValidatingDevice*>(internal);
+    CG_ASSERT(device != nullptr && device->real != nullptr);
+    return device->real->reportLeaks(device->realInternal);
+}
+
 // The wrapper's own per-device table, forwarding to the backend the wrapper
 // wraps. Static lifetime so `Device::Release` can keep using it while other
 // devices exist.
@@ -1548,6 +1594,11 @@ const DeviceInterface kValidatingDeviceInterface = {
     &WrSignalFence,
     &WrWaitFence,
     &WrFenceValue,
+    &WrCreateTimestampQueryHeap,
+    &WrDestroyTimestampQueryHeap,
+    &WrReadTimestamps,
+    &WrTimestampFrequency,
+    &WrReportLeaks,
     &WrWaitIdle,
     &WrCreateBuffer,
     &WrDestroyBuffer,
@@ -1589,6 +1640,7 @@ const DeviceInterface kValidatingDeviceInterface = {
     &WrSubmissionInfo,
     &WrCreateSwapChain,
     &WrDestroySwapChain,
+    &WrObjectName,
 };
 
 // ---------------------------------------------------------------------------
@@ -1918,6 +1970,29 @@ Status<Error> WrListEndDebugLabel(void* internal) noexcept
     return list->real->endDebugLabel(list->realInternal);
 }
 
+Status<Error> WrListSetDebugMarker(void* internal, const char* label) noexcept
+{
+    auto* list = static_cast<TrackedList*>(internal);
+    CG_ASSERT(list != nullptr && list->real != nullptr);
+    return list->real->setDebugMarker(list->realInternal, label);
+}
+
+Status<Error> WrListWriteTimestamp(void* internal, TimestampQueryHeapHandle heap,
+                                   u32 queryIndex) noexcept
+{
+    auto* list = static_cast<TrackedList*>(internal);
+    CG_ASSERT(list != nullptr && list->real != nullptr);
+    return list->real->writeTimestamp(list->realInternal, heap, queryIndex);
+}
+
+Status<Error> WrListResolveTimestamps(void* internal, TimestampQueryHeapHandle heap, u32 firstQuery,
+                                      u32 queryCount) noexcept
+{
+    auto* list = static_cast<TrackedList*>(internal);
+    CG_ASSERT(list != nullptr && list->real != nullptr);
+    return list->real->resolveTimestamps(list->realInternal, heap, firstQuery, queryCount);
+}
+
 RenderPassInfo WrListCurrentRenderPass(const void* internal) noexcept
 {
     const auto* list = static_cast<const TrackedList*>(internal);
@@ -1962,6 +2037,9 @@ const CommandListInterface kValidatingListInterface = {
     &WrListPushConstants,
     &WrListBeginDebugLabel,
     &WrListEndDebugLabel,
+    &WrListSetDebugMarker,
+    &WrListWriteTimestamp,
+    &WrListResolveTimestamps,
     &WrListCurrentRenderPass,
     &WrListStats,
 };
@@ -2019,6 +2097,11 @@ void DestroyValidatingDevice(void* internal) noexcept
     if (real != nullptr && real->waitIdle != nullptr)
     {
         (void)real->waitIdle(realInternal);
+    }
+    if (device->level == ValidationLevel::Exhaustive && real != nullptr &&
+        real->reportLeaks != nullptr)
+    {
+        (void)real->reportLeaks(realInternal);
     }
     if (backend != nullptr && backend->destroyDevice != nullptr)
     {

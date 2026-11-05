@@ -13,6 +13,7 @@ set(CYBER_RHI_SOURCES
     src/d3d12/d3d12_swapchain.cpp
     src/d3d12/d3d12_resources.cpp
     src/d3d12/d3d12_textures.cpp
+    src/d3d12/gpu_markers.cpp
     src/d3d12/gpu_allocator.cpp
     src/device.cpp
     src/frame_ring.cpp
@@ -58,6 +59,11 @@ cyber_add_module(
     SOURCES ${CYBER_RHI_SOURCES}
     PUBLIC_HEADERS ${CYBER_RHI_HEADERS}
     DEPENDS core memory
+)
+
+target_compile_definitions(cyber_rhi PRIVATE
+    "$<$<CONFIG:Debug>:CYBER_GPU_MARKERS=1>"
+    "$<$<CONFIG:RelWithDebInfo>:CYBER_GPU_MARKERS=1>"
 )
 
 if(CYBER_RHI_ENABLE_D3D12)
@@ -218,6 +224,13 @@ cyber_add_test(
 )
 
 if(CYBER_RHI_ENABLE_D3D12)
+    # A standalone native probe separates adapter/runtime failures from RHI
+    # initialization without loading or changing the renderer backend.
+    add_executable(cyber_rhi_d3d12_probe EXCLUDE_FROM_ALL tests/d3d12_device_probe.cpp)
+    target_compile_features(cyber_rhi_d3d12_probe PRIVATE cxx_std_20)
+    target_link_libraries(cyber_rhi_d3d12_probe PRIVATE d3d12 dxgi)
+    cyber_apply_warnings(cyber_rhi_d3d12_probe)
+
     # The adapter layer is the one part of the D3D12 backend that runs on any
     # Windows machine: WARP is always present, so CI exercises it without a GPU.
     cyber_add_test(
@@ -228,6 +241,11 @@ if(CYBER_RHI_ENABLE_D3D12)
     cyber_add_test(
         NAME rhi_d3d12_device
         SOURCES tests/d3d12_device_test.cpp
+        DEPENDS rhi memory
+    )
+    cyber_add_test(
+        NAME rhi_device_lost
+        SOURCES tests/device_lost_test.cpp
         DEPENDS rhi memory
     )
     cyber_add_test(
@@ -258,4 +276,23 @@ if(CYBER_RHI_ENABLE_D3D12)
         SOURCES tests/gpu_memory_test.cpp
         DEPENDS rhi memory
     )
+    cyber_add_test(
+        NAME rhi_timestamps
+        SOURCES tests/timestamps_test.cpp
+        DEPENDS rhi memory
+    )
 endif()
+
+# Names are read back from D3D12; marker ordering is tested on the validation
+# backend and native marker support is checked against the active build mode.
+cyber_add_test(
+    NAME rhi_debug_markers
+    SOURCES tests/debug_markers_test.cpp
+    DEPENDS rhi memory
+)
+
+cyber_add_test(
+    NAME rhi_leak_report
+    SOURCES tests/leak_report_test.cpp
+    DEPENDS rhi memory
+)

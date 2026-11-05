@@ -116,6 +116,22 @@ tests pass in debug; the design is ADR 0013.
   backend compiles out entirely when `CYBER_RHI_ENABLE_D3D12` is off. 81 tests
   pass in every preset; the design is ADR 0017 and the evidence is the Phase 14
   report.
+- Phase 15: GPU memory and debug tooling. `cyber_rhi` suballocates D3D12 heaps,
+  validates RHI state and lifetime rules, names objects, emits native pass and
+  point markers in Debug/Profile, reads back GPU timestamps after fences,
+  reports named leaks, and preserves device-loss diagnostics. No PIX runtime or
+  other third-party renderer dependency is linked. The blue-clear marker sample
+  is in `samples/05_d3d12_markers/`. Debug, Profile, Release, Shipping, and
+  ASan suites pass 87/87. The Intel HD Graphics 530 RTV heap-kind bug is fixed;
+  the sample now submits and presents, and the fresh RenderDoc and PIX captures
+  confirm the nested `Clear Pass` and `Clear backbuffer` labels and the blue
+  presented frame. See the [Phase 15 report](docs/reports/phase-15.md).
+- Phase 16 is complete. `cyber_shaders` parses a small typed Cyber shader
+  language, reports source locations, and emits HLSL; the D3D12 textured cube
+  comparison uses the generated vertex and pixel shaders. Debug, Release, and
+  ASan pass 88/88, and the repository-wide formatting gate passes. This is
+  shader-tooling progress, not a photorealistic renderer. See the
+  [Phase 16 report](docs/reports/phase-16.md).
 
 See [engines/MODULES.md](engines/MODULES.md) for the module index and
 [docs/architecture/overview.md](docs/architecture/overview.md) for the design.

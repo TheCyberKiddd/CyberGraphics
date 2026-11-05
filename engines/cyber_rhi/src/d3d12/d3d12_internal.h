@@ -4,6 +4,7 @@
 
 #include "d3d12_com.h"
 #include "gpu_allocator.h"
+#include "gpu_markers.h"
 
 #include <cyber/core/error.h>
 #include <cyber/core/result.h>
@@ -18,6 +19,7 @@
 #include <cyber/rhi/sampler.h>
 #include <cyber/rhi/texture.h>
 
+#include <atomic>
 #include <condition_variable>
 #include <mutex>
 
@@ -54,12 +56,27 @@ struct D3D12FenceSlot
     u32 generation = 0;
 };
 
+struct D3D12TimestampQueryHeapSlot
+{
+    ID3D12QueryHeap* queries = nullptr;
+    ID3D12Resource* readback = nullptr;
+    void* mapped = nullptr;
+    TimestampQueryHeapDesc desc{};
+    u64 readbackBytes = 0;
+    ID3D12Heap* heap = nullptr;
+    u64 heapOffset = 0;
+    u64 reservedBytes = 0;
+    bool dedicated = false;
+    bool alive = false;
+    u32 generation = 0;
+};
+
 struct D3D12Queue
 {
     ID3D12CommandQueue* queue = nullptr;
     D3D12_COMMAND_LIST_TYPE type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-    u64 signalled = 0;
-    u64 submissions = 0;
+    std::atomic<u64> signalled{0};
+    std::atomic<u64> submissions{0};
     // What the last accepted batch contained, for `submissionInfo`.
     SubmissionInfo last{};
 };
@@ -248,6 +265,7 @@ struct D3D12CommandListSlot
     bool passOpen = false;
     // Depth of open debug labels, so `end` can refuse an unbalanced list.
     u32 labelDepth = 0;
+    GpuMarkerScope markers[kMaxGpuMarkerDepth]{};
     PipelineHandle pipeline{};
     PipelineKind pipelineKind = PipelineKind::Graphics;
     PipelineLayoutHandle layout{};
@@ -277,6 +295,10 @@ struct D3D12SwapChainSlot
     u32 width = 0;
     u32 height = 0;
     u32 imageCount = 0;
+    // Borrowed label from the description, kept so each image is named after
+    // the surface it belongs to. The caller keeps it alive for the
+    // swapchain's lifetime, the same contract every other label states.
+    const char* label = nullptr;
     PresentMode presentMode = PresentMode::Fifo;
     // Presented before the surface can be presented without tearing.
     bool allowsTearing = false;
@@ -292,13 +314,14 @@ struct D3D12SwapChainSlot
 struct D3D12Device
 {
     explicit D3D12Device(memory::Allocator& allocator) noexcept
-        : fences(allocator), freeFenceSlots(allocator), buffers(allocator),
-          freeBufferSlots(allocator), textures(allocator), freeTextureSlots(allocator),
-          views(allocator), freeViewSlots(allocator), samplers(allocator),
-          freeSamplerSlots(allocator), shaders(allocator), freeShaderSlots(allocator),
-          layouts(allocator), freeLayoutSlots(allocator), groups(allocator),
-          freeGroupSlots(allocator), pipelineLayouts(allocator), freePipelineLayoutSlots(allocator),
-          pipelines(allocator), freePipelineSlots(allocator), pipelineCaches(allocator),
+        : fences(allocator), freeFenceSlots(allocator), timestampQueryHeaps(allocator),
+          freeTimestampQueryHeaps(allocator), buffers(allocator), freeBufferSlots(allocator),
+          textures(allocator), freeTextureSlots(allocator), views(allocator),
+          freeViewSlots(allocator), samplers(allocator), freeSamplerSlots(allocator),
+          shaders(allocator), freeShaderSlots(allocator), layouts(allocator),
+          freeLayoutSlots(allocator), groups(allocator), freeGroupSlots(allocator),
+          pipelineLayouts(allocator), freePipelineLayoutSlots(allocator), pipelines(allocator),
+          freePipelineSlots(allocator), pipelineCaches(allocator),
           freePipelineCacheSlots(allocator), commandLists(allocator),
           freeCommandListSlots(allocator), swapChains(allocator), freeSwapChainSlots(allocator),
           deferredReclaims(allocator), memory(allocator)
@@ -319,6 +342,8 @@ struct D3D12Device
 
     DynamicArray<D3D12FenceSlot> fences;
     DynamicArray<u32> freeFenceSlots;
+    DynamicArray<D3D12TimestampQueryHeapSlot> timestampQueryHeaps;
+    DynamicArray<u32> freeTimestampQueryHeaps;
     DynamicArray<D3D12BufferSlot> buffers;
     DynamicArray<u32> freeBufferSlots;
     DynamicArray<D3D12TextureSlot> textures;
@@ -368,6 +393,7 @@ struct D3D12Device
 
     memory::Allocator* allocator = nullptr;
     u64 fenceSignals = 0;
+    std::atomic<HRESULT> deviceLostReason{S_OK};
     mutable std::mutex mutex;
     std::condition_variable condition;
 
@@ -402,8 +428,13 @@ struct D3D12Device
     d3d12::GpuHeapAllocator memory;
 };
 
+[[nodiscard]] Status<Error> DeviceLostStatus(const D3D12Device& device) noexcept;
+[[nodiscard]] Status<Error> DetectDeviceLost(D3D12Device& device, HRESULT operationResult) noexcept;
+
 // Slot resolution. Every one returns null for a stale or default handle.
 [[nodiscard]] D3D12FenceSlot* Resolve(D3D12Device& device, FenceHandle handle) noexcept;
+[[nodiscard]] D3D12TimestampQueryHeapSlot* Resolve(D3D12Device& device,
+                                                   TimestampQueryHeapHandle handle) noexcept;
 [[nodiscard]] D3D12BufferSlot* Resolve(D3D12Device& device, BufferHandle handle) noexcept;
 [[nodiscard]] D3D12TextureSlot* Resolve(D3D12Device& device, TextureHandle handle) noexcept;
 [[nodiscard]] D3D12ViewSlot* Resolve(D3D12Device& device, TextureViewHandle handle) noexcept;
@@ -497,6 +528,20 @@ void FlushTransientReclaims(D3D12Device& device) noexcept;
 [[nodiscard]] Status<Error> D3D12Transition(void* internal,
                                             memory::Span<const BufferBarrier> buffers,
                                             memory::Span<const TextureBarrier> textures) noexcept;
+[[nodiscard]] ObjectNameInfo D3D12DeviceObjectName(const void* internal,
+                                                   const ObjectRef& object) noexcept;
+[[nodiscard]] Status<Error> D3D12CreateTimestampQueryHeap(void* internal,
+                                                          const TimestampQueryHeapDesc& desc,
+                                                          TimestampQueryHeapHandle* out) noexcept;
+[[nodiscard]] Status<Error> D3D12DestroyTimestampQueryHeap(void* internal,
+                                                           TimestampQueryHeapHandle heap) noexcept;
+[[nodiscard]] Status<Error> D3D12ReadTimestamps(void* internal, TimestampQueryHeapHandle heap,
+                                                u32 firstQuery, u32 queryCount,
+                                                FenceHandle completionFence, u64 completionValue,
+                                                memory::Span<u64> out) noexcept;
+[[nodiscard]] u64 D3D12TimestampFrequency(const void* internal, QueueKind queue) noexcept;
+[[nodiscard]] u32 D3D12ReportLeaks(const void* internal) noexcept;
+void ReleaseTimestampQueryHeaps(D3D12Device& device) noexcept;
 
 // Shader, binding, and pipeline-layout entries, implemented in
 // `d3d12_binding.cpp`.

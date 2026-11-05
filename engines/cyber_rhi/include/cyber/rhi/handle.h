@@ -58,6 +58,9 @@ struct PipelineCacheTag
 struct FenceTag
 {
 };
+struct TimestampQueryHeapTag
+{
+};
 struct SwapChainTag
 {
 };
@@ -92,6 +95,8 @@ using PipelineLayoutHandle = memory::Handle<PipelineLayoutTag>;
 using PipelineCacheHandle = memory::Handle<PipelineCacheTag>;
 // A monotonic 64-bit timeline the CPU and GPU can wait on.
 using FenceHandle = memory::Handle<FenceTag>;
+// A set of timestamp query slots owned by one device (Phase 15).
+using TimestampQueryHeapHandle = memory::Handle<TimestampQueryHeapTag>;
 // A ring of presentable images owned by the device and backed by a surface the
 // caller owns (Phase 13).
 using SwapChainHandle = memory::Handle<SwapChainTag>;

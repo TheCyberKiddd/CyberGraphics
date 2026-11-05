@@ -13,6 +13,7 @@
 
 #include "validation.h"
 
+#include <cyber/core/log.h>
 #include <cyber/memory/alignment.h>
 #include <cyber/memory/dynamic_array.h>
 #include <cyber/memory/slot_map.h>
@@ -488,6 +489,69 @@ MemoryStats NullMemoryStats(const void* internal) noexcept
     return MemoryStats{};
 }
 
+Status<Error> NullCreateTimestampQueryHeap(void*, const TimestampQueryHeapDesc&,
+                                           TimestampQueryHeapHandle*) noexcept
+{
+    return StatusError(ErrorCode::Unsupported, "null backend: timestamp queries are not supported");
+}
+
+Status<Error> NullDestroyTimestampQueryHeap(void*, TimestampQueryHeapHandle) noexcept
+{
+    return StatusError(ErrorCode::Unsupported, "null backend: timestamp queries are not supported");
+}
+
+Status<Error> NullReadTimestamps(void*, TimestampQueryHeapHandle, u32, u32, FenceHandle, u64,
+                                 memory::Span<u64>) noexcept
+{
+    return StatusError(ErrorCode::Unsupported, "null backend: timestamp queries are not supported");
+}
+
+u64 NullTimestampFrequency(const void*, QueueKind) noexcept
+{
+    return 0;
+}
+
+u32 NullReportLeaks(const void* internal) noexcept
+{
+    if (internal == nullptr)
+    {
+        return 0;
+    }
+
+    const auto& device = *static_cast<const NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+    u32 count = 0;
+    device.buffers.ForEach(
+        [&count](BufferHandle handle, const NullBuffer& buffer) noexcept
+        {
+            if (count != UINT32_MAX)
+            {
+                ++count;
+            }
+            CG_LOG(Warning, Rhi, "live buffer %u generation %u: %s (%llu bytes)", handle.index,
+                   handle.generation,
+                   buffer.desc.label != nullptr && buffer.desc.label[0] != '\0' ? buffer.desc.label
+                                                                                : "unlabelled",
+                   static_cast<unsigned long long>(buffer.desc.sizeBytes));
+        });
+    device.textures.ForEach(
+        [&count](TextureHandle handle, const NullTexture& texture) noexcept
+        {
+            if (count != UINT32_MAX)
+            {
+                ++count;
+            }
+            CG_LOG(Warning, Rhi, "live texture %u generation %u: %s (%ux%u)", handle.index,
+                   handle.generation,
+                   texture.desc.label != nullptr && texture.desc.label[0] != '\0'
+                       ? texture.desc.label
+                       : "unlabelled",
+                   texture.desc.width, texture.desc.height);
+        });
+    CG_LOG(Info, Rhi, "null backend: %u live resources", count);
+    return count;
+}
+
 QueueHandle NullQueue(const void* internal, QueueKind kind) noexcept
 {
     if (internal == nullptr)
@@ -664,6 +728,85 @@ u64 NullFenceValue(const void* internal, FenceHandle handle) noexcept
     const std::lock_guard<std::mutex> lock(device.mutex);
     const NullFenceSlot* slot = ResolveFence(device, handle);
     return slot != nullptr ? slot->value : 0;
+}
+
+// ----------------------------------------------------------------------------
+// Debug names
+// ----------------------------------------------------------------------------
+
+// Copies a borrowed label into an `ObjectNameInfo`'s fixed buffer, truncating
+// at the buffer, and marks the info named. Shared shape of every read-back
+// implementation in this file and its backend peers.
+void FillNameFromLabel(ObjectNameInfo& info, const char* label) noexcept
+{
+    u32 length = 0;
+    while (label[length] != '\0' && length < sizeof(info.name) - 1)
+    {
+        info.name[length] = label[length];
+        ++length;
+    }
+    info.name[length] = '\0';
+    info.length = length;
+    info.named = true;
+}
+
+// The validation backend has no driver, so the name it reports is the label a
+// caller gave the object and the descriptor keeps, which is one more way a
+// creation-time mistake shows up. A kind whose descriptor label this backend
+// does not retain (a shader, a group, a layout, a pipeline, a cache, a fence)
+// answers `named == false`, the same answer an unnamed object gets.
+ObjectNameInfo NullObjectName(const void* internal, const ObjectRef& object) noexcept
+{
+    ObjectNameInfo info;
+    if (internal == nullptr)
+    {
+        return info;
+    }
+    const auto& device = *static_cast<const NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    const char* label = nullptr;
+    switch (object.kind)
+    {
+    case ObjectKind::Buffer:
+    {
+        const NullBuffer* slot = device.buffers.Get(UnpackHandle<BufferTag>(object.packed));
+        label = slot != nullptr ? slot->desc.label : nullptr;
+        break;
+    }
+    case ObjectKind::Texture:
+    {
+        const NullTexture* slot = device.textures.Get(UnpackHandle<TextureTag>(object.packed));
+        label = slot != nullptr ? slot->desc.label : nullptr;
+        break;
+    }
+    case ObjectKind::TextureView:
+    {
+        const NullView* slot = device.views.Get(UnpackHandle<TextureViewTag>(object.packed));
+        label = slot != nullptr ? slot->desc.label : nullptr;
+        break;
+    }
+    case ObjectKind::Sampler:
+    {
+        const NullSampler* slot = device.samplers.Get(UnpackHandle<SamplerTag>(object.packed));
+        label = slot != nullptr ? slot->desc.label : nullptr;
+        break;
+    }
+    case ObjectKind::CommandList:
+    {
+        const NullCommandList* const* slot =
+            device.commandLists.Get(UnpackHandle<CommandListTag>(object.packed));
+        label = slot != nullptr && *slot != nullptr ? (*slot)->desc.label : nullptr;
+        break;
+    }
+    default:
+        break;
+    }
+    if (label != nullptr && label[0] != '\0')
+    {
+        FillNameFromLabel(info, label);
+    }
+    return info;
 }
 
 Status<Error> NullWaitIdle(void* internal) noexcept
@@ -4081,6 +4224,36 @@ Status<Error> NullCmdEndDebugLabel(void* internal) noexcept
     return Status<Error>::Ok();
 }
 
+Status<Error> NullCmdSetDebugMarker(void* internal, const char* label) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: list is null");
+    }
+    auto& list = *static_cast<NullCommandList*>(internal);
+    const Status<Error> recording = RequireRecording(list);
+    if (!recording)
+    {
+        return recording;
+    }
+    if (label == nullptr || label[0] == '\0')
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: a debug marker needs a non-empty name");
+    }
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullCmdWriteTimestamp(void*, TimestampQueryHeapHandle, u32) noexcept
+{
+    return StatusError(ErrorCode::Unsupported, "null backend: timestamp queries are not supported");
+}
+
+Status<Error> NullCmdResolveTimestamps(void*, TimestampQueryHeapHandle, u32, u32) noexcept
+{
+    return StatusError(ErrorCode::Unsupported, "null backend: timestamp queries are not supported");
+}
+
 RenderPassInfo NullCmdCurrentRenderPass(const void* internal) noexcept
 {
     if (internal == nullptr)
@@ -4667,6 +4840,11 @@ void NullDestroyDevice(void* internal) noexcept
         interface.signalFence = &NullSignalFence;
         interface.waitFence = &NullWaitFence;
         interface.fenceValue = &NullFenceValue;
+        interface.createTimestampQueryHeap = &NullCreateTimestampQueryHeap;
+        interface.destroyTimestampQueryHeap = &NullDestroyTimestampQueryHeap;
+        interface.readTimestamps = &NullReadTimestamps;
+        interface.timestampFrequency = &NullTimestampFrequency;
+        interface.reportLeaks = &NullReportLeaks;
         interface.waitIdle = &NullWaitIdle;
         interface.createBuffer = &NullCreateBuffer;
         interface.destroyBuffer = &NullDestroyBuffer;
@@ -4708,6 +4886,7 @@ void NullDestroyDevice(void* internal) noexcept
         interface.submissionInfo = &NullSubmissionInfo;
         interface.createSwapChain = &NullCreateSwapChain;
         interface.destroySwapChain = &NullDestroySwapChain;
+        interface.objectName = &NullObjectName;
         return interface;
     }();
     return &kInterface;
@@ -4745,6 +4924,9 @@ void NullDestroyDevice(void* internal) noexcept
         interface.pushConstants = &NullCmdPushConstants;
         interface.beginDebugLabel = &NullCmdBeginDebugLabel;
         interface.endDebugLabel = &NullCmdEndDebugLabel;
+        interface.setDebugMarker = &NullCmdSetDebugMarker;
+        interface.writeTimestamp = &NullCmdWriteTimestamp;
+        interface.resolveTimestamps = &NullCmdResolveTimestamps;
         interface.currentRenderPass = &NullCmdCurrentRenderPass;
         interface.stats = &NullCmdStats;
         return interface;

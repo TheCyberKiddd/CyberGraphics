@@ -2,7 +2,10 @@
 
 #if defined(CYBER_RHI_HAS_D3D12)
 
+#include <cyber/core/log.h>
 #include <cyber/rhi/swapchain.h>
+
+#include <cstdio>
 
 namespace cyber::rhi::detail
 {
@@ -28,10 +31,10 @@ using cyber::memory::kInvalidHandleIndex;
     return next == 0 ? 1 : next;
 }
 
-[[nodiscard]] D3D12_CPU_DESCRIPTOR_HANDLE CpuViewHandle(D3D12Device& device, u32 index) noexcept
+[[nodiscard]] D3D12_CPU_DESCRIPTOR_HANDLE CpuRtvHandle(D3D12Device& device, u32 index) noexcept
 {
-    D3D12_CPU_DESCRIPTOR_HANDLE handle = device.viewHeap->GetCPUDescriptorHandleForHeapStart();
-    handle.ptr += static_cast<SIZE_T>(index) * device.viewDescriptorSize;
+    D3D12_CPU_DESCRIPTOR_HANDLE handle = device.rtvHeap->GetCPUDescriptorHandleForHeapStart();
+    handle.ptr += static_cast<SIZE_T>(index) * device.rtvDescriptorSize;
     return handle;
 }
 
@@ -127,6 +130,21 @@ void ReleaseImages(D3D12Device& device, D3D12SwapChainSlot& slot) noexcept
     texture.desc.arrayLayers = 1;
     texture.desc.mipLevels = 1;
     texture.desc.sampleCount = 1;
+    // Every image gets a name the presentable surface itself is the origin of:
+    // a capture shows them grouped, and a leak report names what would be
+    // leaked instead of a bare texture index.
+    {
+        char imageName[96];
+        if (slot.label != nullptr && slot.label[0] != '\0')
+        {
+            std::snprintf(imageName, sizeof(imageName), "%.64s image %u", slot.label, imageIndex);
+        }
+        else
+        {
+            std::snprintf(imageName, sizeof(imageName), "swapchain image %u", imageIndex);
+        }
+        NameObject(resource, imageName);
+    }
     for (u32 subresource = 0; subresource < kMaxTrackedSubresources; ++subresource)
     {
         texture.states[subresource] = ResourceState::Present;
@@ -151,18 +169,18 @@ void ReleaseImages(D3D12Device& device, D3D12SwapChainSlot& slot) noexcept
         viewIndex = static_cast<u32>(device.views.Size() - 1);
     }
 
-    const u32 descriptorIndex = device.viewDescriptorsUsed;
-    if (descriptorIndex >= D3D12_MAX_SHADER_VISIBLE_DESCRIPTOR_HEAP_SIZE_TIER_1)
+    const u32 descriptorIndex = device.rtvDescriptorsUsed;
+    if (descriptorIndex >= kAttachmentDescriptors)
     {
         return StatusError(ErrorCode::OutOfRange,
-                           "d3d12 backend: shader-visible descriptor heap is full");
+                           "d3d12 backend: render-target descriptor heap is full");
     }
     D3D12_RENDER_TARGET_VIEW_DESC viewDesc{};
     viewDesc.Format = ToDxgiFormat(slot.format);
     viewDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
     device.device->CreateRenderTargetView(resource, &viewDesc,
-                                          CpuViewHandle(device, descriptorIndex));
-    device.viewDescriptorsUsed = descriptorIndex + 1;
+                                          CpuRtvHandle(device, descriptorIndex));
+    device.rtvDescriptorsUsed = descriptorIndex + 1;
 
     D3D12ViewSlot& view = device.views[viewIndex];
     view.generation = NextGeneration(view.generation);
@@ -170,6 +188,7 @@ void ReleaseImages(D3D12Device& device, D3D12SwapChainSlot& slot) noexcept
     view.texture = TextureHandle{};
     view.texture.index = textureIndex;
     view.texture.generation = texture.generation;
+    view.heap = DescriptorHeapKind::RenderTarget;
     view.desc = TextureViewDesc{};
     view.desc.texture = view.texture;
     view.desc.format = slot.format;
@@ -228,6 +247,11 @@ Status<Error> AcquireNextImage(void* internal, SwapChainFrame* out) noexcept
     }
     auto& slot = *static_cast<D3D12SwapChainSlot*>(internal);
     auto& device = *static_cast<D3D12Device*>(slot.device);
+    const Status<Error> healthy = DeviceLostStatus(device);
+    if (!healthy)
+    {
+        return healthy;
+    }
     const std::lock_guard<std::mutex> lock(device.mutex);
     if (slot.swapChain == nullptr)
     {
@@ -262,6 +286,11 @@ Status<Error> Present(void* internal) noexcept
     }
     auto& slot = *static_cast<D3D12SwapChainSlot*>(internal);
     auto& device = *static_cast<D3D12Device*>(slot.device);
+    const Status<Error> healthy = DeviceLostStatus(device);
+    if (!healthy)
+    {
+        return healthy;
+    }
     const std::lock_guard<std::mutex> lock(device.mutex);
     if (slot.swapChain == nullptr)
     {
@@ -288,6 +317,11 @@ Status<Error> Present(void* internal) noexcept
     }
     if (FAILED(presented))
     {
+        const Status<Error> lost = DetectDeviceLost(device, presented);
+        if (!lost)
+        {
+            return lost;
+        }
         return StatusError(ErrorCode::NotFound, "d3d12 backend: present failed");
     }
 
@@ -315,6 +349,11 @@ Status<Error> Resize(void* internal, u32 width, u32 height) noexcept
     }
     auto& slot = *static_cast<D3D12SwapChainSlot*>(internal);
     auto& device = *static_cast<D3D12Device*>(slot.device);
+    const Status<Error> healthy = DeviceLostStatus(device);
+    if (!healthy)
+    {
+        return healthy;
+    }
     const std::lock_guard<std::mutex> lock(device.mutex);
     if (slot.swapChain == nullptr)
     {
@@ -395,6 +434,11 @@ Status<Error> D3D12CreateSwapChain(void* internal, const SwapChainDesc& desc, Sw
     }
 
     auto& device = *static_cast<D3D12Device*>(internal);
+    const Status<Error> healthy = DeviceLostStatus(device);
+    if (!healthy)
+    {
+        return healthy;
+    }
     const std::lock_guard<std::mutex> lock(device.mutex);
     if (device.queues[static_cast<u32>(QueueKind::Graphics)].queue == nullptr)
     {
@@ -455,6 +499,8 @@ Status<Error> D3D12CreateSwapChain(void* internal, const SwapChainDesc& desc, Sw
     created.Attach(createdPointer);
     if (FAILED(result) || !created.IsValid())
     {
+        CG_LOG(Error, Rhi, "d3d12 backend: CreateSwapChainForHwnd failed with HRESULT 0x%08lX",
+               static_cast<unsigned long>(result));
         return StatusError(ErrorCode::Internal, "d3d12 backend: swapchain creation failed");
     }
     // Alt+Enter belongs to the application's window policy, not to the renderer.
@@ -495,6 +541,7 @@ Status<Error> D3D12CreateSwapChain(void* internal, const SwapChainDesc& desc, Sw
     slot.imageCount = desc.imageCount;
     slot.presentMode = desc.presentMode;
     slot.allowsTearing = allowsTearing;
+    slot.label = desc.label;
     slot.acquired = false;
     slot.currentImage = 0;
     slot.presents = 0;

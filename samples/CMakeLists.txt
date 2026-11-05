@@ -6,3 +6,7 @@ add_subdirectory(01_gradient)
 add_subdirectory(02_raster)
 add_subdirectory(03_depth)
 add_subdirectory(04_textured)
+
+if(CYBER_RHI_ENABLE_D3D12)
+    add_subdirectory(05_d3d12_markers)
+endif()

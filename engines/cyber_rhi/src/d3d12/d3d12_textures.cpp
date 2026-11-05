@@ -192,6 +192,11 @@ Status<Error> D3D12CreateTexture(void* internal, const TextureDesc& desc,
     }
 
     auto& device = *static_cast<D3D12Device*>(internal);
+    const Status<Error> healthy = DeviceLostStatus(device);
+    if (!healthy)
+    {
+        return healthy;
+    }
     const std::lock_guard<std::mutex> lock(device.mutex);
 
     D3D12_HEAP_PROPERTIES heap{};
@@ -382,6 +387,11 @@ Status<Error> D3D12CreateTextureView(void* internal, const TextureViewDesc& desc
                            "d3d12 backend: view creation needs a device and an output handle");
     }
     auto& device = *static_cast<D3D12Device*>(internal);
+    const Status<Error> healthy = DeviceLostStatus(device);
+    if (!healthy)
+    {
+        return healthy;
+    }
     const std::lock_guard<std::mutex> lock(device.mutex);
 
     D3D12TextureSlot* texture = Resolve(device, desc.texture);
@@ -548,6 +558,11 @@ Status<Error> D3D12CreateSampler(void* internal, const SamplerDesc& desc,
                            "d3d12 backend: sampler creation needs a device and an output handle");
     }
     auto& device = *static_cast<D3D12Device*>(internal);
+    const Status<Error> healthy = DeviceLostStatus(device);
+    if (!healthy)
+    {
+        return healthy;
+    }
     const std::lock_guard<std::mutex> lock(device.mutex);
 
     const u32 descriptorIndex = device.samplerDescriptorsUsed;
@@ -631,6 +646,11 @@ Status<Error> D3D12Transition(void* internal, cyber::memory::Span<const BufferBa
     }
 
     auto& device = *static_cast<D3D12Device*>(internal);
+    const Status<Error> healthy = DeviceLostStatus(device);
+    if (!healthy)
+    {
+        return healthy;
+    }
     const std::lock_guard<std::mutex> lock(device.mutex);
 
     // Validate the whole batch before touching any state, so a batch with one bad

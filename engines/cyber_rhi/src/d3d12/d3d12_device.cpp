@@ -73,7 +73,18 @@ using cyber::memory::kInvalidHandleIndex;
     features.Add(Feature::Compute);
     features.Add(Feature::TimelineFences);
     features.Add(Feature::AnisotropicFiltering);
+#if defined(CYBER_GPU_MARKERS)
     features.Add(Feature::DebugMarkers);
+#endif
+    u64 timestampFrequency = 0;
+    const D3D12Queue& graphics = device.queues[static_cast<u32>(QueueKind::Graphics)];
+    if (graphics.queue != nullptr &&
+        SUCCEEDED(graphics.queue->GetTimestampFrequency(&timestampFrequency)) &&
+        timestampFrequency != 0)
+    {
+        features.Add(Feature::TimestampQueries);
+    }
+    // Native command-list markers are enabled only in Debug and Profile builds.
 
     D3D12_FEATURE_DATA_D3D12_OPTIONS options{};
     if (device.device != nullptr && SUCCEEDED(device.device->CheckFeatureSupport(
@@ -177,14 +188,24 @@ Status<Error> D3D12CreateFence(void* internal, const FenceDesc& desc, FenceHandl
     }
 
     auto& device = *static_cast<D3D12Device*>(internal);
+    const Status<Error> healthy = DeviceLostStatus(device);
+    if (!healthy)
+    {
+        return healthy;
+    }
     const std::lock_guard<std::mutex> lock(device.mutex);
 
     ID3D12Fence* fence = nullptr;
-    if (FAILED(device.device->CreateFence(desc.initialValue, D3D12_FENCE_FLAG_NONE,
-                                          __uuidof(ID3D12Fence),
-                                          reinterpret_cast<void**>(&fence))) ||
-        fence == nullptr)
+    const HRESULT created =
+        device.device->CreateFence(desc.initialValue, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence),
+                                   reinterpret_cast<void**>(&fence));
+    if (FAILED(created) || fence == nullptr)
     {
+        const Status<Error> lost = DetectDeviceLost(device, created);
+        if (!lost)
+        {
+            return lost;
+        }
         return StatusError(ErrorCode::Internal, "d3d12 backend: fence creation failed");
     }
     NameObject(fence, desc.label);
@@ -272,6 +293,11 @@ Status<Error> D3D12SignalFence(void* internal, FenceHandle handle, u64 value) no
     }
 
     auto& device = *static_cast<D3D12Device*>(internal);
+    const Status<Error> healthy = DeviceLostStatus(device);
+    if (!healthy)
+    {
+        return healthy;
+    }
     ID3D12CommandQueue* queue = nullptr;
     ID3D12Fence* fence = nullptr;
     {
@@ -309,6 +335,11 @@ Status<Error> D3D12SignalFence(void* internal, FenceHandle handle, u64 value) no
         fence->Release();
         if (FAILED(signalled))
         {
+            const Status<Error> lost = DetectDeviceLost(device, signalled);
+            if (!lost)
+            {
+                return lost;
+            }
             return StatusError(ErrorCode::Internal, "d3d12 backend: queue signal failed");
         }
     }
@@ -330,6 +361,11 @@ Status<Error> D3D12WaitFence(void* internal, FenceHandle handle, u64 value,
     }
 
     auto& device = *static_cast<D3D12Device*>(internal);
+    const Status<Error> healthy = DeviceLostStatus(device);
+    if (!healthy)
+    {
+        return healthy;
+    }
     ID3D12Fence* fence = nullptr;
     {
         const std::lock_guard<std::mutex> lock(device.mutex);
@@ -339,7 +375,16 @@ Status<Error> D3D12WaitFence(void* internal, FenceHandle handle, u64 value,
             return StatusError(ErrorCode::InvalidArgument,
                                "d3d12 backend: fence handle is stale or invalid");
         }
-        if (slot->fence->GetCompletedValue() >= value)
+        const u64 completed = slot->fence->GetCompletedValue();
+        if (completed == UINT64_MAX)
+        {
+            const Status<Error> lost = DetectDeviceLost(device, DXGI_ERROR_DEVICE_REMOVED);
+            if (!lost)
+            {
+                return lost;
+            }
+        }
+        if (completed >= value)
         {
             return Status<Error>::Ok();
         }
@@ -363,7 +408,16 @@ Status<Error> D3D12WaitFence(void* internal, FenceHandle handle, u64 value,
         fence->Release();
         return StatusError(ErrorCode::Internal, "d3d12 backend: wait event creation failed");
     }
-    (void)fence->SetEventOnCompletion(value, event);
+    const HRESULT eventResult = fence->SetEventOnCompletion(value, event);
+    if (FAILED(eventResult))
+    {
+        (void)CloseHandle(event);
+        fence->Release();
+        const Status<Error> lost = DetectDeviceLost(device, eventResult);
+        return lost ? StatusError(ErrorCode::Internal,
+                                  "d3d12 backend: fence event registration failed")
+                    : lost;
+    }
 
     DWORD milliseconds = INFINITE;
     if (timeoutNanoseconds != kInfiniteWaitNanoseconds)
@@ -373,18 +427,27 @@ Status<Error> D3D12WaitFence(void* internal, FenceHandle handle, u64 value,
         const u64 rounded = (timeoutNanoseconds + 999'999ULL) / 1'000'000ULL;
         milliseconds = static_cast<DWORD>(rounded == 0 ? 1 : rounded);
     }
-    (void)WaitForSingleObject(event, milliseconds);
+    const DWORD waitResult = WaitForSingleObject(event, milliseconds);
     (void)CloseHandle(event);
 
     Status<Error> result = Status<Error>::Ok();
     {
         const std::lock_guard<std::mutex> lock(device.mutex);
-        if (Resolve(device, handle) == nullptr)
+        const u64 completed = fence->GetCompletedValue();
+        if (completed == UINT64_MAX)
+        {
+            result = DetectDeviceLost(device, DXGI_ERROR_DEVICE_REMOVED);
+        }
+        else if (Resolve(device, handle) == nullptr)
         {
             result = StatusError(ErrorCode::InvalidArgument,
                                  "d3d12 backend: fence was destroyed while waiting");
         }
-        else if (fence->GetCompletedValue() < value)
+        else if (waitResult == WAIT_FAILED)
+        {
+            result = StatusError(ErrorCode::Internal, "d3d12 backend: fence wait failed");
+        }
+        else if (completed < value)
         {
             result = StatusError(ErrorCode::NotFound,
                                  "d3d12 backend: fence timed out before reaching the value");
@@ -413,6 +476,12 @@ Status<Error> D3D12WaitIdle(void* internal) noexcept
         return StatusError(ErrorCode::InvalidArgument, "d3d12 backend: device is null");
     }
     auto& device = *static_cast<D3D12Device*>(internal);
+    const Status<Error> initialStatus = DetectDeviceLost(device, S_OK);
+    if (!initialStatus)
+    {
+        return initialStatus;
+    }
+    const std::lock_guard<std::mutex> lock(device.mutex);
 
     // Drain every queue that accepted work by signalling a value and waiting for
     // the GPU to reach it. A queue that never submitted returns immediately.
@@ -424,25 +493,61 @@ Status<Error> D3D12WaitIdle(void* internal) noexcept
             continue;
         }
         ID3D12Fence* fence = nullptr;
-        if (FAILED(device.device->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence),
-                                              reinterpret_cast<void**>(&fence))) ||
-            fence == nullptr)
+        const HRESULT created = device.device->CreateFence(
+            0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), reinterpret_cast<void**>(&fence));
+        if (FAILED(created) || fence == nullptr)
         {
+            const Status<Error> lost = DetectDeviceLost(device, created);
+            if (!lost)
+            {
+                return lost;
+            }
             return StatusError(ErrorCode::Internal, "d3d12 backend: idle fence creation failed");
         }
         const u64 value = entry.signalled + 1;
-        if (SUCCEEDED(entry.queue->Signal(fence, value)))
+        const HRESULT signalled = entry.queue->Signal(fence, value);
+        if (FAILED(signalled))
         {
-            entry.signalled = value;
-            HANDLE event = CreateEventExW(nullptr, nullptr, 0, EVENT_MODIFY_STATE | SYNCHRONIZE);
-            if (event != nullptr)
+            fence->Release();
+            const Status<Error> lost = DetectDeviceLost(device, signalled);
+            if (!lost)
             {
-                (void)fence->SetEventOnCompletion(value, event);
-                (void)WaitForSingleObject(event, INFINITE);
-                (void)CloseHandle(event);
+                return lost;
             }
+            return StatusError(ErrorCode::Internal, "d3d12 backend: idle queue signal failed");
         }
+        entry.signalled = value;
+        HANDLE event = CreateEventExW(nullptr, nullptr, 0, EVENT_MODIFY_STATE | SYNCHRONIZE);
+        if (event == nullptr)
+        {
+            fence->Release();
+            return StatusError(ErrorCode::Internal,
+                               "d3d12 backend: idle wait event creation failed");
+        }
+        const HRESULT registered = fence->SetEventOnCompletion(value, event);
+        if (FAILED(registered))
+        {
+            (void)CloseHandle(event);
+            fence->Release();
+            const Status<Error> lost = DetectDeviceLost(device, registered);
+            return lost ? StatusError(ErrorCode::Internal,
+                                      "d3d12 backend: idle fence event registration failed")
+                        : lost;
+        }
+        const DWORD waitResult = WaitForSingleObject(event, INFINITE);
+        const u64 completed = fence->GetCompletedValue();
+        (void)CloseHandle(event);
         fence->Release();
+        if (completed == UINT64_MAX)
+        {
+            return DetectDeviceLost(device, DXGI_ERROR_DEVICE_REMOVED);
+        }
+        if (waitResult != WAIT_OBJECT_0)
+        {
+            const Status<Error> lost = DetectDeviceLost(device, S_OK);
+            return lost ? StatusError(ErrorCode::Internal, "d3d12 backend: idle wait failed")
+                        : lost;
+        }
     }
     return Status<Error>::Ok();
 }
@@ -460,6 +565,11 @@ Status<Error> D3D12WaitIdle(void* internal) noexcept
         value.signalFence = &D3D12SignalFence;
         value.waitFence = &D3D12WaitFence;
         value.fenceValue = &D3D12FenceValue;
+        value.createTimestampQueryHeap = &D3D12CreateTimestampQueryHeap;
+        value.destroyTimestampQueryHeap = &D3D12DestroyTimestampQueryHeap;
+        value.readTimestamps = &D3D12ReadTimestamps;
+        value.timestampFrequency = &D3D12TimestampFrequency;
+        value.reportLeaks = &D3D12ReportLeaks;
         value.waitIdle = &D3D12WaitIdle;
 
         value.createBuffer = &D3D12CreateBuffer;
@@ -504,6 +614,7 @@ Status<Error> D3D12WaitIdle(void* internal) noexcept
         value.submissionInfo = &D3D12SubmissionInfo;
         value.createSwapChain = &D3D12CreateSwapChain;
         value.destroySwapChain = &D3D12DestroySwapChain;
+        value.objectName = &D3D12DeviceObjectName;
         return value;
     }();
     return &interface;
@@ -707,6 +818,173 @@ const DeviceInterface* D3D12Interface() noexcept
     return BuildInterface();
 }
 
+namespace
+{
+
+[[nodiscard]] bool IsDeviceRemovalResult(HRESULT result) noexcept
+{
+    return result == DXGI_ERROR_DEVICE_REMOVED || result == DXGI_ERROR_DEVICE_RESET ||
+           result == DXGI_ERROR_DEVICE_HUNG || result == DXGI_ERROR_DRIVER_INTERNAL_ERROR ||
+           result == D3D12_ERROR_DRIVER_VERSION_MISMATCH;
+}
+
+[[nodiscard]] const char* DeviceLostMessage(HRESULT reason) noexcept
+{
+    switch (reason)
+    {
+    case DXGI_ERROR_DEVICE_REMOVED:
+        return "d3d12 backend: device lost (DXGI_ERROR_DEVICE_REMOVED)";
+    case DXGI_ERROR_DEVICE_RESET:
+        return "d3d12 backend: device lost (DXGI_ERROR_DEVICE_RESET)";
+    case DXGI_ERROR_DEVICE_HUNG:
+        return "d3d12 backend: device lost (DXGI_ERROR_DEVICE_HUNG)";
+    case DXGI_ERROR_DRIVER_INTERNAL_ERROR:
+        return "d3d12 backend: device lost (DXGI_ERROR_DRIVER_INTERNAL_ERROR)";
+    case D3D12_ERROR_DRIVER_VERSION_MISMATCH:
+        return "d3d12 backend: device lost (D3D12_ERROR_DRIVER_VERSION_MISMATCH)";
+    default:
+        return "d3d12 backend: device lost (see Rhi diagnostics for HRESULT)";
+    }
+}
+
+void LogDred(D3D12Device& device) noexcept
+{
+    ComOwner<ID3D12DeviceRemovedExtendedData> dred;
+    if (device.device == nullptr || FAILED(device.device->QueryInterface(
+                                        __uuidof(ID3D12DeviceRemovedExtendedData), dred.PutVoid())))
+    {
+        CG_LOG(Warning, Rhi, "d3d12 DRED data is unavailable for the removed device");
+        return;
+    }
+
+    D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT breadcrumbs{};
+    if (SUCCEEDED(dred->GetAutoBreadcrumbsOutput(&breadcrumbs)))
+    {
+        u32 logged = 0;
+        for (const D3D12_AUTO_BREADCRUMB_NODE* node = breadcrumbs.pHeadAutoBreadcrumbNode;
+             node != nullptr && logged < 64; node = node->pNext, ++logged)
+        {
+            const u32 completed =
+                node->pLastBreadcrumbValue != nullptr ? *node->pLastBreadcrumbValue : 0;
+            const u32 historyIndex =
+                node->BreadcrumbCount == 0
+                    ? 0
+                    : (completed < node->BreadcrumbCount ? completed : node->BreadcrumbCount - 1);
+            const u32 operation = node->BreadcrumbCount > 0 && node->pCommandHistory != nullptr
+                                      ? static_cast<u32>(node->pCommandHistory[historyIndex])
+                                      : 0;
+            CG_LOG(Error, Rhi,
+                   "d3d12 DRED breadcrumb: list=%.64s queue=%.64s completed=%u/%u operation=%u",
+                   node->pCommandListDebugNameA != nullptr ? node->pCommandListDebugNameA
+                                                           : "unnamed",
+                   node->pCommandQueueDebugNameA != nullptr ? node->pCommandQueueDebugNameA
+                                                            : "unnamed",
+                   completed, node->BreadcrumbCount, operation);
+        }
+        if (logged == 64 && breadcrumbs.pHeadAutoBreadcrumbNode != nullptr)
+        {
+            CG_LOG(Warning, Rhi, "d3d12 DRED breadcrumb output truncated at 64 command lists");
+        }
+    }
+    else
+    {
+        CG_LOG(Warning, Rhi, "d3d12 DRED auto-breadcrumb data could not be read");
+    }
+
+    D3D12_DRED_PAGE_FAULT_OUTPUT pageFault{};
+    if (SUCCEEDED(dred->GetPageFaultAllocationOutput(&pageFault)))
+    {
+        CG_LOG(Error, Rhi, "d3d12 DRED page fault: virtual_address=0x%llX",
+               static_cast<unsigned long long>(pageFault.PageFaultVA));
+        const D3D12_DRED_ALLOCATION_NODE* lists[] = {
+            pageFault.pHeadExistingAllocationNode,
+            pageFault.pHeadRecentFreedAllocationNode,
+        };
+        const char* categories[] = {"existing", "recently_freed"};
+        for (u32 listIndex = 0; listIndex < 2; ++listIndex)
+        {
+            u32 logged = 0;
+            for (const D3D12_DRED_ALLOCATION_NODE* node = lists[listIndex];
+                 node != nullptr && logged < 32; node = node->pNext, ++logged)
+            {
+                CG_LOG(Error, Rhi, "d3d12 DRED allocation: category=%s name=%.64s type=%u",
+                       categories[listIndex],
+                       node->ObjectNameA != nullptr ? node->ObjectNameA : "unnamed",
+                       static_cast<u32>(node->AllocationType));
+            }
+            if (logged == 32 && lists[listIndex] != nullptr)
+            {
+                CG_LOG(Warning, Rhi, "d3d12 DRED allocation list truncated at 32 entries");
+            }
+        }
+    }
+    else
+    {
+        CG_LOG(Warning, Rhi, "d3d12 DRED page-fault data could not be read");
+    }
+}
+
+void LogDeviceRemoval(D3D12Device& device, HRESULT reason) noexcept
+{
+    CG_LOG(Error, Rhi, "d3d12 device removed: reason=0x%08lX adapter=%.64s",
+           static_cast<unsigned long>(reason), device.adapterInfo.name);
+    for (u32 index = 0; index < kQueueKindCount; ++index)
+    {
+        const D3D12Queue& queue = device.queues[index];
+        CG_LOG(Error, Rhi, "d3d12 removal queue=%u submissions=%llu last_fence=%llu", index,
+               static_cast<unsigned long long>(queue.submissions.load(std::memory_order_relaxed)),
+               static_cast<unsigned long long>(queue.signalled.load(std::memory_order_relaxed)));
+    }
+    LogDred(device);
+}
+
+}  // namespace
+
+Status<Error> DeviceLostStatus(const D3D12Device& device) noexcept
+{
+    const HRESULT reason = device.deviceLostReason.load(std::memory_order_acquire);
+    if (FAILED(reason))
+    {
+        return StatusError(ErrorCode::DeviceLost, DeviceLostMessage(reason));
+    }
+    return Status<Error>::Ok();
+}
+
+Status<Error> DetectDeviceLost(D3D12Device& device, HRESULT operationResult) noexcept
+{
+    const Status<Error> existing = DeviceLostStatus(device);
+    if (!existing)
+    {
+        return existing;
+    }
+
+    HRESULT reason = IsDeviceRemovalResult(operationResult) ? operationResult : S_OK;
+    if (device.device != nullptr)
+    {
+        const HRESULT removedReason = device.device->GetDeviceRemovedReason();
+        if (FAILED(removedReason))
+        {
+            reason = removedReason;
+        }
+    }
+    if (SUCCEEDED(reason))
+    {
+        return Status<Error>::Ok();
+    }
+
+    HRESULT expected = S_OK;
+    if (device.deviceLostReason.compare_exchange_strong(expected, reason,
+                                                        std::memory_order_acq_rel))
+    {
+        LogDeviceRemoval(device, reason);
+    }
+    else
+    {
+        reason = expected;
+    }
+    return StatusError(ErrorCode::DeviceLost, DeviceLostMessage(reason));
+}
+
 Result<DeviceCreation, Error> CreateD3D12Device(const DeviceDesc& desc,
                                                 memory::Allocator& allocator) noexcept
 {
@@ -882,6 +1160,7 @@ void DestroyD3D12Device(void* internal) noexcept
 
     ReportDebugMessages(*device);
 
+    ReleaseTimestampQueryHeaps(*device);
     ReleaseResources(*device);
     // Deferred transient reservations are pure bookkeeping; teardown returns
     // every one of them rather than waiting for work that no longer matters.
@@ -898,6 +1177,8 @@ void DestroyD3D12Device(void* internal) noexcept
     ReleaseQueues(*device);
     device->fences.Clear();
     device->freeFenceSlots.Clear();
+    device->timestampQueryHeaps.Clear();
+    device->freeTimestampQueryHeaps.Clear();
     device->buffers.Clear();
     device->freeBufferSlots.Clear();
     device->textures.Clear();

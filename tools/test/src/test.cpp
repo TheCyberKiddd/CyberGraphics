@@ -40,6 +40,10 @@ Registry& GetRegistry()
 }
 
 thread_local std::vector<Failure>* g_currentFailures = nullptr;
+thread_local bool* g_currentSkipped = nullptr;
+thread_local std::string* g_currentSkipMessage = nullptr;
+thread_local const char** g_currentSkipFile = nullptr;
+thread_local int* g_currentSkipLine = nullptr;
 std::uint64_t g_seed = 0;
 
 struct RunResult
@@ -47,6 +51,10 @@ struct RunResult
     TestCase test;
     std::string displayName;
     std::vector<Failure> failures;
+    bool skipped = false;
+    std::string skipMessage;
+    const char* skipFile = nullptr;
+    int skipLine = 0;
     double milliseconds = 0.0;
 };
 
@@ -138,6 +146,10 @@ RunResult RunOne(const TestCase& test, std::size_t repeatIndex, std::uint32_t re
 
     const auto start = std::chrono::steady_clock::now();
     g_currentFailures = &result.failures;
+    g_currentSkipped = &result.skipped;
+    g_currentSkipMessage = &result.skipMessage;
+    g_currentSkipFile = &result.skipFile;
+    g_currentSkipLine = &result.skipLine;
     try
     {
         test.function();
@@ -153,6 +165,10 @@ RunResult RunOne(const TestCase& test, std::size_t repeatIndex, std::uint32_t re
             Failure{"unhandled non-standard exception", test.file, test.line});
     }
     g_currentFailures = nullptr;
+    g_currentSkipped = nullptr;
+    g_currentSkipMessage = nullptr;
+    g_currentSkipFile = nullptr;
+    g_currentSkipLine = nullptr;
 
     const auto finish = std::chrono::steady_clock::now();
     result.milliseconds = std::chrono::duration<double, std::milli>(finish - start).count();
@@ -162,13 +178,23 @@ RunResult RunOne(const TestCase& test, std::size_t repeatIndex, std::uint32_t re
 void PrintConsole(const std::vector<RunResult>& results)
 {
     std::size_t failedTests = 0;
+    std::size_t skippedTests = 0;
     for (const RunResult& result : results)
     {
         std::cout << "[ RUN      ] " << result.displayName << '\n';
         if (result.failures.empty())
         {
-            std::cout << "[       OK ] " << result.displayName << " (" << std::fixed
-                      << std::setprecision(3) << result.milliseconds << " ms)\n";
+            if (result.skipped)
+            {
+                ++skippedTests;
+                std::cout << "[  SKIPPED ] " << result.displayName << ": " << result.skipMessage
+                          << '\n';
+            }
+            else
+            {
+                std::cout << "[       OK ] " << result.displayName << " (" << std::fixed
+                          << std::setprecision(3) << result.milliseconds << " ms)\n";
+            }
         }
         else
         {
@@ -184,7 +210,11 @@ void PrintConsole(const std::vector<RunResult>& results)
     }
 
     std::cout << "[==========] " << results.size() << " test(s) ran.\n";
-    std::cout << "[  PASSED  ] " << (results.size() - failedTests) << " test(s).\n";
+    std::cout << "[  PASSED  ] " << (results.size() - failedTests - skippedTests) << " test(s).\n";
+    if (skippedTests != 0)
+    {
+        std::cout << "[  SKIPPED ] " << skippedTests << " test(s).\n";
+    }
     if (failedTests != 0)
     {
         std::cout << "[  FAILED  ] " << failedTests << " test(s).\n";
@@ -201,7 +231,12 @@ void PrintTap(const std::vector<RunResult>& results)
     {
         if (result.failures.empty())
         {
-            std::cout << "ok " << index << " - " << result.displayName << '\n';
+            std::cout << "ok " << index << " - " << result.displayName;
+            if (result.skipped)
+            {
+                std::cout << " # SKIP " << SingleLine(result.skipMessage);
+            }
+            std::cout << '\n';
         }
         else
         {
@@ -219,6 +254,7 @@ void PrintTap(const std::vector<RunResult>& results)
 void PrintJunit(const std::vector<RunResult>& results)
 {
     std::size_t failedTests = 0;
+    std::size_t skippedTests = 0;
     double totalMilliseconds = 0.0;
     for (const RunResult& result : results)
     {
@@ -226,14 +262,19 @@ void PrintJunit(const std::vector<RunResult>& results)
         {
             ++failedTests;
         }
+        else if (result.skipped)
+        {
+            ++skippedTests;
+        }
         totalMilliseconds += result.milliseconds;
     }
 
     std::cout << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
     std::cout << "<testsuites tests=\"" << results.size() << "\" failures=\"" << failedTests
-              << "\" errors=\"0\" time=\"" << FormatSeconds(totalMilliseconds) << "\">\n";
+              << "\" errors=\"0\" skipped=\"" << skippedTests << "\" time=\""
+              << FormatSeconds(totalMilliseconds) << "\">\n";
     std::cout << "  <testsuite name=\"cyber\" tests=\"" << results.size() << "\" failures=\""
-              << failedTests << "\" errors=\"0\" skipped=\"0\" time=\""
+              << failedTests << "\" errors=\"0\" skipped=\"" << skippedTests << "\" time=\""
               << FormatSeconds(totalMilliseconds) << "\">\n";
 
     for (const RunResult& result : results)
@@ -243,6 +284,12 @@ void PrintJunit(const std::vector<RunResult>& results)
                   << XmlEscape(result.test.file != nullptr ? result.test.file : "<unknown>")
                   << "\" line=\"" << result.test.line << "\" time=\""
                   << FormatSeconds(result.milliseconds) << "\">\n";
+        if (result.skipped && result.failures.empty())
+        {
+            std::cout << "      <skipped message=\"" << XmlEscape(result.skipMessage) << "\">"
+                      << XmlEscape(result.skipFile != nullptr ? result.skipFile : "<unknown>")
+                      << ":" << result.skipLine << "</skipped>\n";
+        }
         for (const Failure& failure : result.failures)
         {
             std::cout << "      <failure message=\"" << XmlEscape(SingleLine(failure.message))
@@ -301,6 +348,20 @@ void Expect(bool condition, std::string_view expression, const char* file, int l
 void Fail(std::string_view message, const char* file, int line)
 {
     AddFailure(std::string(message), file, line);
+}
+
+void Skip(std::string_view message, const char* file, int line)
+{
+    if (g_currentSkipped == nullptr || g_currentSkipMessage == nullptr ||
+        g_currentSkipFile == nullptr || g_currentSkipLine == nullptr)
+    {
+        std::cerr << "test runner: skip outside a running test\n";
+        std::abort();
+    }
+    *g_currentSkipped = true;
+    *g_currentSkipMessage = std::string(message);
+    *g_currentSkipFile = file;
+    *g_currentSkipLine = line;
 }
 
 void Require(bool condition, std::string_view expression, const char* file, int line)

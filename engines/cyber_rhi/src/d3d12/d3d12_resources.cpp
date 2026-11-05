@@ -2,6 +2,9 @@
 
 #if defined(CYBER_RHI_HAS_D3D12)
 
+#include <cyber/core/log.h>
+#include <cyber/memory/alignment.h>
+
 #include <cstring>
 
 namespace cyber::rhi::detail
@@ -41,6 +44,16 @@ D3D12FenceSlot* Resolve(D3D12Device& device, FenceHandle handle) noexcept
         return nullptr;
     }
     D3D12FenceSlot& slot = device.fences[handle.index];
+    return slot.alive && slot.generation == handle.generation ? &slot : nullptr;
+}
+
+D3D12TimestampQueryHeapSlot* Resolve(D3D12Device& device, TimestampQueryHeapHandle handle) noexcept
+{
+    if (!handle.IsValid() || handle.index >= device.timestampQueryHeaps.Size())
+    {
+        return nullptr;
+    }
+    D3D12TimestampQueryHeapSlot& slot = device.timestampQueryHeaps[handle.index];
     return slot.alive && slot.generation == handle.generation ? &slot : nullptr;
 }
 
@@ -463,6 +476,462 @@ void NameObject(ID3D12Object* object, const char* label) noexcept
     }
 }
 
+// The private-data slot the API's own `SetName` writes. Reading it back is what
+// proves the driver has the name, so `SetName`'s equivalence with
+// `SetPrivateData` under this well-known identifier is the whole point.
+constexpr GUID kD3DDebugObjectNamePrivateData = {
+    0x4cca5fd8, 0x921f, 0x42c8, {0x85, 0x66, 0x70, 0xca, 0xf2, 0xa9, 0xb7, 0x41}};
+
+// Copies a UTF-8 string into an `ObjectNameInfo`'s fixed buffer, truncating at
+// the buffer, and marks the info named. Same shape as the null backend's.
+void FillNameFromUtf8(ObjectNameInfo& info, const char* utf8) noexcept
+{
+    u32 length = 0;
+    while (utf8[length] != '\0' && length < sizeof(info.name) - 1)
+    {
+        info.name[length] = utf8[length];
+        ++length;
+    }
+    info.name[length] = '\0';
+    info.length = length;
+    info.named = true;
+}
+
+// Reads one D3D12 object's debug name back through `GetPrivateData`, which is
+// the read-back side of what `NameObject` wrote. A size of zero means the
+// object never got a name, which is one more way an unnamed object and a kind
+// without a nameable object answer the same.
+void ReadNameFromObject(ID3D12Object* object, ObjectNameInfo& info) noexcept
+{
+    if (object == nullptr)
+    {
+        return;
+    }
+    wchar_t wide[128]{};
+    u32 wideBytes = sizeof(wide);
+    if (FAILED(object->GetPrivateData(kD3DDebugObjectNamePrivateData, &wideBytes, wide)) ||
+        wideBytes < sizeof(wchar_t))
+    {
+        return;
+    }
+    // The stored length includes both terminator bytes; reduce to the character
+    // count `MultiByteToWideChar` understands.
+    wide[wideBytes / sizeof(wchar_t) - 1] = L'\0';
+    char utf8[256]{};
+    const int length =
+        WideCharToMultiByte(CP_UTF8, 0, wide, -1, utf8, sizeof(utf8), nullptr, nullptr);
+    if (length <= 0)
+    {
+        return;
+    }
+    FillNameFromUtf8(info, utf8);
+}
+
+[[nodiscard]] ObjectNameInfo D3D12DeviceObjectName(const void* internal,
+                                                   const ObjectRef& object) noexcept
+{
+    ObjectNameInfo info;
+    if (internal == nullptr)
+    {
+        return info;
+    }
+    const auto& device = *static_cast<const D3D12Device*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    // A kind whose D3D12 object the backend does not own a pointer to (a view,
+    // a sampler, a bind group, a shader module, a pipeline cache with no
+    // library) keeps no name driver-side, so no case reaches `ReadNameFromObject`
+    // and the answer stays unnamed. That is the honest answer, not a workaround.
+    switch (object.kind)
+    {
+    case ObjectKind::Buffer:
+    {
+        const D3D12BufferSlot* slot =
+            Resolve(const_cast<D3D12Device&>(device), UnpackHandle<BufferTag>(object.packed));
+        if (slot != nullptr && slot->alive)
+        {
+            ReadNameFromObject(slot->resource, info);
+        }
+        break;
+    }
+    case ObjectKind::Texture:
+    {
+        const D3D12TextureSlot* slot =
+            Resolve(const_cast<D3D12Device&>(device), UnpackHandle<TextureTag>(object.packed));
+        if (slot != nullptr && slot->alive)
+        {
+            ReadNameFromObject(slot->resource, info);
+        }
+        break;
+    }
+    case ObjectKind::PipelineLayout:
+    {
+        const D3D12PipelineLayoutSlot* slot = Resolve(
+            const_cast<D3D12Device&>(device), UnpackHandle<PipelineLayoutTag>(object.packed));
+        if (slot != nullptr && slot->alive)
+        {
+            ReadNameFromObject(slot->rootSignature, info);
+        }
+        break;
+    }
+    case ObjectKind::Pipeline:
+    {
+        const D3D12PipelineSlot* slot =
+            Resolve(const_cast<D3D12Device&>(device), UnpackHandle<PipelineTag>(object.packed));
+        if (slot != nullptr && slot->alive)
+        {
+            ReadNameFromObject(slot->state, info);
+        }
+        break;
+    }
+    case ObjectKind::Fence:
+    {
+        const D3D12FenceSlot* slot =
+            Resolve(const_cast<D3D12Device&>(device), UnpackHandle<FenceTag>(object.packed));
+        if (slot != nullptr && slot->alive)
+        {
+            ReadNameFromObject(slot->fence, info);
+        }
+        break;
+    }
+    case ObjectKind::TimestampQueryHeap:
+    {
+        const D3D12TimestampQueryHeapSlot* slot = Resolve(
+            const_cast<D3D12Device&>(device), UnpackHandle<TimestampQueryHeapTag>(object.packed));
+        if (slot != nullptr && slot->alive)
+        {
+            ReadNameFromObject(slot->queries, info);
+        }
+        break;
+    }
+    case ObjectKind::CommandList:
+    {
+        const D3D12CommandListSlot* slot =
+            Resolve(const_cast<D3D12Device&>(device), UnpackHandle<CommandListTag>(object.packed));
+        if (slot != nullptr && slot->alive)
+        {
+            ReadNameFromObject(slot->list, info);
+        }
+        break;
+    }
+    default:
+        break;
+    }
+    return info;
+}
+
+Status<Error> D3D12CreateTimestampQueryHeap(void* internal, const TimestampQueryHeapDesc& desc,
+                                            TimestampQueryHeapHandle* out) noexcept
+{
+    if (internal == nullptr || out == nullptr || desc.queryCount == 0)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "d3d12 backend: timestamp heap needs a device, count, and output");
+    }
+
+    auto& device = *static_cast<D3D12Device*>(internal);
+    const Status<Error> healthy = DeviceLostStatus(device);
+    if (!healthy)
+    {
+        return healthy;
+    }
+    const std::lock_guard<std::mutex> lock(device.mutex);
+    if (!device.capabilities.features.Has(Feature::TimestampQueries))
+    {
+        return StatusError(ErrorCode::Unsupported,
+                           "d3d12 backend: timestamp queries are not supported");
+    }
+
+    const u64 readbackBytes = static_cast<u64>(desc.queryCount) * sizeof(u64);
+    const u64 reservedBytes =
+        cyber::memory::AlignUp(readbackBytes, d3d12::kDefaultPlacementAlignment);
+    if (readbackBytes > device.capabilities.limits.maxBufferBytes || reservedBytes == 0)
+    {
+        return StatusError(ErrorCode::OutOfRange,
+                           "d3d12 backend: timestamp heap exceeds the readback limit");
+    }
+
+    D3D12_QUERY_HEAP_DESC queryDesc{};
+    queryDesc.Count = desc.queryCount;
+    queryDesc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+    queryDesc.NodeMask = 0;
+    ID3D12QueryHeap* queries = nullptr;
+    if (FAILED(device.device->CreateQueryHeap(&queryDesc, __uuidof(ID3D12QueryHeap),
+                                              reinterpret_cast<void**>(&queries))) ||
+        queries == nullptr)
+    {
+        return StatusError(ErrorCode::Internal,
+                           "d3d12 backend: timestamp query heap creation failed");
+    }
+    NameObject(queries, desc.label);
+
+    ID3D12Heap* heap = nullptr;
+    u64 heapOffset = 0;
+    bool dedicated = false;
+    const Status<Error> allocated =
+        device.memory.Allocate(d3d12::MemoryClassType::Readback, readbackBytes,
+                               d3d12::kDefaultPlacementAlignment, &heap, &heapOffset, &dedicated);
+    if (!allocated)
+    {
+        queries->Release();
+        return allocated;
+    }
+
+    D3D12_RESOURCE_DESC resourceDesc{};
+    resourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    resourceDesc.Width = readbackBytes;
+    resourceDesc.Height = 1;
+    resourceDesc.DepthOrArraySize = 1;
+    resourceDesc.MipLevels = 1;
+    resourceDesc.Format = DXGI_FORMAT_UNKNOWN;
+    resourceDesc.SampleDesc.Count = 1;
+    resourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+    ID3D12Resource* readback = nullptr;
+    if (FAILED(device.device->CreatePlacedResource(
+            heap, heapOffset, &resourceDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+            __uuidof(ID3D12Resource), reinterpret_cast<void**>(&readback))) ||
+        readback == nullptr)
+    {
+        device.memory.Deallocate(d3d12::MemoryClassType::Readback, heap, heapOffset, reservedBytes,
+                                 dedicated);
+        queries->Release();
+        return StatusError(ErrorCode::Internal,
+                           "d3d12 backend: timestamp readback resource creation failed");
+    }
+
+    void* mapped = nullptr;
+    const D3D12_RANGE readRange{0, static_cast<SIZE_T>(readbackBytes)};
+    if (FAILED(readback->Map(0, &readRange, &mapped)) || mapped == nullptr)
+    {
+        readback->Release();
+        device.memory.Deallocate(d3d12::MemoryClassType::Readback, heap, heapOffset, reservedBytes,
+                                 dedicated);
+        queries->Release();
+        return StatusError(ErrorCode::Internal, "d3d12 backend: timestamp readback mapping failed");
+    }
+
+    u32 index = kInvalidHandleIndex;
+    if (device.freeTimestampQueryHeaps.Size() > 0)
+    {
+        index = device.freeTimestampQueryHeaps[device.freeTimestampQueryHeaps.Size() - 1];
+        (void)device.freeTimestampQueryHeaps.TryResize(device.freeTimestampQueryHeaps.Size() - 1);
+    }
+    else
+    {
+        if (!device.timestampQueryHeaps.TryPushBack(D3D12TimestampQueryHeapSlot{}))
+        {
+            readback->Unmap(0, nullptr);
+            readback->Release();
+            device.memory.Deallocate(d3d12::MemoryClassType::Readback, heap, heapOffset,
+                                     reservedBytes, dedicated);
+            queries->Release();
+            return StatusError(ErrorCode::Internal,
+                               "d3d12 backend: timestamp heap table growth failed");
+        }
+        index = static_cast<u32>(device.timestampQueryHeaps.Size() - 1);
+    }
+
+    D3D12TimestampQueryHeapSlot& slot = device.timestampQueryHeaps[index];
+    slot.generation = NextGeneration(slot.generation);
+    slot.alive = true;
+    slot.queries = queries;
+    slot.readback = readback;
+    slot.mapped = mapped;
+    slot.desc = desc;
+    slot.readbackBytes = readbackBytes;
+    slot.heap = heap;
+    slot.heapOffset = heapOffset;
+    slot.reservedBytes = reservedBytes;
+    slot.dedicated = dedicated;
+
+    TimestampQueryHeapHandle handle;
+    handle.index = index;
+    handle.generation = slot.generation;
+    *out = handle;
+    return Status<Error>::Ok();
+}
+
+Status<Error> D3D12DestroyTimestampQueryHeap(void* internal,
+                                             TimestampQueryHeapHandle handle) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "d3d12 backend: device is null");
+    }
+    auto& device = *static_cast<D3D12Device*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+    D3D12TimestampQueryHeapSlot* slot = Resolve(device, handle);
+    if (slot == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "d3d12 backend: timestamp heap handle is stale or invalid");
+    }
+    const D3D12_RANGE written{0, 0};
+    slot->readback->Unmap(0, &written);
+    slot->readback->Release();
+    slot->queries->Release();
+    device.memory.Deallocate(d3d12::MemoryClassType::Readback, slot->heap, slot->heapOffset,
+                             slot->reservedBytes, slot->dedicated);
+    slot->queries = nullptr;
+    slot->readback = nullptr;
+    slot->mapped = nullptr;
+    slot->alive = false;
+    slot->generation = NextGeneration(slot->generation);
+    if (!device.freeTimestampQueryHeaps.TryPushBack(handle.index))
+    {
+        return StatusError(ErrorCode::Internal,
+                           "d3d12 backend: timestamp heap free list growth failed");
+    }
+    return Status<Error>::Ok();
+}
+
+Status<Error> D3D12ReadTimestamps(void* internal, TimestampQueryHeapHandle handle, u32 firstQuery,
+                                  u32 queryCount, FenceHandle completionFence, u64 completionValue,
+                                  memory::Span<u64> out) noexcept
+{
+    if (internal == nullptr || queryCount == 0 || out.Size() < queryCount)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "d3d12 backend: timestamp read needs a device and enough output slots");
+    }
+    auto& device = *static_cast<D3D12Device*>(internal);
+    const Status<Error> healthy = DeviceLostStatus(device);
+    if (!healthy)
+    {
+        return healthy;
+    }
+    const std::lock_guard<std::mutex> lock(device.mutex);
+    D3D12TimestampQueryHeapSlot* slot = Resolve(device, handle);
+    if (slot == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "d3d12 backend: timestamp heap handle is stale or invalid");
+    }
+    if (firstQuery >= slot->desc.queryCount || queryCount > slot->desc.queryCount - firstQuery)
+    {
+        return StatusError(ErrorCode::OutOfRange,
+                           "d3d12 backend: timestamp read range exceeds the query heap");
+    }
+    D3D12FenceSlot* fence = Resolve(device, completionFence);
+    if (fence == nullptr || fence->fence == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "d3d12 backend: timestamp read fence is stale or invalid");
+    }
+    const u64 completed = fence->fence->GetCompletedValue();
+    if (completed == UINT64_MAX)
+    {
+        return DetectDeviceLost(device, DXGI_ERROR_DEVICE_REMOVED);
+    }
+    if (completed < completionValue)
+    {
+        return StatusError(ErrorCode::NotFound,
+                           "d3d12 backend: timestamp completion fence has not reached its value");
+    }
+    const auto* values = static_cast<const u64*>(slot->mapped);
+    for (u32 index = 0; index < queryCount; ++index)
+    {
+        out[index] = values[firstQuery + index];
+    }
+    return Status<Error>::Ok();
+}
+
+u64 D3D12TimestampFrequency(const void* internal, QueueKind kind) noexcept
+{
+    if (internal == nullptr || kind >= QueueKind::Count)
+    {
+        return 0;
+    }
+    const auto& device = *static_cast<const D3D12Device*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+    const D3D12Queue& queue = device.queues[static_cast<u32>(kind)];
+    u64 frequency = 0;
+    return queue.queue != nullptr && SUCCEEDED(queue.queue->GetTimestampFrequency(&frequency))
+               ? frequency
+               : 0;
+}
+
+u32 D3D12ReportLeaks(const void* internal) noexcept
+{
+    if (internal == nullptr)
+    {
+        return 0;
+    }
+    const auto& device = *static_cast<const D3D12Device*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+    u32 count = 0;
+    for (usize index = 0; index < device.buffers.Size(); ++index)
+    {
+        const D3D12BufferSlot& slot = device.buffers[index];
+        if (slot.alive)
+        {
+            ++count;
+            CG_LOG(Warning, Rhi, "live buffer %u generation %u: %s (%llu bytes)", index,
+                   slot.generation,
+                   slot.desc.label != nullptr && slot.desc.label[0] != '\0' ? slot.desc.label
+                                                                            : "unlabelled",
+                   static_cast<unsigned long long>(slot.desc.sizeBytes));
+        }
+    }
+    for (usize index = 0; index < device.textures.Size(); ++index)
+    {
+        const D3D12TextureSlot& slot = device.textures[index];
+        if (slot.alive && !slot.swapChainOwned)
+        {
+            ++count;
+            CG_LOG(Warning, Rhi, "live texture %u generation %u: %s (%ux%u)", index,
+                   slot.generation,
+                   slot.desc.label != nullptr && slot.desc.label[0] != '\0' ? slot.desc.label
+                                                                            : "unlabelled",
+                   slot.desc.width, slot.desc.height);
+        }
+    }
+    for (usize index = 0; index < device.timestampQueryHeaps.Size(); ++index)
+    {
+        const D3D12TimestampQueryHeapSlot& slot = device.timestampQueryHeaps[index];
+        if (slot.alive)
+        {
+            ++count;
+            CG_LOG(Warning, Rhi, "live timestamp heap %u generation %u: %s (%u queries)", index,
+                   slot.generation,
+                   slot.desc.label != nullptr && slot.desc.label[0] != '\0' ? slot.desc.label
+                                                                            : "unlabelled",
+                   slot.desc.queryCount);
+        }
+    }
+    CG_LOG(Info, Rhi, "d3d12 backend: %u live resources", count);
+    return count;
+}
+
+void ReleaseTimestampQueryHeaps(D3D12Device& device) noexcept
+{
+    for (usize index = 0; index < device.timestampQueryHeaps.Size(); ++index)
+    {
+        D3D12TimestampQueryHeapSlot& slot = device.timestampQueryHeaps[index];
+        if (!slot.alive)
+        {
+            continue;
+        }
+        const D3D12_RANGE written{0, 0};
+        if (slot.readback != nullptr)
+        {
+            if (slot.mapped != nullptr)
+            {
+                slot.readback->Unmap(0, &written);
+            }
+            slot.readback->Release();
+        }
+        if (slot.queries != nullptr)
+        {
+            slot.queries->Release();
+        }
+        device.memory.Deallocate(d3d12::MemoryClassType::Readback, slot.heap, slot.heapOffset,
+                                 slot.reservedBytes, slot.dedicated);
+        slot = D3D12TimestampQueryHeapSlot{};
+    }
+}
+
 Status<Error> SubmitBarriers(D3D12Device& device, const D3D12_RESOURCE_BARRIER* barriers,
                              u32 count) noexcept
 {
@@ -554,6 +1023,11 @@ Status<Error> D3D12CreateBuffer(void* internal, const BufferDesc& desc, BufferHa
     }
 
     auto& device = *static_cast<D3D12Device*>(internal);
+    const Status<Error> healthy = DeviceLostStatus(device);
+    if (!healthy)
+    {
+        return healthy;
+    }
     const std::lock_guard<std::mutex> lock(device.mutex);
     if (desc.sizeBytes > device.capabilities.limits.maxBufferBytes)
     {
@@ -832,6 +1306,11 @@ Status<Error> D3D12WriteBuffer(void* internal, BufferHandle handle, u64 offset,
         return StatusError(ErrorCode::InvalidArgument, "d3d12 backend: device is null");
     }
     auto& device = *static_cast<D3D12Device*>(internal);
+    const Status<Error> healthy = DeviceLostStatus(device);
+    if (!healthy)
+    {
+        return healthy;
+    }
     const std::lock_guard<std::mutex> lock(device.mutex);
     D3D12BufferSlot* slot = Resolve(device, handle);
     if (slot == nullptr)
@@ -865,6 +1344,11 @@ Status<Error> D3D12ReadBuffer(void* internal, BufferHandle handle, u64 offset,
         return StatusError(ErrorCode::InvalidArgument, "d3d12 backend: device is null");
     }
     auto& device = *static_cast<D3D12Device*>(internal);
+    const Status<Error> healthy = DeviceLostStatus(device);
+    if (!healthy)
+    {
+        return healthy;
+    }
     const std::lock_guard<std::mutex> lock(device.mutex);
     D3D12BufferSlot* slot = Resolve(device, handle);
     if (slot == nullptr)

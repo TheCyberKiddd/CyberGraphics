@@ -64,7 +64,7 @@ struct Options
 {
     const char* capturePath = nullptr;
     u32 frames = 0;
-    i32 supersample = 2;
+    i32 supersample = 1;
 };
 
 struct SceneUniforms

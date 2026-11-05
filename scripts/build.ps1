@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('debug', 'release', 'shipping', 'debug-asan', 'ci-windows')]
+    [ValidateSet('debug', 'release', 'profile', 'shipping', 'debug-asan', 'ci-windows')]
     [string]$Preset = 'debug',
     [switch]$Clean,
     [switch]$Test,

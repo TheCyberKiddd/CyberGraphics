@@ -36,11 +36,11 @@ are recorded.
 - [x] **Phase 14 — Direct3D 12 backend** — complete; [report](reports/phase-14.md), [design note](design/phase-14-d3d12.md), [ADR 0017](adr/0017-d3d12-backend.md), six D3D12 test binaries plus the cross-module `backend_compare`, 81/81 tests in debug, release, shipping and ASan,and the done-when line's two images matching `cyber_software_renderer`, both 4x
   supersampled and box-filtered to 512x512 (triangle exact, cube 1089 of 262144
   pixels over tolerance on silhouette edges) · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-14-direct3d-12-backend) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-14-direct3d-12-backend)
-- [ ] **Phase 15 — GPU memory and debug tooling** — designed, no code yet: [design note](design/phase-15-gpu-memory-debug.md) and [ADR 0018](adr/0018-gpu-heap-suballocation-and-rhi-validation.md); the first increment is the heap allocator with sub-allocation and a statistics report · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-15-gpu-memory-and-debug-tooling) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-15-gpu-memory-and-debug-tooling)
+- [x] **Phase 15 — GPU memory and debug tooling** — increments 1–7 and the automated build/test checks are complete. The Intel HD Graphics 530 sample-path RTV heap-kind bug is fixed; the marker sample submits and presents on the adapter. PIX and RenderDoc captures both show the nested `Clear Pass` and `Clear backbuffer` regions and the blue presented frame. The repository keeps the native D3D12 marker API in the RHI tests, but capture-visible labels come from nested debug regions because Microsoft documents the raw `SetMarker` support method as internal and recommends WinPixEventRuntime. · [implementation summary](graphics/PHASE_15.md), [report](reports/phase-15.md), [design note](design/phase-15-gpu-memory-debug.md), [ADR 0018](adr/0018-gpu-heap-suballocation-and-rhi-validation.md) · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-15-gpu-memory-and-debug-tooling) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-15-gpu-memory-and-debug-tooling)
 
 ## Part 4: Shaders and materials (phases 16-19)
 
-- [ ] **Phase 16 — Shader language and compiler strategy** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-16-shader-language-and-compiler-strategy) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-16-shader-language-and-compiler-strategy)
+- [x] **Phase 16 — Shader language and compiler strategy** — compiler emits HLSL used by the D3D12 cube comparison; Debug, Release, and Debug-ASan pass 88/88, package/structure/layer checks pass, and the repository-wide formatter passes. · [implementation summary](graphics/PHASE_16.md), [report](reports/phase-16.md), [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-16-shader-language-and-compiler-strategy) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-16-shader-language-and-compiler-strategy)
 - [ ] **Phase 17 — Reflection, permutations, and hot reload** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-17-reflection-permutations-and-hot-reload) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-17-reflection-permutations-and-hot-reload)
 - [ ] **Phase 18 — Material system** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-18-material-system) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-18-material-system)
 - [ ] **Phase 19 — Constant streaming and bindless resources** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-19-constant-streaming-and-bindless-resources) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-19-constant-streaming-and-bindless-resources)
@@ -112,8 +112,8 @@ boundary, and null backend; 58/58 tests in debug.
   comparison that renders a colored triangle and a textured cube through the RHI
   and matches the software renderer's images within a recorded tolerance. The
   debug layer is enabled with GPU-based validation and its messages fail a test.
-- Next: Phase 15, GPU memory and debug tooling — designed in
-  `docs/design/phase-15-gpu-memory-debug.md` and decided in ADR 0018, with no
-  code landed yet. The first increment is the heap allocator with sub-allocation
-  and a statistics report, followed by aliasing, the RHI-level validation layer,
-  names and markers, timestamps, the leak report, and device-lost handling.
+- Next: Phase 17, reflection, permutations, and hot reload. Phase 15's automated
+  checks and capture evidence are complete; the Intel HD Graphics 530 marker
+  sample submits and presents, and both PIX and RenderDoc show the nested pass
+  labels and blue frame. The raw native point-marker call is covered by RHI
+  tests; it is not presented as a separate capture UI event.

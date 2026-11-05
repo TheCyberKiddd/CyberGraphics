@@ -2,9 +2,13 @@
 
 #if defined(CYBER_RHI_HAS_D3D12)
 
+#include "d3d12_internal.h"
+
+#include <cyber/core/log.h>
 #include <cyber/memory/alignment.h>
 #include <cyber/rhi/memory.h>
 
+#include <cstdio>
 #include <d3d12.h>
 
 namespace cyber::rhi::d3d12
@@ -35,6 +39,47 @@ namespace
         break;
     }
     return D3D12_HEAP_TYPE_DEFAULT;
+}
+
+// The class's own words, so a heap's name reads exactly the way `MemoryStats`'
+// report and a capture's hierarchy do.
+[[nodiscard]] const char* ClassTextOf(MemoryClassType class_) noexcept
+{
+    switch (class_)
+    {
+    case MemoryClassType::Upload:
+        return "upload";
+    case MemoryClassType::Readback:
+        return "readback";
+    case MemoryClassType::DeviceLocal:
+    case MemoryClassType::Count:
+    default:
+        break;
+    }
+    return "device-local";
+}
+
+// Names one heap after its class and size. Captures and leak reports read
+// these back, and a heap whose name says what serves it is one a caller can
+// reason about without opening the allocator's internal state.
+void NameHeap(ID3D12Heap* heap, MemoryClassType class_, u64 sizeBytes, bool dedicated) noexcept
+{
+    if (heap == nullptr)
+    {
+        return;
+    }
+    char text[72]{};
+    if (dedicated)
+    {
+        std::snprintf(text, sizeof(text), "gpu heap %s (%.1f MiB) dedicated", ClassTextOf(class_),
+                      static_cast<double>(sizeBytes) / (1024.0 * 1024.0));
+    }
+    else
+    {
+        std::snprintf(text, sizeof(text), "gpu heap %s (%.1f MiB)", ClassTextOf(class_),
+                      static_cast<double>(sizeBytes) / (1024.0 * 1024.0));
+    }
+    detail::NameObject(heap, text);
 }
 
 // First entry whose offset is at or above `offset`. Every list is kept sorted
@@ -175,9 +220,16 @@ bool GpuHeapAllocator::OpenSubHeap(ClassState& classState, MemoryClassType class
     heap.Flags = D3D12_HEAP_FLAG_NONE;
 
     ID3D12Heap* api = nullptr;
-    if (FAILED(m_device->CreateHeap(&heap, __uuidof(ID3D12Heap), reinterpret_cast<void**>(&api))) ||
-        api == nullptr)
+    const HRESULT result =
+        m_device->CreateHeap(&heap, __uuidof(ID3D12Heap), reinterpret_cast<void**>(&api));
+    if (FAILED(result) || api == nullptr)
     {
+        CG_LOG(Error, Rhi,
+               "d3d12 allocator: CreateHeap failed class=%u size=%llu alignment=%llu "
+               "hr=0x%08lX removal=0x%08lX",
+               static_cast<u32>(class_), static_cast<unsigned long long>(heapBytes),
+               static_cast<unsigned long long>(heap.Alignment), static_cast<unsigned long>(result),
+               static_cast<unsigned long>(m_device->GetDeviceRemovedReason()));
         return false;
     }
 
@@ -199,6 +251,7 @@ bool GpuHeapAllocator::OpenSubHeap(ClassState& classState, MemoryClassType class
     sub.sizeBytes = heapBytes;
     sub.usedBytes = 0;
     sub.freeRanges[0] = SubAllocation{0, heapBytes};
+    NameHeap(api, class_, heapBytes, false);
     return true;
 }
 
@@ -345,10 +398,16 @@ Status<Error> GpuHeapAllocator::Allocate(MemoryClassType class_, u64 sizeBytes, 
     heap.Flags = D3D12_HEAP_FLAG_NONE;
 
     ID3D12Heap* dedicatedApi = nullptr;
-    if (FAILED(m_device->CreateHeap(&heap, __uuidof(ID3D12Heap),
-                                    reinterpret_cast<void**>(&dedicatedApi))) ||
-        dedicatedApi == nullptr)
+    const HRESULT result =
+        m_device->CreateHeap(&heap, __uuidof(ID3D12Heap), reinterpret_cast<void**>(&dedicatedApi));
+    if (FAILED(result) || dedicatedApi == nullptr)
     {
+        CG_LOG(Error, Rhi,
+               "d3d12 allocator: dedicated CreateHeap failed class=%u size=%llu "
+               "alignment=%llu hr=0x%08lX removal=0x%08lX",
+               static_cast<u32>(class_), static_cast<unsigned long long>(rounded),
+               static_cast<unsigned long long>(heap.Alignment), static_cast<unsigned long>(result),
+               static_cast<unsigned long>(m_device->GetDeviceRemovedReason()));
         return Status<Error>::Err(Error{
             ErrorCode::Internal, "d3d12 backend: no heap could be created for the allocation"});
     }
@@ -356,6 +415,7 @@ Status<Error> GpuHeapAllocator::Allocate(MemoryClassType class_, u64 sizeBytes, 
     dedicated.heap = dedicatedApi;
     dedicated.class_ = class_;
     dedicated.sizeBytes = rounded;
+    NameHeap(dedicatedApi, class_, rounded, true);
     if (!m_dedicated.TryPushBack(dedicated))
     {
         dedicatedApi->Release();

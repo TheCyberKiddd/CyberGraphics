@@ -129,6 +129,11 @@ Status<Error> D3D12CreateShader(void* internal, const ShaderDesc& desc, ShaderHa
     }
 
     auto& device = *static_cast<D3D12Device*>(internal);
+    const Status<Error> healthy = DeviceLostStatus(device);
+    if (!healthy)
+    {
+        return healthy;
+    }
 
     const void* source = desc.code.Data();
     u64 sourceSize = desc.code.Size();
@@ -307,6 +312,11 @@ Status<Error> D3D12CreateBindGroupLayout(void* internal, const BindGroupLayoutDe
     }
 
     auto& device = *static_cast<D3D12Device*>(internal);
+    const Status<Error> healthy = DeviceLostStatus(device);
+    if (!healthy)
+    {
+        return healthy;
+    }
     const std::lock_guard<std::mutex> lock(device.mutex);
 
     u32 descriptors = 0;
@@ -410,6 +420,11 @@ Status<Error> D3D12CreateBindGroup(void* internal, const BindGroupDesc& desc,
                            "d3d12 backend: group creation needs a device and an output handle");
     }
     auto& device = *static_cast<D3D12Device*>(internal);
+    const Status<Error> healthy = DeviceLostStatus(device);
+    if (!healthy)
+    {
+        return healthy;
+    }
     const std::lock_guard<std::mutex> lock(device.mutex);
 
     const D3D12LayoutSlot* layout = Resolve(device, desc.layout);
@@ -668,6 +683,11 @@ Status<Error> D3D12CreatePipelineLayout(void* internal, const PipelineLayoutDesc
     }
 
     auto& device = *static_cast<D3D12Device*>(internal);
+    const Status<Error> healthy = DeviceLostStatus(device);
+    if (!healthy)
+    {
+        return healthy;
+    }
     const std::lock_guard<std::mutex> lock(device.mutex);
 
     // A used slot contributes up to two descriptor tables; the RHI's four slots

@@ -331,6 +331,7 @@ void CommandList::Reset() noexcept
     }
     m_interface->reset(m_internal);
     m_state = CommandListState::Initial;
+    m_passLabelOpen = false;
 }
 
 Status<Error> CommandList::BeginRenderPass(const RenderPassDesc& desc) noexcept
@@ -345,7 +346,24 @@ Status<Error> CommandList::BeginRenderPass(const RenderPassDesc& desc) noexcept
     {
         return valid;
     }
-    return m_interface->beginRenderPass(m_internal, desc);
+    const Status<Error> begun = m_interface->beginRenderPass(m_internal, desc);
+    if (!begun)
+    {
+        return begun;
+    }
+    // The pass's own marker comes from the RHI, not from each caller: a capture
+    // then shows every pass as a labelled region with the caller's explicit
+    // labels nested inside. A pass without a label gets no event — the caller's
+    // choice — and a backend without marker support accepts the label call and
+    // drops it, which is the contract `BeginDebugLabel` already states.
+    if (desc.label != nullptr && desc.label[0] != '\0')
+    {
+        if (m_interface->beginDebugLabel(m_internal, desc.label))
+        {
+            m_passLabelOpen = true;
+        }
+    }
+    return begun;
 }
 
 Status<Error> CommandList::EndRenderPass() noexcept
@@ -354,6 +372,13 @@ Status<Error> CommandList::EndRenderPass() noexcept
     {
         return Fail(ErrorCode::InvalidArgument,
                     "the command list is not recording; call Begin() first");
+    }
+    // Close the RHI's own label before the pass ends, so it stays nested inside
+    // and so a rejection about balance never has to mention it.
+    if (m_passLabelOpen)
+    {
+        (void)m_interface->endDebugLabel(m_internal);
+        m_passLabelOpen = false;
     }
     return m_interface->endRenderPass(m_internal);
 }
@@ -677,6 +702,45 @@ Status<Error> CommandList::EndDebugLabel() noexcept
     return m_interface->endDebugLabel(m_internal);
 }
 
+Status<Error> CommandList::SetDebugMarker(const char* label) noexcept
+{
+    if (!IsRecording())
+    {
+        return Fail(ErrorCode::InvalidArgument,
+                    "the command list is not recording; call Begin() first");
+    }
+    if (label == nullptr || label[0] == '\0')
+    {
+        return Fail(ErrorCode::InvalidArgument, "a debug marker needs a non-empty name");
+    }
+    return m_interface->setDebugMarker(m_internal, label);
+}
+
+Status<Error> CommandList::WriteTimestamp(TimestampQueryHeapHandle heap, u32 queryIndex) noexcept
+{
+    if (!IsRecording())
+    {
+        return Fail(ErrorCode::InvalidArgument,
+                    "the command list is not recording; call Begin() first");
+    }
+    return m_interface->writeTimestamp(m_internal, heap, queryIndex);
+}
+
+Status<Error> CommandList::ResolveTimestamps(TimestampQueryHeapHandle heap, u32 firstQuery,
+                                             u32 queryCount) noexcept
+{
+    if (!IsRecording())
+    {
+        return Fail(ErrorCode::InvalidArgument,
+                    "the command list is not recording; call Begin() first");
+    }
+    if (queryCount == 0)
+    {
+        return Fail(ErrorCode::InvalidArgument, "timestamp query range is empty");
+    }
+    return m_interface->resolveTimestamps(m_internal, heap, firstQuery, queryCount);
+}
+
 void CommandList::Release() noexcept
 {
     if (m_device != nullptr && m_deviceInternal != nullptr && m_handle.IsValid() &&
@@ -691,6 +755,7 @@ void CommandList::Release() noexcept
     m_handle.Reset();
     m_state = CommandListState::Initial;
     m_queue = QueueKind::Graphics;
+    m_passLabelOpen = false;
 }
 
 void CommandList::MoveFrom(CommandList& other) noexcept
@@ -702,6 +767,7 @@ void CommandList::MoveFrom(CommandList& other) noexcept
     m_handle = other.m_handle;
     m_state = other.m_state;
     m_queue = other.m_queue;
+    m_passLabelOpen = other.m_passLabelOpen;
 
     other.m_device = nullptr;
     other.m_deviceInternal = nullptr;
@@ -710,6 +776,7 @@ void CommandList::MoveFrom(CommandList& other) noexcept
     other.m_handle.Reset();
     other.m_state = CommandListState::Initial;
     other.m_queue = QueueKind::Graphics;
+    other.m_passLabelOpen = false;
 }
 
 }  // namespace cyber::rhi

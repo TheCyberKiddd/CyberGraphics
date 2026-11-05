@@ -36,6 +36,14 @@
       }
     },
     {
+      "name": "profile",
+      "displayName": "Profile",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    },
+    {
       "name": "shipping",
       "displayName": "Shipping",
       "inherits": "base",
@@ -87,6 +95,10 @@
       "configurePreset": "release"
     },
     {
+      "name": "profile",
+      "configurePreset": "profile"
+    },
+    {
       "name": "shipping",
       "configurePreset": "shipping"
     },
@@ -118,6 +130,13 @@
     {
       "name": "release",
       "configurePreset": "release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "profile",
+      "configurePreset": "profile",
       "output": {
         "outputOnFailure": true
       }

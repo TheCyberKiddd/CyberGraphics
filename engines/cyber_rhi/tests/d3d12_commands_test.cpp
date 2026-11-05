@@ -544,8 +544,10 @@ CG_TEST(d3d12_commands_draw_a_colored_triangle)
     pass.depthStencil.depthLoadOp = LoadOp::Clear;
     pass.depthStencil.depthStoreOp = StoreOp::Store;
     pass.depthStencil.clearValue = ClearDepthStencilValue::Of(0.0f);
+    pass.label = "Geometry Pass";
 
     CG_REQUIRE(list.BeginRenderPass(pass).IsOk());
+    CG_REQUIRE(list.SetDebugMarker("Geometry draw begins").IsOk());
     CG_REQUIRE(list.SetPipeline(frame.pipeline).IsOk());
     CG_REQUIRE(list.SetBindGroup(BindGroupSlot::PerFrame, frame.group).IsOk());
     CG_REQUIRE(list.SetViewport(Viewport::Of(static_cast<float>(kSize), static_cast<float>(kSize)))
@@ -922,7 +924,9 @@ CG_TEST(d3d12_commands_leave_the_debug_layer_silent)
         pass.depthStencil.depthLoadOp = LoadOp::Clear;
         pass.depthStencil.depthStoreOp = StoreOp::Store;
         pass.depthStencil.clearValue = ClearDepthStencilValue::Of(0.0f);
+        pass.label = "Textured Geometry Pass";
         CG_REQUIRE(list.BeginRenderPass(pass).IsOk());
+        CG_REQUIRE(list.SetDebugMarker("Textured geometry draw begins").IsOk());
         CG_REQUIRE(list.SetPipeline(pipeline.Value()).IsOk());
         CG_REQUIRE(list.SetBindGroup(BindGroupSlot::PerFrame, group.Value()).IsOk());
         CG_REQUIRE(

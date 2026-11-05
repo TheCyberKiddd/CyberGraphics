@@ -25,6 +25,7 @@
 #include <cyber/rhi/shader.h>
 #include <cyber/rhi/submission.h>
 #include <cyber/rhi/texture.h>
+#include <cyber/shaders/compiler.h>
 #include <cyber/software/camera.h>
 #include <cyber/software/depth_buffer.h>
 #include <cyber/software/framebuffer.h>
@@ -51,6 +52,7 @@ using cyber::math::Vec4;
 using cyber::memory::Byte;
 using cyber::memory::HeapAllocator;
 using cyber::memory::Span;
+using cyber::memory::StringView;
 using namespace cyber::rhi;
 namespace software = cyber::software;
 
@@ -376,35 +378,23 @@ struct GpuVertex
 static_assert(sizeof(GpuVertex) == 20);
 
 constexpr char kCubeVertexSource[] =
-    "struct Input\n"
-    "{\n"
-    "    float3 position : TEXCOORD0;\n"
-    "    float2 uv : TEXCOORD1;\n"
-    "};\n"
-    "struct Output\n"
-    "{\n"
-    "    float4 position : SV_Position;\n"
-    "    float2 uv : TEXCOORD0;\n"
-    "};\n"
-    "cbuffer Scene : register(b0)\n"
-    "{\n"
-    "    float4x4 modelViewProjection;\n"
-    "};\n"
-    "Output main(Input input)\n"
-    "{\n"
-    "    Output output;\n"
-    "    output.position = mul(modelViewProjection, float4(input.position, 1.0));\n"
-    "    output.uv = input.uv;\n"
-    "    return output;\n"
+    "shader vertex Cube {\n"
+    "    input float3 position @location(0);\n"
+    "    input float2 uv @location(1);\n"
+    "    output float4 clipPosition @builtin(position);\n"
+    "    output float2 texcoord @location(0);\n"
+    "    uniform float4x4 modelViewProjection @register(b0);\n"
+    "    output.clipPosition = mul(modelViewProjection, float4(input.position, 1.0));\n"
+    "    output.texcoord = input.uv;\n"
     "}\n";
 
-constexpr char kCubePixelSource[] =
-    "Texture2D albedo : register(t0, space0);\n"
-    "SamplerState albedoSampler : register(s0, space0);\n"
-    "float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target\n"
-    "{\n"
-    "    return albedo.Sample(albedoSampler, uv);\n"
-    "}\n";
+constexpr char kCubePixelSource[] = "shader pixel Cube {\n"
+                                    "    input float4 position @builtin(position);\n"
+                                    "    input float2 uv @location(0);\n"
+                                    "    texture2d albedo @register(t0, space0);\n"
+                                    "    sampler albedoSampler @register(s0, space0);\n"
+                                    "    return sample(albedo, albedoSampler, input.uv);\n"
+                                    "}\n";
 
 constexpr char kTriangleVertexSource[] = "struct Input\n"
                                          "{\n"
@@ -423,6 +413,11 @@ constexpr char kTrianglePixelSource[] = "float4 main(float4 position : SV_Positi
 [[nodiscard]] Span<const Byte> Bytes(const char* text) noexcept
 {
     return Span<const Byte>(reinterpret_cast<const Byte*>(text), std::strlen(text));
+}
+
+[[nodiscard]] Span<const Byte> Bytes(StringView text) noexcept
+{
+    return Span<const Byte>(reinterpret_cast<const Byte*>(text.Data()), text.Size());
 }
 
 [[nodiscard]] bool OpenD3D12Device(Device& out, HeapAllocator& heap) noexcept
@@ -925,9 +920,20 @@ u32 RenderD3DCube(HeapAllocator& heap, u8* outPixels)
         return __LINE__;
     }
 
+    auto generatedVertex = cyber::shaders::CompileHlsl("cube_vertex.cgs", kCubeVertexSource, heap);
+    if (!generatedVertex)
+    {
+        return __LINE__;
+    }
+    auto generatedPixel = cyber::shaders::CompileHlsl("cube_pixel.cgs", kCubePixelSource, heap);
+    if (!generatedPixel)
+    {
+        return __LINE__;
+    }
+
     ShaderDesc vertexShaderDesc{};
     vertexShaderDesc.stage = ShaderStage::Vertex;
-    vertexShaderDesc.code = Bytes(kCubeVertexSource);
+    vertexShaderDesc.code = Bytes(generatedVertex.Value().hlsl.View());
     vertexShaderDesc.entryPoint = "main";
     auto vertexShader = device.CreateShader(vertexShaderDesc);
     if (!vertexShader)
@@ -936,7 +942,7 @@ u32 RenderD3DCube(HeapAllocator& heap, u8* outPixels)
     }
     ShaderDesc pixelShaderDesc{};
     pixelShaderDesc.stage = ShaderStage::Pixel;
-    pixelShaderDesc.code = Bytes(kCubePixelSource);
+    pixelShaderDesc.code = Bytes(generatedPixel.Value().hlsl.View());
     pixelShaderDesc.entryPoint = "main";
     auto pixelShader = device.CreateShader(pixelShaderDesc);
     if (!pixelShader)

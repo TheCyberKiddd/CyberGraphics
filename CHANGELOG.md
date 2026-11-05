@@ -8,6 +8,19 @@ semantic versioning once a public API exists.
 
 ### Added
 
+- Phase 16 complete: `cyber_shaders` compiles a bounded typed Cyber shader
+  language to HLSL with source diagnostics, and the D3D12 cube comparison uses
+  the generated stages. Debug, Release, and Debug-ASan pass 88/88; package,
+  structure, layer, and repository-wide formatting checks pass.
+- Phase 15 GPU memory and debug tooling: D3D12 heap suballocation and transient
+  reuse, RHI validation, object-name read-back, first-party native command-list
+  markers, fence-safe timestamps, named leak reporting, and sticky device-loss
+  diagnostics. The marker sample and phase report are included. Automated
+  Debug, Profile, Release, Shipping, ASan, structure, layer, formatting, and
+  Profile package-consumer checks pass. PIX and RenderDoc captures show the
+  nested pass labels and blue presented frame on the Intel HD Graphics 530
+  after fixing the sample's RTV heap-kind mismatch. The native point-marker
+  path is covered by RHI tests; PIX does not show it as a separate UI event.
 - Phase 14, increment 7 (the phase's done-when line): an image comparison that
   renders the same scene through the Direct3D 12 backend and through
   `cyber_software_renderer` and compares the two images with a recorded tolerance

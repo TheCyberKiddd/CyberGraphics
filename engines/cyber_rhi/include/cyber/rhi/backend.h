@@ -20,6 +20,7 @@
 #include <cyber/rhi/submission.h>
 #include <cyber/rhi/swapchain.h>
 #include <cyber/rhi/texture.h>
+#include <cyber/rhi/timestamp.h>
 
 namespace cyber::rhi
 {
@@ -48,6 +49,55 @@ struct DeviceCreation
     // Backend-private device state, owned by the device and released by
     // `Backend::destroyDevice`.
     void* internal = nullptr;
+};
+
+// Which object an `ObjectRef` names for the debug-name query. Every kind here
+// has a descriptor with an optional caller-supplied label the backend forwards
+// to the driver; a kind the backend cannot name with the driver's own mechanism
+// (a view, a sampler, or a bind group, none of which is a single D3D12 object)
+// answers an unnamed `ObjectNameInfo` honestly rather than inventing a name.
+enum class ObjectKind : u8
+{
+    Buffer,
+    Texture,
+    TextureView,
+    Sampler,
+    Shader,
+    BindGroup,
+    PipelineLayout,
+    Pipeline,
+    PipelineCache,
+    Fence,
+    TimestampQueryHeap,
+    CommandList,
+};
+
+// A handle generalized across kinds, for the one debug surface that needs it:
+// the debug-name query. `packed` is the lossless form `PackHandle` produces for
+// any typed handle, so a caller converts a `BufferHandle` or a `FenceHandle`
+// with one call and the read-back unpacks it without knowing the tag.
+struct ObjectRef
+{
+    ObjectKind kind = ObjectKind::Buffer;
+    // `PackHandle` form: index in the high half, generation in the low half.
+    u64 packed = 0;
+};
+
+// The debug name a driver shows for one object, copied. 128 bytes is also the
+// conversion buffer the backend's own naming path uses, so a name a backend can
+// set is one it can read back whole; anything longer was never fully named.
+struct ObjectNameInfo
+{
+    // False for a kind with no nameable driver object, an unnamed object, and a
+    // stale handle. The three are indistinguishable by design: the driver keeps
+    // no name for any of them, and inventing a difference would be a lie.
+    bool named = false;
+    // Byte length of `name`, without the terminator. 0 when `named` is false.
+    // The name is UTF-8, which is every RHI descriptor label's own form.
+    u32 length = 0;
+    // The name, NUL-terminated. Truncated to fit; the drop is visible because
+    // `length` counts what `name` holds, not what the caller asked for.
+    char name[128]{};
 };
 
 // Per-device function table. Every method is required: a null entry is a
@@ -79,6 +129,22 @@ struct DeviceInterface
                                u64 timeoutNanoseconds) noexcept;
     // Current value of a fence, or 0 for a stale handle.
     u64 (*fenceValue)(const void* internal, FenceHandle fence) noexcept;
+    // Creates a timestamp query heap.
+    Status<Error> (*createTimestampQueryHeap)(void* internal, const TimestampQueryHeapDesc& desc,
+                                              TimestampQueryHeapHandle* out) noexcept;
+    // Destroys a timestamp query heap.
+    Status<Error> (*destroyTimestampQueryHeap)(void* internal,
+                                               TimestampQueryHeapHandle heap) noexcept;
+    // Copies resolved timestamps to the caller after `completionFence` has
+    // reached `completionValue`. The output span must hold `queryCount` values.
+    Status<Error> (*readTimestamps)(void* internal, TimestampQueryHeapHandle heap, u32 firstQuery,
+                                    u32 queryCount, FenceHandle completionFence,
+                                    u64 completionValue, memory::Span<u64> out) noexcept;
+    // Ticks per second for this queue, or zero when timestamp queries are not
+    // supported.
+    u64 (*timestampFrequency)(const void* internal, QueueKind queue) noexcept;
+    // Logs and returns the count of live resources owned by the device.
+    u32 (*reportLeaks)(const void* internal) noexcept;
     // Blocks until the device has finished all submitted work. Phase 10 has no
     // submission, so every backend completes immediately.
     Status<Error> (*waitIdle)(void* internal) noexcept;
@@ -212,11 +278,23 @@ struct DeviceInterface
     // non-null. A description no backend can present is
     // `ErrorCode::InvalidArgument`; a present mode the adapter cannot serve is
     // `ErrorCode::Unsupported`.
-    Status<Error> (*createSwapChain)(void* internal, const SwapChainDesc& desc,
-                                     SwapChainHandle* out, SwapChainCreation* creation) noexcept;
-    // Releases a swapchain and its images. A caller that has an image acquired
+    Status<Error> (*createSwapChain)(
+        void* internal, const SwapChainDesc& desc, SwapChainHandle* out,
+        SwapChainCreation* creation) noexcept;  // Releases a swapchain and its images. A caller
+                                                // that has an image acquired
     // may still destroy the swapchain; the image is simply never presented.
     Status<Error> (*destroySwapChain)(void* internal, SwapChainHandle swapchain) noexcept;
+
+    // Reports the debug name one object shows in a capture, so a leak report,
+    // a capture review, or a test can read back what a resource's label became.
+    // The driver's own name slot is the source of truth: a read-back that
+    // returned the backend's bookkeeping would never notice a lost step, so
+    // what this entry answers is what the driver would show. Must not allocate
+    // and must hold no lock the caller can observe, matching `pipelineState`.
+    // A kind with no nameable driver object (a view, a sampler, or a bind group
+    // in the D3D12 backend), an unnamed object, and a stale handle all report
+    // `named == false`; the concept does not exist for them.
+    ObjectNameInfo (*objectName)(const void* internal, const ObjectRef& object) noexcept;
 };
 
 // A graphics backend. Obtained from the backend's own entry point (for example
