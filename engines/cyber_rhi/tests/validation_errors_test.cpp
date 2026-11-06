@@ -5,9 +5,9 @@
 //
 // Recording-side errors (barriers, bindings) are the shared rule set the null
 // backend performs and the wrapper forwards. Lifetime errors (destroy and
-// reuse while a submission is in flight) are the wrapper's own, and they need a
-// backend whose submissions outlive `Submit`, so they run on the D3D12 backend
-// with a gate fence holding the GPU work back.
+// reuse while a submission is in flight) are the wrapper's own, and need a
+// backend whose submissions outlive `Submit`, so they run on D3D12 with a gate
+// fence holding the GPU work back. These two tests skip when D3D12 is absent.
 
 #include "rhi_fixture.h"
 
@@ -53,9 +53,8 @@ bool MentionsFlight(const cyber::core::Status<cyber::core::Error>& status) noexc
            std::strstr(status.Error().message, "in flight") != nullptr;
 }
 
-// A device on the last adapter: WARP when the machine has no GPU, which is
-// where CI runs. `Device::Create` installs the validating wrapper in front of
-// the backend at the default `ValidationLevel::Standard`.
+// Use the last adapter, which is WARP on the Windows CI runner. Device::Create
+// installs the standard validating wrapper around the selected backend.
 [[nodiscard]] bool OpenD3D12Device(Device& out, HeapAllocator& heap) noexcept
 {
     const Backend* backend = D3D12Backend();
@@ -103,14 +102,6 @@ void WatchRejections(void* userData, const cyber::core::LogRecord& record) noexc
     }
     watch->count += 1;
     std::snprintf(watch->last, sizeof(watch->last), "%.400s", record.message);
-}
-
-// The watch is added by the test itself so the logger holds the address of a
-// sink the test's stack owns. See `d3d12_commands_test.cpp` for the same shape.
-void InstallRejectionWatch(RejectionWatch& watch, cyber::core::CallbackSink& sink) noexcept
-{
-    sink = cyber::core::CallbackSink{&WatchRejections, &watch};
-    (void)cyber::core::DefaultLogger().AddSink(&sink);
 }
 
 void RemoveRejectionWatch(cyber::core::CallbackSink& sink) noexcept
@@ -274,7 +265,7 @@ CG_TEST(rhi_validation_errors_catch_a_destroy_while_in_flight)
     Device device;
     if (!OpenD3D12Device(device, heap))
     {
-        CG_FAIL("this build has no Direct3D 12 adapter to record on");
+        CG_SKIP("this build has no Direct3D 12 adapter to record on");
         return;
     }
 
@@ -352,7 +343,7 @@ CG_TEST(rhi_validation_errors_catch_a_transient_reuse_before_its_fence)
     Device device;
     if (!OpenD3D12Device(device, heap))
     {
-        CG_FAIL("this build has no Direct3D 12 adapter to record on");
+        CG_SKIP("this build has no Direct3D 12 adapter to record on");
         return;
     }
 
