@@ -754,8 +754,7 @@ Result<SimplifiedMesh, Error> SimplifyMesh(const Mesh& source, u32 targetTriangl
             sortedEdges[index] = EdgePair{edgeWords[index * 2], edgeWords[index * 2 + 1]};
         }
         std::sort(sortedEdges.Data(), sortedEdges.Data() + sortedEdges.Size(),
-                  [](const EdgePair& lhs, const EdgePair& rhs) noexcept
-                  {
+                  [](const EdgePair& lhs, const EdgePair& rhs) noexcept {
                       return lhs.first < rhs.first ||
                              (lhs.first == rhs.first && lhs.second < rhs.second);
                   });
