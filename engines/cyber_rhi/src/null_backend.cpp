@@ -53,16 +53,6 @@ using cyber::memory::SlotMap;
     return Status<Error>::Err(Error{code, message});
 }
 
-[[nodiscard]] bool Fail(Error* out, ErrorCode code, const char* message) noexcept
-{
-    if (out != nullptr)
-    {
-        out->code = code;
-        out->message = message;
-    }
-    return false;
-}
-
 // One slot of the fence table. `generation` only increases, and 0 means the slot
 // has never been used, so a valid handle always has a non-zero generation.
 struct NullFenceSlot

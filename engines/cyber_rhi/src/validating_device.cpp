@@ -538,34 +538,6 @@ struct ValidatingDevice
 }
 
 // -----------------------------------------------------------------------
-// Rejection helpers.
-//
-// Every rejection the wrapper makes on its own logs at warning level on the
-// `Rhi` channel, which is where a caller debugs a wrong descriptor, and
-// returns the same code and text the call reports.
-// -----------------------------------------------------------------------
-
-[[nodiscard]] Status<Error> Reject(const char* call, ErrorCode code, const char* message) noexcept
-{
-    const Error error{code, message};
-    CG_LOG(Warning, Rhi, "validating device rejected %s: %s", call, error.message);
-    return Status<Error>::Err(error);
-}
-
-// Shared form for the shared validators: run the rule, and on failure reject
-// with the rule's own message. `true` means "go on to the real call".
-[[nodiscard]] Status<Error> RunValidator(const char* call, bool passed, const Error& error) noexcept
-{
-    if (passed)
-    {
-        return Status<Error>::Ok();
-    }
-    const Error reported{error.code, error.message};
-    CG_LOG(Warning, Rhi, "validating device rejected %s: %s", call, reported.message);
-    return Status<Error>::Err(reported);
-}
-
-// -----------------------------------------------------------------------
 // Destroy-path helpers, shared by buffers and textures.
 // -----------------------------------------------------------------------
 
@@ -601,8 +573,7 @@ struct ValidatingDevice
            static_cast<unsigned long long>(packedResource),
            static_cast<unsigned long long>(PackHandle(unreached.fence)),
            static_cast<unsigned long long>(unreached.value));
-    // The specialized line above is this rejection's warning; `Reject` would
-    // log its generic form again, and a rejection logs once.
+    // The specialized line above is this rejection's warning, so this logs once.
     const Error error{ErrorCode::InvalidArgument, "a resource still in flight was destroyed"};
     return Status<Error>::Err(error);
 }
