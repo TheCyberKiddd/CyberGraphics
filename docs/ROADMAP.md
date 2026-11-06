@@ -9,9 +9,8 @@ documents are binding:
   per-phase work packages, reading list, tasks, tips, and report template.
 
 Work phases in this order. Do not tick a phase until its done-when line is
-proved with committed evidence. Phases 1-21 are complete. Phase 22's
-implementation and local validation are recorded in its report; its checkbox
-remains pending commit.
+proved with committed evidence. Phases 1-22 are complete; Phase 22's
+implementation and local validation are recorded in its report.
 
 ## Part 1: Foundation (phases 1-5)
 
@@ -50,7 +49,7 @@ remains pending commit.
 
 - [x] **Phase 20 — Render graph** — Debug, Release, and Debug-ASan pass 100/100; package/source consumers and repository checks pass; the null-backend multi-pass test verifies automatic barriers, culls an unused pass, and writes a DOT dump · [summary](graphics/PHASE_20.md) · [report](reports/phase-20.md) · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-20-render-graph) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-20-render-graph)
 - [x] **Phase 21 — Render thread and frame pipelining** — profiler proves producer/render overlap; Linux ThreadSanitizer passes the null-backend render-thread and hot-pipeline targets; resize/shutdown stress passes; Debug, Release, Debug-ASan, package/source consumers, and repository checks pass · [summary](graphics/PHASE_21.md) · [report](reports/phase-21.md) · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-21-render-thread-and-frame-pipelining) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-21-render-thread-and-frame-pipelining)
-- [ ] **Phase 22 — Scene, render proxies, and culling** — implementation and local validation recorded; master checkbox pending commit · [summary](graphics/PHASE_22.md) · [report](reports/phase-22.md) · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-22-scene-render-proxies-and-culling) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-22-scene-render-proxies-and-culling)
+- [x] **Phase 22 — Scene, render proxies, and culling** — Debug, Release, and Debug-ASan pass 104/104; scene ThreadSanitizer passes 2/2; package/source consumers and repository checks pass; 100,000-proxy benchmark matches all 1,681 visible handles at 2.881 ms p95 · [summary](graphics/PHASE_22.md) · [report](reports/phase-22.md) · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-22-scene-render-proxies-and-culling) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-22-scene-render-proxies-and-culling)
 - [ ] **Phase 23 — Geometry pipeline** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-23-geometry-pipeline) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-23-geometry-pipeline)
 - [ ] **Phase 24 — Asset import and cooked render assets** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-24-asset-import-and-cooked-render-assets) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-24-asset-import-and-cooked-render-assets)
 - [ ] **Phase 25 — Engine-facing renderer interface** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-25-engine-facing-renderer-interface) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-25-engine-facing-renderer-interface)
@@ -113,9 +112,8 @@ boundary, and null backend; 58/58 tests in debug.
   comparison that renders a colored triangle and a textured cube through the RHI
   and matches the software renderer's images within a recorded tolerance. The
   debug layer is enabled with GPU-based validation and its messages fail a test.
-- Current: Phase 22, scene, render proxies, and culling. Its local
-  implementation and validation evidence are in the report; commit before
-  checking the master roadmap. Phase 21's render-thread pipeline and validation
+- Current: Phase 22, scene, render proxies, and culling. Its implementation and
+  validation evidence are committed in the report. Phase 21's render-thread pipeline and validation
   evidence are recorded in its report. Phase 20's render graph,
   multi-pass tests, and validation evidence are recorded in its report. Phase
   19's constant streaming, descriptor management, capability-gated bindless

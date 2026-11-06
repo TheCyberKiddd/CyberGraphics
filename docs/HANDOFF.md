@@ -1,8 +1,10 @@
-# Handoff — Phase 22 locally validated
+# Handoff — Phase 22 committed
 
 ## Current state
 
-- Last verified commit: `1e251aa` (pre-Phase 22); Phase 22 changes are uncommitted.
+- Phase 22 implementation commit: `cd3ee2b` (`scene: implement Phase 22 scene proxies and culling`).
+- Working tree contains no Phase 22 changes; unrelated
+  `diagnosing-low-phase-6-sample-frame-rate.json` remains untracked.
 - `cyber_scene` now provides copied mesh/light/camera proxies, bounded command
   packets through the Phase 21 render queue, generation-checked handles,
   contiguous bounds/transform records, parallel culling, and screen-space LOD.
@@ -11,8 +13,8 @@
 - The 100,000-proxy benchmark matches all 1,681 visible handles to the serial
   reference: 1.777 ms median, 2.881 ms p95 on an Intel Core i5-6400 (4 cores).
 - Design, reading notes, ADR 0025, summary, and report are present.
-- The Phase 22 master-roadmap checkbox remains unchecked until this evidence
-  is committed.
+- The Phase 22 master-roadmap checkbox is checked now that implementation and
+  validation evidence are committed.
 
 ## Decisions and known gaps
 
@@ -25,6 +27,5 @@
 
 ## Exact next step
 
-Run `.\scripts\format.ps1 -Check` and `git diff --check`, review the Phase 22
-diff, then commit it. Only after the commit should the master roadmap checkbox
-be marked complete; Phase 23 is next.
+Phase 23, Geometry pipeline, is next. Read its roadmap and build-guide sections
+and required design references before beginning implementation.
