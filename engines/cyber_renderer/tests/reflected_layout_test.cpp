@@ -206,6 +206,41 @@ CG_TEST(renderer_reflected_layout_rejects_unsupported_bindings)
     CG_EXPECT_EQ(storage.Error().code, ErrorCode::Unsupported);
 }
 
+CG_TEST(renderer_reflected_layout_maps_material_constants_to_per_material)
+{
+    constexpr char pixelSource[] = "shader pixel Material {\n"
+                                   "    input float4 position @builtin(position);\n"
+                                   "    uniform float4 baseColorFactor @register(b1, space2);\n"
+                                   "    return baseColorFactor;\n"
+                                   "}\n";
+    HeapAllocator allocator;
+    Reflection pixel{};
+    CG_REQUIRE(Compile(pixelSource, allocator, pixel));
+    const Reflection* stages[] = {&pixel};
+    auto layout = BuildReflectedLayout(Span<const Reflection* const>(stages, 1));
+    CG_REQUIRE(static_cast<bool>(layout));
+    const ReflectedLayout& value = layout.Value();
+
+    CG_EXPECT_EQ(value.materialConstantsBinding, u32{0});
+    CG_EXPECT_EQ(value.materialConstantsSizeBytes, u32{16});
+    CG_EXPECT_EQ(value.bindingCounts[2], u32{1});
+    CG_EXPECT_EQ(value.slots[2][0].entry.type, BindingType::UniformBuffer);
+    CG_EXPECT_EQ(value.slots[2][0].entry.shaderRegister, u32{1});
+    CG_EXPECT_EQ(value.slots[2][0].registerIndex, u32{1});
+
+    constexpr char renamedSource[] = "shader pixel Material {\n"
+                                     "    input float4 position @builtin(position);\n"
+                                     "    uniform float4 tintFactor @register(b1, space2);\n"
+                                     "    return tintFactor;\n"
+                                     "}\n";
+    Reflection renamed{};
+    CG_REQUIRE(Compile(renamedSource, allocator, renamed));
+    const Reflection* renamedStage[] = {&renamed};
+    auto renamedLayout = BuildReflectedLayout(Span<const Reflection* const>(renamedStage, 1));
+    CG_REQUIRE(static_cast<bool>(renamedLayout));
+    CG_EXPECT_FALSE(value == renamedLayout.Value());
+}
+
 CG_TEST(renderer_reflected_layout_creates_device_objects)
 {
     HeapAllocator heap;

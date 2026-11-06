@@ -12,7 +12,7 @@ the relevant phase exists. A sample that is not tested will break.
 | `04_textured/` | Checker-textured cube with Lambert diffuse and a Blinn-Phong highlight. | 9 |
 | `01_triangle/` | First RHI triangle. | 14 |
 | `02_cube/` | Textured, rotating cube through the RHI. | 14 |
-| `03_materials/` | Material definitions and instances. | 18 |
+| `07_materials/` | Reflected material definitions and instances rendered through D3D12. | 18 |
 | `04_lighting/` | PBR sphere grid and light types. | 26 |
 | `host_app/` | Stub Cyber Engine host that loads renderer plugins. | 25 |
 

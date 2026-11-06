@@ -3,9 +3,12 @@ cyber_add_module(
     LAYER 3
     SOURCES
         src/hot_pipeline.cpp
+        src/material.cpp
+        src/material_file.cpp
         src/reflected_layout.cpp
     PUBLIC_HEADERS
         include/cyber/renderer/hot_pipeline.h
+        include/cyber/renderer/material.h
         include/cyber/renderer/reflected_layout.h
     DEPENDS core memory jobs rhi shaders
 )
@@ -28,5 +31,19 @@ cyber_add_test(
     NAME renderer_public_headers
     SOURCES
         tests/public_headers_test.cpp
+    DEPENDS renderer
+)
+
+cyber_add_test(
+    NAME renderer_material
+    SOURCES
+        tests/material_test.cpp
+    DEPENDS renderer shaders rhi memory
+)
+
+cyber_add_test(
+    NAME renderer_material_file
+    SOURCES
+        tests/material_file_test.cpp
     DEPENDS renderer
 )

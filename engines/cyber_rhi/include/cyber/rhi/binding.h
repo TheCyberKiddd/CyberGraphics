@@ -93,6 +93,7 @@ inline constexpr u32 kBindingTypeCount = static_cast<u32>(BindingType::Count);
 
 // Largest number of push-constant ranges one pipeline layout may declare.
 inline constexpr u32 kMaxPushConstantRanges = 4;
+inline constexpr u32 kNoShaderRegister = 0xFFFFFFFFU;
 
 // One binding slot in a group layout.
 struct BindGroupLayoutEntry
@@ -107,6 +108,10 @@ struct BindGroupLayoutEntry
     // Number of resources the binding consumes. A value above 1 is an array
     // indexed at run time; the bind group supplies that many resources in a row.
     u32 arrayCount = 1;
+    // Optional explicit shader register index. When unset, the backend assigns
+    // registers in entry order within this descriptor type; the bind-group slot
+    // selects the register space.
+    u32 shaderRegister = kNoShaderRegister;
 };
 
 // Description of a bind group layout.

@@ -41,6 +41,7 @@ target_link_libraries(cyber_engine_renderer PRIVATE
     cyber::core
     cyber::math
     cyber::memory
+    cyber::renderer
 )
 ```
 
@@ -63,6 +64,7 @@ target_link_libraries(cyber_engine_renderer PRIVATE
     cyber::core
     cyber::math
     cyber::memory
+    cyber::renderer
 )
 ```
 
@@ -72,10 +74,24 @@ The install tree contains:
 include/cyber/core/...          core module headers
 include/cyber/math/...          math module headers
 include/cyber/memory/...        allocator and container headers
+include/cyber/platform/...      platform service headers
+include/cyber/perf/...          profiling service headers
+include/cyber/jobs/...          job-system headers
+include/cyber/rhi/...           rendering hardware interface headers
+include/cyber/shaders/...       shader compiler and reflection headers
+include/cyber/renderer/...      renderer and material headers
+include/cyber/software/...      software renderer headers
 include/cybergraphics/          stable C ABI (empty until Phase 25)
+lib/cyber_platform.lib          static module library
+lib/cyber_perf.lib              static module library
+lib/cyber_jobs.lib              static module library
+lib/cyber_rhi.lib                static module library
+lib/cyber_shaders.lib            static module library
+lib/cyber_renderer.lib           static module library
+lib/cyber_software_renderer.lib  static module library
 lib/cyber_core.lib              static module library
 lib/cyber_math.lib              static module library
-lib/cyber_memory.lib            static module library
+lib/cyber_memory.lib             static module library
 lib/cmake/CyberGraphics/...     package config and exported targets
 share/CyberGraphics/...         LICENSE and notices
 ```
@@ -92,7 +108,13 @@ Linux, so neither path can silently break.
 | `cyber::core` | `cyber::core` | Core primitives. |
 | `cyber::math` | `cyber::math` | Vectors, matrices, projections, geometry. |
 | `cyber::memory` | `cyber::memory` | Allocators, containers, strings, and generation handles. |
-| `cyber::rhi`, ... | same | Added when their phases start. |
+| `cyber::platform` | `cyber::platform` | Windows platform and file services. |
+| `cyber::perf` | `cyber::perf` | Profiling interfaces. |
+| `cyber::jobs` | `cyber::jobs` | Job system. |
+| `cyber::rhi` | `cyber::rhi` | Rendering hardware interface. |
+| `cyber::shaders` | `cyber::shaders` | Shader compiler, reflection, and cache. |
+| `cyber::renderer` | `cyber::renderer` | Reflected pipelines and material system. |
+| `cyber::software_renderer` | `cyber::software_renderer` | CPU reference renderer. |
 
 Build-internal warning policy and test targets are not exported.
 

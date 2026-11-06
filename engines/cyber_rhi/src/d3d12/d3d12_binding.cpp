@@ -48,6 +48,24 @@ using cyber::memory::kInvalidHandleIndex;
     return handle;
 }
 
+[[nodiscard]] u32 ShaderRegisterForEntry(const D3D12LayoutSlot& layout, u32 entryIndex) noexcept
+{
+    const BindGroupLayoutEntry& entry = layout.entries[entryIndex];
+    if (entry.shaderRegister != kNoShaderRegister)
+    {
+        return entry.shaderRegister;
+    }
+    u32 nextRegister = 0;
+    for (u32 prior = 0; prior < entryIndex; ++prior)
+    {
+        if (layout.entries[prior].type == entry.type)
+        {
+            nextRegister += layout.entries[prior].arrayCount;
+        }
+    }
+    return nextRegister;
+}
+
 // Compile target for a stage. Every stage the RHI names has one; the shader model
 // is 5.1 because that is what feature level 11_0 guarantees.
 [[nodiscard]] const char* TargetFor(ShaderStage stage) noexcept
@@ -691,12 +709,13 @@ Status<Error> D3D12CreatePipelineLayout(void* internal, const PipelineLayoutDesc
     const std::lock_guard<std::mutex> lock(device.mutex);
 
     // A used slot contributes up to two descriptor tables; the RHI's four slots
-    // become register spaces 0..3, so the same shader works for any layout. The
-    // resource table and the sampler table are separate because the API forbids
-    // mixing the two descriptor kinds in one heap.
+    // become register spaces 0..3. Resource tables preserve each binding's
+    // register class and shader register, while sampler tables remain separate
+    // because the API forbids mixing their descriptors.
     constexpr u32 kMaxParameters = kBindGroupSlotCount * 2 + 1;
+    constexpr u32 kMaxRanges = kBindGroupSlotCount * kMaxLayoutEntries;
     D3D12_ROOT_PARAMETER parameters[kMaxParameters]{};
-    D3D12_DESCRIPTOR_RANGE ranges[kBindGroupSlotCount * 2]{};
+    D3D12_DESCRIPTOR_RANGE ranges[kMaxRanges]{};
     u32 parameterCount = 0;
     u32 rangeCount = 0;
     u32 descriptorCounts[kBindGroupSlotCount]{};
@@ -722,39 +741,76 @@ Status<Error> D3D12CreatePipelineLayout(void* internal, const PipelineLayoutDesc
         }
         descriptorCounts[slotIndex] = layout->descriptorCount;
 
-        if (layout->resourceCount > 0 && parameterCount < kMaxParameters)
+        const u32 firstResourceRange = rangeCount;
+        u32 resourceOffset = 0;
+        for (u32 entryIndex = 0; entryIndex < layout->entryCount; ++entryIndex)
         {
-            D3D12_DESCRIPTOR_RANGE& range = ranges[rangeCount];
-            range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-            range.NumDescriptors = layout->resourceCount;
-            range.BaseShaderRegister = 0;
+            const BindGroupLayoutEntry& entry = layout->entries[entryIndex];
+            if (entry.type == BindingType::Sampler)
+            {
+                continue;
+            }
+            D3D12_DESCRIPTOR_RANGE& range = ranges[rangeCount++];
+            switch (entry.type)
+            {
+            case BindingType::UniformBuffer:
+                range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+                break;
+            case BindingType::StorageBuffer:
+            case BindingType::StorageTexture:
+                range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+                break;
+            case BindingType::SampledTexture:
+                range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+                break;
+            case BindingType::Sampler:
+            case BindingType::Count:
+                CG_ASSERT(false);
+                break;
+            }
+            range.NumDescriptors = entry.arrayCount;
+            range.BaseShaderRegister = ShaderRegisterForEntry(*layout, entryIndex);
             range.RegisterSpace = slotIndex;
-            range.OffsetInDescriptorsFromTableStart = 0;
-
-            parameters[parameterCount].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-            parameters[parameterCount].DescriptorTable.NumDescriptorRanges = 1;
-            parameters[parameterCount].DescriptorTable.pDescriptorRanges = &ranges[rangeCount];
-            parameters[parameterCount].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-            resourceParameter[slotIndex] = parameterCount;
-            ++parameterCount;
-            ++rangeCount;
+            range.OffsetInDescriptorsFromTableStart = resourceOffset;
+            resourceOffset += entry.arrayCount;
         }
-        if (layout->samplerCount > 0 && parameterCount < kMaxParameters)
+        if (rangeCount > firstResourceRange && parameterCount < kMaxParameters)
         {
-            D3D12_DESCRIPTOR_RANGE& range = ranges[rangeCount];
-            range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
-            range.NumDescriptors = layout->samplerCount;
-            range.BaseShaderRegister = 0;
-            range.RegisterSpace = slotIndex;
-            range.OffsetInDescriptorsFromTableStart = 0;
-
             parameters[parameterCount].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-            parameters[parameterCount].DescriptorTable.NumDescriptorRanges = 1;
-            parameters[parameterCount].DescriptorTable.pDescriptorRanges = &ranges[rangeCount];
+            parameters[parameterCount].DescriptorTable.NumDescriptorRanges =
+                rangeCount - firstResourceRange;
+            parameters[parameterCount].DescriptorTable.pDescriptorRanges =
+                &ranges[firstResourceRange];
+            parameters[parameterCount].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+            resourceParameter[slotIndex] = parameterCount++;
+        }
+        const u32 firstSamplerRange = rangeCount;
+        u32 samplerOffset = 0;
+        for (u32 entryIndex = 0; entryIndex < layout->entryCount; ++entryIndex)
+        {
+            const BindGroupLayoutEntry& entry = layout->entries[entryIndex];
+            if (entry.type != BindingType::Sampler)
+            {
+                continue;
+            }
+            D3D12_DESCRIPTOR_RANGE& range = ranges[rangeCount++];
+            range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
+            range.NumDescriptors = entry.arrayCount;
+            range.BaseShaderRegister = ShaderRegisterForEntry(*layout, entryIndex);
+            range.RegisterSpace = slotIndex;
+            range.OffsetInDescriptorsFromTableStart = samplerOffset;
+            samplerOffset += entry.arrayCount;
+        }
+        if (rangeCount > firstSamplerRange && parameterCount < kMaxParameters)
+        {
+            parameters[parameterCount].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+            parameters[parameterCount].DescriptorTable.NumDescriptorRanges =
+                rangeCount - firstSamplerRange;
+            parameters[parameterCount].DescriptorTable.pDescriptorRanges =
+                &ranges[firstSamplerRange];
             parameters[parameterCount].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
             samplerParameter[slotIndex] = parameterCount;
             ++parameterCount;
-            ++rangeCount;
         }
     }
 

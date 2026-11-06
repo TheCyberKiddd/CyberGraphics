@@ -140,6 +140,13 @@ tests pass in debug; the design is ADR 0013.
   D3D12 live-reload self-test applied edits in 48 ms and 84 ms and retained the
   previous pipeline after a syntax error. The master-roadmap checkbox awaits
   commit of this evidence. See the [Phase 17 report](docs/reports/phase-17.md).
+- Phase 18's material system is implemented and locally validated. Reflected
+  material definitions and instances support parameter blocks, texture slots,
+  explicit uploads, deterministic draw sorting, and bounded `.cybermat`
+  serialization. The D3D12 sample verifies 100 instances and a live parameter
+  change at frame 20; Debug, Release, and Debug-ASan pass 98/98, and package,
+  source-consumer, structure, layer, formatting, and whitespace checks pass.
+  Phase 18 is complete. See the [Phase 18 report](docs/reports/phase-18.md).
 
 See [engines/MODULES.md](engines/MODULES.md) for the module index and
 [docs/architecture/overview.md](docs/architecture/overview.md) for the design.
@@ -198,6 +205,8 @@ package. Both modes expose the same targets:
 - `cyber::math` - vectors, matrices, quaternions, projections, geometry, color,
   and half floats.
 - `cyber::memory` - allocators, containers, strings, and generation handles.
+- `cyber::shaders` and `cyber::renderer` - shader reflection, pipeline
+  integration, and material definitions and instances.
 
 Source mode:
 
@@ -212,6 +221,7 @@ target_link_libraries(cyber_engine_renderer PRIVATE
     cyber::core
     cyber::math
     cyber::memory
+    cyber::renderer
 )
 ```
 
@@ -230,6 +240,7 @@ target_link_libraries(cyber_engine_renderer PRIVATE
     cyber::core
     cyber::math
     cyber::memory
+    cyber::renderer
 )
 ```
 

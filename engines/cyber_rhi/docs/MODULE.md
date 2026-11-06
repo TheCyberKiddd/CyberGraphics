@@ -29,7 +29,7 @@ private headers.
 | `texture.h` | `TextureDimension`, `TextureUsage`, `TextureAspect`, `SubresourceRange`, `TextureDesc`, `TextureViewDesc`, `TextureInfo`, `TextureViewInfo`, `MaxMipLevels`, `TextureByteSize`. |
 | `sampler.h` | `FilterMode`, `AddressMode`, `BorderColor`, `CompareFunction`, `SamplerDesc`. |
 | `shader.h` | `ShaderStage`, `ShaderStageMask`, `ShaderBytecodeFormat`, `ShaderDesc`, `ShaderInfo`. |
-| `binding.h` | `BindGroupSlot`, `BindingType`, group layout and group descriptors, `PipelineLayoutDesc`, `PushConstantRange`. |
+| `binding.h` | `BindGroupSlot`, `BindingType`, group layout and group descriptors (including optional explicit shader-register indices), `PipelineLayoutDesc`, `PushConstantRange`. |
 | `pipeline.h` | Vertex layout, topology, rasterizer, blend, multisample, depth-stencil state, `GraphicsPipelineDesc`, `ComputePipelineDesc`, `PipelineCacheDesc`, and the stable description hashes. |
 | `resource_state.h` | `ResourceState` and its set rules, `BufferBarrier`, `TextureBarrier`, `ResolveSubresourceRange`. |
 | `render_pass.h` | `LoadOp`, `StoreOp`, clear values, color and depth attachments, `RenderPassDesc`, `RenderPassInfo`, and the structural validator. |
@@ -57,6 +57,8 @@ Dependencies are one-way. A module may depend only on modules with a lower
 
 - Only this module includes D3D12, Vulkan, or Metal headers.
 - Synchronization is explicit; there are no hidden barriers.
+- Bind-group slots map to shader register spaces; backends preserve each
+  binding's register class and explicit register index when one is provided.
 - Resources use generation-counted handles and deferred destruction.
 - The null backend validates every public operation.
 
@@ -79,7 +81,8 @@ matching, and stale handles — has a case that fails if the rule is removed.
 
 Phase 12 adds `rhi_shader`, `rhi_binding`, `rhi_pipeline`, and
 `rhi_pipeline_hash`: stage and bytecode validation, layout and group matching,
-push-constant ranges, every graphics and compute state rule, and stable hashes.
+push-constant ranges, optional explicit shader-register indices for reflected
+layouts, every graphics and compute state rule, and stable hashes.
 
 Phase 13 adds `rhi_render_pass`, `rhi_command_list`, `rhi_submit`,
 `rhi_missing_barrier`, `rhi_frame_ring`, `rhi_retirement`, and `rhi_swapchain`:
@@ -96,8 +99,9 @@ guaranteed limits, and a drain on `WaitIdle` — `rhi_d3d12_resources`: buffers 
 the heap their usage names, textures, views, samplers, host-visible writes and
 readback reads, and the barrier path with per-subresource texture state — and
 `rhi_d3d12_binding`: HLSL compiled through the SDK's `D3DCompile`, bind group
-layouts and groups filling one contiguous block of the shader-visible heap, and
-pipeline layouts serialized into root signatures.
+layouts and groups filling one contiguous block of the shader-visible heap,
+typed CBV/SRV/UAV/sampler ranges preserving shader registers, and pipeline
+layouts serialized into root signatures.
 
 Phase 15 adds GPU heap allocation and transient reuse, a shared RHI validation
 wrapper, driver-backed object names, native D3D12 pass markers, timestamp

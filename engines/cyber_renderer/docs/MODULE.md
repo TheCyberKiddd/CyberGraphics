@@ -8,20 +8,28 @@
 
 ## Purpose
 
-Phase 17's renderer-side shader integration: compiler-reflected RHI layouts,
-vertex input layouts, asynchronous graphics-pipeline creation, frame-boundary
-publication, fallback pipelines, and deferred retirement. Later phases add the
-render graph, materials, lighting, and GPU-driven rendering.
+Phase 17's renderer-side shader integration and Phase 18's material system:
+compiler-reflected RHI layouts, vertex input layouts, asynchronous
+graphics-pipeline creation, frame-boundary publication, fallback pipelines,
+deferred retirement, immutable material definitions, mutable instances,
+reflected parameter blocks, texture slots, text serialization, and sorted draw
+records. Later phases add streaming, render graphs, lighting, and GPU-driven
+rendering.
 
 ## Public API
 
 `include/cyber/renderer/`
 
-`reflected_layout.h` derives RHI layouts from `cyber_shaders::Reflection`.
-`hot_pipeline.h` builds graphics pipelines asynchronously and publishes them at
-`BeginFrame`. Only headers under this path are public. Everything under `src/`
-is private. Public headers must compile on their own and must not include
-another module's private headers.
+`reflected_layout.h` derives RHI layouts from `cyber_shaders::Reflection`,
+including the material parameter buffer at `b1, space2`.
+`hot_pipeline.h` builds graphics pipelines asynchronously and publishes them
+at `BeginFrame`. `material.h` validates immutable material definitions against
+shader reflection, creates mutable instances with explicit GPU uploads, sorts
+draw keys, and parses/writes bounded `.cybermat` documents. Definitions borrow
+their pipeline; instances borrow their definition, device, and allocator, and
+never own resolved texture views. Only headers under this path are public.
+Everything under `src/` is private. Public headers must compile on their own
+and must not include another module's private headers.
 
 ## Dependencies
 
@@ -37,6 +45,10 @@ Dependencies are one-way. A module may depend only on modules with a lower
 - All GPU work goes through cyber_rhi; no backend headers.
 - Reflection and layouts are derived from compiler output, not backend
   reflection.
+- Material parameter names, types, and byte offsets match reflected members;
+  material buffers are b1/space2, while b0/space0 remains push constants.
+- Material uploads are explicitly recorded on a graphics-capable command list;
+  the caller orders submission, in-flight updates, and resource destruction.
 - Pipeline changes publish only at frame boundaries; replaced GPU objects are
   retained through the configured frames-in-flight interval.
 - The owning thread calls public renderer methods; background jobs own their
@@ -51,9 +63,9 @@ Dependencies are one-way. A module may depend only on modules with a lower
 
 ## Tests
 
-Null-backend reflected-layout and hot-pipeline tests; later phases add graph
-culling and aliasing tests, golden images, per-pass GPU timings, and scene
-benchmarks.
+Null-backend reflected-layout, hot-pipeline, material-instance, material-file,
+and public-header tests; later phases add graph culling and aliasing tests,
+golden images, per-pass GPU timings, and scene benchmarks.
 
 ## Budgets
 

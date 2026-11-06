@@ -22,6 +22,8 @@ install(
         cyber_perf
         cyber_jobs
         cyber_rhi
+        cyber_shaders
+        cyber_renderer
         cyber_software_renderer
     EXPORT CyberGraphicsTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -80,6 +82,22 @@ install(
 
 install(
     DIRECTORY engines/cyber_rhi/include/cyber/rhi
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cyber
+    FILES_MATCHING
+        PATTERN "*.h"
+        PATTERN "*.hpp"
+)
+
+install(
+    DIRECTORY engines/cyber_shaders/include/cyber/shaders
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cyber
+    FILES_MATCHING
+        PATTERN "*.h"
+        PATTERN "*.hpp"
+)
+
+install(
+    DIRECTORY engines/cyber_renderer/include/cyber/renderer
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cyber
     FILES_MATCHING
         PATTERN "*.h"

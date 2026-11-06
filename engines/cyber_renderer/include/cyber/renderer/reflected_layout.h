@@ -23,6 +23,8 @@ inline constexpr u32 kMaxReflectedBindingsPerSlot = 16;
 /// Largest push-constant block a reflected layout accepts: the minimum every
 /// Vulkan implementation guarantees, and well inside D3D12's root signature.
 inline constexpr u32 kMaxReflectedPushConstantBytes = 128;
+/// Largest reflected material constant buffer supported by this phase.
+inline constexpr u32 kMaxReflectedMaterialConstantBytes = 4096;
 /// Most vertex attributes a reflected vertex layout holds.
 inline constexpr u32 kMaxReflectedVertexAttributes = shaders::kMaxStageVariables;
 /// Returned by ReflectedLayout::FindBinding for a name the slot does not hold.
@@ -47,15 +49,24 @@ struct ReflectedBinding
 /// stage of one program. Trivially copyable and comparable.
 ///
 /// Binding convention (ADR 0017, ADR 0020): register space S is bind-group
-/// slot S. Inside a slot, sampled textures come first in register order, then
-/// samplers in register order; the binding number is the position in that
-/// order, which is also the order the D3D12 backend writes descriptors in.
-/// The constant buffer at b0, space0 is the push-constant block.
+/// slot S. Inside a slot, uniform buffers come first, then sampled textures,
+/// then samplers, each in register order. The binding number is the position
+/// in that order, which is also the order the D3D12 backend writes descriptors
+/// in. The constant buffer at b0, space0 is the push-constant block; b1, space2
+/// is the per-material parameter block.
 struct ReflectedLayout
 {
     std::array<std::array<ReflectedBinding, kMaxReflectedBindingsPerSlot>, rhi::kBindGroupSlotCount>
         slots{};
     std::array<u32, rhi::kBindGroupSlotCount> bindingCounts{};
+    /// Binding index of the b1, space2 material constant buffer, or kNoBinding.
+    u32 materialConstantsBinding = kNoBinding;
+    /// Byte size of the reflected b1, space2 block, or zero when absent.
+    u32 materialConstantsSizeBytes = 0;
+    /// Reflected members in the material block; layout equality includes these
+    /// so hot reload invalidates materials when member offsets or types change.
+    u32 materialConstantsMemberCount = 0;
+    std::array<shaders::ConstantMember, shaders::kMaxConstantMembers> materialConstantsMembers{};
     /// Push-constant range; `sizeBytes` is zero when the program has none.
     rhi::PushConstantRange pushConstants{};
 
@@ -91,11 +102,13 @@ struct ReflectedLayout
 ///         - ErrorCode::InvalidArgument when two stages are the same stage, or
 ///           a register is used by two different resource kinds;
 ///         - ErrorCode::Unsupported for a constant buffer other than
-///           b0/space0, a push block over kMaxReflectedPushConstantBytes, a
-///           register space beyond the four bind-group slots, a storage texture
-///           (the D3D12 backend has no UAV descriptor ranges yet), more than
-///           kMaxReflectedBindingsPerSlot bindings, or registers that are not
-///           contiguous from 0 within a slot.
+///           unsupported constant buffer, a push block over
+///           kMaxReflectedPushConstantBytes, a material block over
+///           kMaxReflectedMaterialConstantBytes, a register space beyond the
+///           four bind-group slots, a storage texture (the D3D12 backend has no
+///           UAV descriptor ranges yet), more than kMaxReflectedBindingsPerSlot
+///           bindings, or registers that are not contiguous from 0 within a
+///           resource class and slot.
 [[nodiscard]] core::Result<ReflectedLayout, core::Error>
 BuildReflectedLayout(memory::Span<const shaders::Reflection* const> stages) noexcept;
 

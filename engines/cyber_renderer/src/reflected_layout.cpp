@@ -29,7 +29,44 @@ struct Seen
     u32 registerIndex = 0;
     rhi::ShaderStageMask visibility = 0;
     shaders::ReflectedName name{};
+    u32 sizeBytes = 0;
+    const Reflection* reflection = nullptr;
+    const ResourceBinding* resource = nullptr;
 };
+
+[[nodiscard]] bool SameConstantBuffer(const Reflection& lhsReflection, const ResourceBinding& lhs,
+                                      const Reflection& rhsReflection,
+                                      const ResourceBinding& rhs) noexcept
+{
+    if (lhs.sizeBytes != rhs.sizeBytes || lhs.memberCount != rhs.memberCount ||
+        lhs.firstMember > lhsReflection.memberCount ||
+        rhs.firstMember > rhsReflection.memberCount ||
+        lhs.memberCount > lhsReflection.memberCount - lhs.firstMember ||
+        rhs.memberCount > rhsReflection.memberCount - rhs.firstMember)
+    {
+        return false;
+    }
+    for (u32 member = 0; member < lhs.memberCount; ++member)
+    {
+        const shaders::ConstantMember& a = lhsReflection.members[lhs.firstMember + member];
+        const shaders::ConstantMember& b = rhsReflection.members[rhs.firstMember + member];
+        if (a.name.View() != b.name.View() || a.type != b.type || a.offsetBytes != b.offsetBytes ||
+            a.sizeBytes != b.sizeBytes)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] bool SameRegisterClass(ResourceKind lhs, ResourceKind rhs) noexcept
+{
+    if (lhs == ResourceKind::ConstantBuffer || rhs == ResourceKind::ConstantBuffer)
+    {
+        return lhs == rhs;
+    }
+    return (lhs == ResourceKind::Sampler) == (rhs == ResourceKind::Sampler);
+}
 
 [[nodiscard]] bool SameName(const shaders::ReflectedName& lhs,
                             const shaders::ReflectedName& rhs) noexcept
@@ -39,8 +76,18 @@ struct Seen
 
 [[nodiscard]] rhi::BindingType BindingTypeOf(ResourceKind kind) noexcept
 {
-    return kind == ResourceKind::Sampler ? rhi::BindingType::Sampler
-                                         : rhi::BindingType::SampledTexture;
+    switch (kind)
+    {
+    case ResourceKind::ConstantBuffer:
+        return rhi::BindingType::UniformBuffer;
+    case ResourceKind::Sampler:
+        return rhi::BindingType::Sampler;
+    case ResourceKind::SampledTexture:
+        return rhi::BindingType::SampledTexture;
+    case ResourceKind::StorageTexture:
+        break;
+    }
+    return rhi::BindingType::Count;
 }
 
 }  // namespace
@@ -80,9 +127,22 @@ bool operator==(const ReflectedLayout& lhs, const ReflectedLayout& rhs) noexcept
 {
     if (lhs.pushConstants.offsetBytes != rhs.pushConstants.offsetBytes ||
         lhs.pushConstants.sizeBytes != rhs.pushConstants.sizeBytes ||
-        lhs.pushConstants.stages != rhs.pushConstants.stages)
+        lhs.pushConstants.stages != rhs.pushConstants.stages ||
+        lhs.materialConstantsBinding != rhs.materialConstantsBinding ||
+        lhs.materialConstantsSizeBytes != rhs.materialConstantsSizeBytes ||
+        lhs.materialConstantsMemberCount != rhs.materialConstantsMemberCount)
     {
         return false;
+    }
+    for (u32 member = 0; member < lhs.materialConstantsMemberCount; ++member)
+    {
+        const shaders::ConstantMember& a = lhs.materialConstantsMembers[member];
+        const shaders::ConstantMember& b = rhs.materialConstantsMembers[member];
+        if (!SameName(a.name, b.name) || a.type != b.type || a.offsetBytes != b.offsetBytes ||
+            a.sizeBytes != b.sizeBytes)
+        {
+            return false;
+        }
     }
     for (u32 slot = 0; slot < rhi::kBindGroupSlotCount; ++slot)
     {
@@ -108,6 +168,11 @@ bool operator==(const ReflectedLayout& lhs, const ReflectedLayout& rhs) noexcept
 
 Result<ReflectedLayout, Error> BuildReflectedLayout(Span<const Reflection* const> stages) noexcept
 {
+    if (stages.Data() == nullptr && !stages.Empty())
+    {
+        return LayoutError(ErrorCode::InvalidArgument,
+                           "reflected layout: non-empty stage span has a null pointer");
+    }
     constexpr usize kMaximumSeen = rhi::kBindGroupSlotCount * kMaxReflectedBindingsPerSlot;
     std::array<Seen, kMaximumSeen> seen{};
     usize seenCount = 0;
@@ -128,32 +193,89 @@ Result<ReflectedLayout, Error> BuildReflectedLayout(Span<const Reflection* const
             return LayoutError(ErrorCode::InvalidArgument,
                                "reflected layout: each stage may appear once");
         }
+        if (reflection->resourceCount > shaders::kMaxResources ||
+            reflection->memberCount > shaders::kMaxConstantMembers)
+        {
+            return LayoutError(ErrorCode::InvalidArgument,
+                               "reflected layout: reflection counts exceed their fixed bounds");
+        }
         stagesSeen |= bit;
 
-        for (u32 index = 0; index < reflection->resourceCount && index < shaders::kMaxResources;
-             ++index)
+        for (u32 index = 0; index < reflection->resourceCount; ++index)
         {
             const ResourceBinding& resource = reflection->resources[index];
+            if (resource.kind != ResourceKind::ConstantBuffer &&
+                resource.kind != ResourceKind::SampledTexture &&
+                resource.kind != ResourceKind::Sampler &&
+                resource.kind != ResourceKind::StorageTexture)
+            {
+                return LayoutError(ErrorCode::InvalidArgument,
+                                   "reflected layout: unknown resource kind");
+            }
             if (resource.kind == ResourceKind::ConstantBuffer)
             {
-                if (resource.registerIndex != 0 || resource.registerSpace != 0)
+                if (resource.registerIndex == 0 && resource.registerSpace == 0)
+                {
+                    if (resource.sizeBytes > kMaxReflectedPushConstantBytes)
+                    {
+                        return LayoutError(ErrorCode::Unsupported,
+                                           "reflected layout: the b0 push-constant block exceeds "
+                                           "128 bytes");
+                    }
+                    if (resource.sizeBytes > layout.pushConstants.sizeBytes)
+                    {
+                        layout.pushConstants.sizeBytes = resource.sizeBytes;
+                    }
+                    layout.pushConstants.stages |= bit;
+                    continue;
+                }
+                if (resource.registerIndex != 1 || resource.registerSpace != 2)
                 {
                     return LayoutError(ErrorCode::Unsupported,
-                                       "reflected layout: only the b0/space0 constant buffer is "
-                                       "bindable until constant streaming (Phase 19)");
+                                       "reflected layout: material constants must use b1, space2");
                 }
-                if (resource.sizeBytes > kMaxReflectedPushConstantBytes)
+                if (resource.sizeBytes == 0 ||
+                    resource.sizeBytes > kMaxReflectedMaterialConstantBytes ||
+                    resource.memberCount == 0 || resource.firstMember > reflection->memberCount ||
+                    resource.memberCount > reflection->memberCount - resource.firstMember)
                 {
                     return LayoutError(ErrorCode::Unsupported,
-                                       "reflected layout: the b0 push-constant block exceeds 128 "
-                                       "bytes");
+                                       "reflected layout: invalid or oversized material constant "
+                                       "buffer");
                 }
-                if (resource.sizeBytes > layout.pushConstants.sizeBytes)
+                if (layout.materialConstantsMemberCount == 0)
                 {
-                    layout.pushConstants.sizeBytes = resource.sizeBytes;
+                    layout.materialConstantsMemberCount = resource.memberCount;
+                    for (u32 member = 0; member < resource.memberCount; ++member)
+                    {
+                        layout.materialConstantsMembers[member] =
+                            reflection->members[resource.firstMember + member];
+                    }
                 }
-                layout.pushConstants.stages |= bit;
-                continue;
+                else
+                {
+                    if (layout.materialConstantsMemberCount != resource.memberCount)
+                    {
+                        return LayoutError(
+                            ErrorCode::InvalidArgument,
+                            "reflected layout: material member counts differ between stages");
+                    }
+                    for (u32 member = 0; member < resource.memberCount; ++member)
+                    {
+                        const shaders::ConstantMember& prior =
+                            layout.materialConstantsMembers[member];
+                        const shaders::ConstantMember& current =
+                            reflection->members[resource.firstMember + member];
+                        if (!SameName(prior.name, current.name) || prior.type != current.type ||
+                            prior.offsetBytes != current.offsetBytes ||
+                            prior.sizeBytes != current.sizeBytes)
+                        {
+                            return LayoutError(
+                                ErrorCode::InvalidArgument,
+                                "reflected layout: material members differ between stages");
+                        }
+                    }
+                }
             }
             if (resource.kind == ResourceKind::StorageTexture)
             {
@@ -172,8 +294,7 @@ Result<ReflectedLayout, Error> BuildReflectedLayout(Span<const Reflection* const
             for (usize prior = 0; prior < seenCount; ++prior)
             {
                 Seen& other = seen[prior];
-                const bool sameClass = (other.kind == ResourceKind::Sampler) ==
-                                       (resource.kind == ResourceKind::Sampler);
+                const bool sameClass = SameRegisterClass(other.kind, resource.kind);
                 if (other.space == resource.registerSpace &&
                     other.registerIndex == resource.registerIndex && sameClass)
                 {
@@ -182,6 +303,15 @@ Result<ReflectedLayout, Error> BuildReflectedLayout(Span<const Reflection* const
                         return LayoutError(ErrorCode::InvalidArgument,
                                            "reflected layout: a register is used by two resource "
                                            "kinds");
+                    }
+                    if (resource.kind == ResourceKind::ConstantBuffer &&
+                        (other.reflection == nullptr || other.resource == nullptr ||
+                         !SameConstantBuffer(*other.reflection, *other.resource, *reflection,
+                                             resource)))
+                    {
+                        return LayoutError(ErrorCode::InvalidArgument,
+                                           "reflected layout: material constant-buffer sizes "
+                                           "differ between stages");
                     }
                     other.visibility |= bit;
                     merged = true;
@@ -197,18 +327,27 @@ Result<ReflectedLayout, Error> BuildReflectedLayout(Span<const Reflection* const
                 return LayoutError(ErrorCode::Unsupported,
                                    "reflected layout: binding limit exceeded");
             }
-            seen[seenCount++] = Seen{resource.kind, resource.registerSpace, resource.registerIndex,
-                                     bit, resource.name};
+            seen[seenCount++] = Seen{resource.kind,
+                                     resource.registerSpace,
+                                     resource.registerIndex,
+                                     bit,
+                                     resource.name,
+                                     resource.sizeBytes,
+                                     reflection,
+                                     &resource};
         }
     }
 
-    // Lay out each slot: sampled textures in register order, then samplers.
+    // Lay out each slot: uniform buffers, sampled textures, then samplers.
     for (u32 slot = 0; slot < rhi::kBindGroupSlotCount; ++slot)
     {
-        for (u32 pass = 0; pass < 2; ++pass)
+        for (u32 pass = 0; pass < 3; ++pass)
         {
-            const bool wantSampler = pass == 1;
-            u32 expected = 0;
+            const ResourceKind wantKind =
+                pass == 0 ? ResourceKind::ConstantBuffer
+                          : (pass == 1 ? ResourceKind::SampledTexture : ResourceKind::Sampler);
+            const u32 firstRegister = wantKind == ResourceKind::ConstantBuffer && slot == 2 ? 1 : 0;
+            u32 expected = firstRegister;
             for (;;)
             {
                 const Seen* next = nullptr;
@@ -216,8 +355,7 @@ Result<ReflectedLayout, Error> BuildReflectedLayout(Span<const Reflection* const
                 for (usize index = 0; index < seenCount; ++index)
                 {
                     const Seen& candidate = seen[index];
-                    if (candidate.space != slot ||
-                        (candidate.kind == ResourceKind::Sampler) != wantSampler)
+                    if (candidate.space != slot || candidate.kind != wantKind)
                     {
                         continue;
                     }
@@ -229,7 +367,7 @@ Result<ReflectedLayout, Error> BuildReflectedLayout(Span<const Reflection* const
                 }
                 if (next == nullptr)
                 {
-                    if (count != expected)
+                    if (count != expected - firstRegister)
                     {
                         return LayoutError(ErrorCode::Unsupported,
                                            "reflected layout: registers in a slot must be "
@@ -247,10 +385,32 @@ Result<ReflectedLayout, Error> BuildReflectedLayout(Span<const Reflection* const
                 binding.entry.type = BindingTypeOf(next->kind);
                 binding.entry.visibility = next->visibility;
                 binding.entry.arrayCount = 1;
+                binding.entry.shaderRegister = next->registerIndex;
                 binding.name = next->name;
                 binding.registerIndex = next->registerIndex;
+                if (next->kind == ResourceKind::ConstantBuffer)
+                {
+                    if (layout.materialConstantsBinding != kNoBinding)
+                    {
+                        return LayoutError(
+                            ErrorCode::Unsupported,
+                            "reflected layout: only one material constant buffer is supported");
+                    }
+                    layout.materialConstantsBinding = binding.entry.binding;
+                    layout.materialConstantsSizeBytes = next->sizeBytes;
+                }
                 ++layout.bindingCounts[slot];
                 ++expected;
+                if (wantKind == ResourceKind::ConstantBuffer)
+                {
+                    if (count != 1)
+                    {
+                        return LayoutError(
+                            ErrorCode::Unsupported,
+                            "reflected layout: only one material constant buffer is supported");
+                    }
+                    break;
+                }
             }
         }
     }

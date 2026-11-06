@@ -201,6 +201,38 @@ CG_TEST(rhi_binding_layout_invalid_descriptors)
     CG_EXPECT_TRUE(static_cast<bool>(device.CreateBindGroupLayout(desc)));
 }
 
+CG_TEST(rhi_binding_layout_shader_register_classes)
+{
+    HeapAllocator heap;
+    Device device;
+    CG_REQUIRE(OpenDevice(device, heap));
+    const ShaderStageMask visibility = ShaderStageBit(ShaderStage::Pixel);
+
+    BindGroupLayoutEntry entries[2] = {
+        Entry(0, BindingType::UniformBuffer, visibility),
+        Entry(1, BindingType::SampledTexture, visibility),
+    };
+    entries[0].shaderRegister = 1;
+    entries[1].shaderRegister = 1;
+
+    BindGroupLayoutDesc desc{};
+    desc.entries = Span<const BindGroupLayoutEntry>(entries, 2);
+    auto created = device.CreateBindGroupLayout(desc);
+    CG_REQUIRE(static_cast<bool>(created));
+    CG_EXPECT_TRUE(device.DestroyBindGroupLayout(created.Value()));
+
+    entries[1].type = BindingType::UniformBuffer;
+    created = device.CreateBindGroupLayout(desc);
+    CG_EXPECT_FALSE(created);
+    CG_EXPECT_EQ(created.Error().code, ErrorCode::InvalidArgument);
+
+    entries[1].type = BindingType::SampledTexture;
+    entries[1].shaderRegister = device.Capabilities().limits.maxBindingsPerGroup;
+    created = device.CreateBindGroupLayout(desc);
+    CG_EXPECT_FALSE(created);
+    CG_EXPECT_EQ(created.Error().code, ErrorCode::OutOfRange);
+}
+
 CG_TEST(rhi_binding_group_create_and_info)
 {
     HeapAllocator heap;

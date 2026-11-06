@@ -1,4 +1,5 @@
 #include <cyber/renderer/hot_pipeline.h>
+#include <cyber/renderer/material.h>
 #include <cyber/renderer/reflected_layout.h>
 #include <cyber/test/test.h>
 
@@ -10,10 +11,14 @@ CG_TEST(renderer_public_headers)
 {
     static_assert(std::is_trivially_copyable_v<ReflectedLayout>);
     static_assert(std::is_trivially_copyable_v<ReflectedVertexLayout>);
+    static_assert(std::is_move_constructible_v<MaterialDefinition>);
+    static_assert(!std::is_copy_constructible_v<MaterialInstance>);
+    static_assert(std::is_move_constructible_v<MaterialInstance>);
     static_assert(!std::is_copy_constructible_v<HotGraphicsPipeline>);
     static_assert(std::is_move_constructible_v<HotGraphicsPipeline>);
 
     CG_EXPECT_EQ(kMaxReflectedPushConstantBytes, u32{128});
+    CG_EXPECT_EQ(kMaxMaterialParameters, u32{64});
     CG_EXPECT_EQ(ToRhiStage(cyber::shaders::Stage::Pixel), cyber::rhi::ShaderStage::Pixel);
 
     HotGraphicsPipeline empty;

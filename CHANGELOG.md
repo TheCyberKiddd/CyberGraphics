@@ -8,6 +8,13 @@ semantic versioning once a public API exists.
 
 ### Added
 
+- Phase 18 material system: immutable reflected definitions, mutable
+  per-instance parameter blocks and texture bindings, explicit GPU uploads,
+  deterministic material draw sorting, bounded `.cybermat` serialization, and
+  a 100-instance D3D12 sample with a live parameter-change self-test. Debug,
+  Release, and Debug-ASan each pass 98/98; package/source consumers and
+  structure, layer, formatting, and whitespace checks pass. The phase report
+  and evidence are included in this commit.
 - Phase 17 implementation and local validation: compiler-owned shader
   reflection, bounded keyword permutations, checksummed on-disk cache,
   job-system compilation and file watching, renderer-side reflected layouts and

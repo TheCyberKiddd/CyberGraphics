@@ -26,7 +26,14 @@ this document does not replace that roadmap or change any phase checkbox.
   formatting, and live-reload checks pass. The valid edit, syntax-error
   rejection, and restore measured 48 ms, 49 ms, and 84 ms on this PC. Its
   implementation and evidence are included in the Phase 17 commit.
-- **Phases 18-44:** not started.
+- **Phase 18:** implementation and local validation complete; Debug, Release,
+  and Debug-ASan each pass 98/98. The D3D12 sample self-test verifies 100
+  material instances, sorted draws, and a live parameter change at frame 20.
+  The package and source consumers and all structure, layer, formatting, and
+  whitespace checks pass. Implementation and evidence are included in this
+  commit, and the master roadmap marks the phase complete. See the
+  [Phase 18 report](reports/phase-18.md).
+- **Phases 19-44:** not started.
 - **Current PC:** Windows 10 Pro 22H2, Intel Core i5-6400 (4 cores), Intel HD
   Graphics 530 (1 GiB reported), Intel driver `31.0.101.2125` dated
   2023-05-24. The marker sample now submits and presents on this adapter after
@@ -88,7 +95,7 @@ this document does not replace that roadmap or change any phase checkbox.
 |---|---|---|
 | 16. Shader language and compiler strategy | Complete | ADR 0019, the language design, compiler, source diagnostics, tests, and generated-HLSL cube integration are complete; Phase 16 evidence is recorded in its report. |
 | 17. Reflection, permutations, and hot reload | Complete | Compiler-owned reflection, bounded/stable permutations, checksummed cache, job-system compilation, reflected renderer layouts, async frame-boundary swaps, and D3D12 live reload. All five Windows presets pass 96/96; the valid edit, syntax rejection, and restore pass in 48/49/84 ms on the Intel HD 530. |
-| 18. Material system | Not started | Material definitions/instances, parameter blocks, textures, render state, and sorted draws. |
+| 18. Material system | Complete | Immutable material definitions, mutable reflected instances, texture slots, explicit uploads, sorted queues, `.cybermat` serialization, and a 100-instance D3D12 sample; evidence is in the Phase 18 report. |
 | 19. Constant streaming and bindless resources | Not started | Per-frame constants, dynamic offsets, descriptors, bindless resources, and measured high draw-count submission. |
 
 ### Part 5 — Renderer architecture
@@ -167,20 +174,19 @@ this document does not replace that roadmap or change any phase checkbox.
 
 ## Verified validation and worktree notes
 
-- On this session's latest run, `.\scripts\build.ps1 profile -Test` passed
-  **87/87** tests.
-- `.\scripts\build.ps1 profile` succeeded after the CPU sample default changed.
-- `.\scripts\format.ps1 -Check` and `git diff --check` passed.
-- Earlier Phase 15 evidence records Debug, Profile, Release, Shipping, and
-  Debug-ASan at 87/87 each; structure/layer checks and the Profile package
-  consumer also passed.
-- The Phase 15 implementation, Phase 17 implementation and documentation, and
-  recent low-power sample change are **uncommitted**. Preserve them when
-  rebuilding the roadmap.
+- On the Phase 18 implementation, Debug, Release, and Debug-ASan each passed
+  **98/98** tests. The Release installed-package consumer and Debug
+  source-tree consumer both built and ran.
+- The D3D12 material sample self-test passed on the Intel HD Graphics 530:
+  100 definitions, 100 instances, 100 sorted draws, and a live parameter
+  change at frame 20.
+- Structure, layer, formatting, and `git diff --check` passed.
+- Phase 18 code, documentation, package rules, and validation evidence are
+  **uncommitted**. Preserve them when committing the phase.
 - `diagnosing-low-phase-6-sample-frame-rate.json` is unrelated and untracked;
   leave it alone.
 
 ## Immediate next step
 
-Phase 17 is complete. Begin Phase 18 only after reading its work package and
-writing the required design note for the material system.
+Read Phase 19's work package and write its design note before implementing
+constant streaming or bindless resources.

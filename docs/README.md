@@ -32,6 +32,8 @@ a phase actually works.
 | [notes/](notes/) | Reading notes and sources for each phase. |
 | [reports/](reports/) | Phase reports with evidence for the done-when line. |
 | [graphics/PHASE_17.md](graphics/PHASE_17.md) | Phase 17 implementation summary and validation status. |
+| [graphics/PHASE_18.md](graphics/PHASE_18.md) | Phase 18 material-system implementation summary and validation status. |
+| [reports/phase-18.md](reports/phase-18.md) | Phase 18 report and local validation evidence. |
 | [graphics/PHASE_15.md](graphics/PHASE_15.md) | Phase 15 implementation summary and capture status. |
 | [specs/](specs/) | RHI, shader language, and asset format specifications. |
 | [testing/](testing/) | Test layers, golden images, sanitizers, and CI gates. |

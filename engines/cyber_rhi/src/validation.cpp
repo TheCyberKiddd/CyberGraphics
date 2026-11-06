@@ -434,6 +434,24 @@ bool ValidateBindGroupLayout(const Limits& limits, const BindGroupLayoutDesc& de
                     "bind group layout has more entries than the device allows");
     }
 
+    const auto ShaderRegister = [&desc](usize entryIndex) noexcept -> u32
+    {
+        const BindGroupLayoutEntry& entry = desc.entries[entryIndex];
+        if (entry.shaderRegister != kNoShaderRegister)
+        {
+            return entry.shaderRegister;
+        }
+        u32 nextRegister = 0;
+        for (usize prior = 0; prior < entryIndex; ++prior)
+        {
+            if (desc.entries[prior].type == entry.type)
+            {
+                nextRegister += desc.entries[prior].arrayCount;
+            }
+        }
+        return nextRegister;
+    };
+
     u32 total = 0;
     for (usize index = 0; index < desc.entries.Size(); ++index)
     {
@@ -459,12 +477,28 @@ bool ValidateBindGroupLayout(const Limits& limits, const BindGroupLayoutDesc& de
         {
             return Fail(out, ErrorCode::OutOfRange, "binding array count exceeds the device limit");
         }
+        const u32 shaderRegister = ShaderRegister(index);
+        if (shaderRegister >= limits.maxBindingsPerGroup ||
+            entry.arrayCount > limits.maxBindingsPerGroup - shaderRegister)
+        {
+            return Fail(out, ErrorCode::OutOfRange,
+                        "shader register range exceeds the device binding limit");
+        }
         for (usize other = 0; other < index; ++other)
         {
             if (desc.entries[other].binding == entry.binding)
             {
                 return Fail(out, ErrorCode::InvalidArgument,
                             "bind group layout repeats a binding number");
+            }
+            const BindGroupLayoutEntry& previous = desc.entries[other];
+            const u32 previousRegister = ShaderRegister(other);
+            if (previous.type == entry.type &&
+                shaderRegister < previousRegister + previous.arrayCount &&
+                previousRegister < shaderRegister + entry.arrayCount)
+            {
+                return Fail(out, ErrorCode::InvalidArgument,
+                            "bind group layout repeats a shader register");
             }
         }
         total += entry.arrayCount;

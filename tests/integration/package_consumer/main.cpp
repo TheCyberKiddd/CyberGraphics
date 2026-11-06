@@ -9,6 +9,7 @@
 #include <cyber/memory/memory.h>
 #include <cyber/perf/perf.h>
 #include <cyber/platform/platform.h>
+#include <cyber/renderer/material.h>
 #include <cyber/rhi/d3d12.h>
 #include <cyber/rhi/rhi.h>
 #include <cyber/software/raster.h>

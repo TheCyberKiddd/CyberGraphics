@@ -9,7 +9,7 @@ documents are binding:
   per-phase work packages, reading list, tasks, tips, and report template.
 
 Work phases in this order. Do not tick a phase until its done-when line is
-proved with committed evidence. Phases 1-17 are complete; Phase 17's
+proved with committed evidence. Phases 1-18 are complete; Phase 18's
 implementation and validation evidence are included in this commit.
 
 ## Part 1: Foundation (phases 1-5)
@@ -42,7 +42,7 @@ implementation and validation evidence are included in this commit.
 
 - [x] **Phase 16 — Shader language and compiler strategy** — compiler emits HLSL used by the D3D12 cube comparison; Debug, Release, and Debug-ASan pass 88/88, package/structure/layer checks pass, and the repository-wide formatter passes. · [implementation summary](graphics/PHASE_16.md), [report](reports/phase-16.md), [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-16-shader-language-and-compiler-strategy) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-16-shader-language-and-compiler-strategy)
 - [x] **Phase 17 — Reflection, permutations, and hot reload** — complete; [implementation summary](graphics/PHASE_17.md), [report](reports/phase-17.md), [design note](design/phase-17-shader-permutations.md), [ADR 0020](adr/0020-shader-reflection-permutations-and-reload.md); 96/96 tests pass in Debug, Profile, Release, Shipping, and Debug-ASan, with package, structure, layer, formatting, and D3D12 live-reload checks passing · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-17-reflection-permutations-and-hot-reload) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-17-reflection-permutations-and-hot-reload)
-- [ ] **Phase 18 — Material system** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-18-material-system) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-18-material-system)
+- [x] **Phase 18 — Material system** — complete; Debug, Release, and Debug-ASan pass 98/98; package/source consumers, sample, and repository checks pass · [summary](graphics/PHASE_18.md) · [report](reports/phase-18.md) · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-18-material-system) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-18-material-system)
 - [ ] **Phase 19 — Constant streaming and bindless resources** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-19-constant-streaming-and-bindless-resources) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-19-constant-streaming-and-bindless-resources)
 
 ## Part 5: Renderer architecture (phases 20-25)
