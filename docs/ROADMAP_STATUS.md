@@ -39,7 +39,12 @@ this document does not replace that roadmap or change any phase checkbox.
   package/source consumers and structure, layer, formatting, and whitespace
   checks pass. The slower dynamic-offset comparison and explicit WARP results
   are retained in the [Phase 19 report](reports/phase-19.md).
-- **Phases 20-44:** not started.
+- **Phase 20:** complete. The render graph infers dependencies and barriers,
+  culls unused passes, aliases compatible non-overlapping transients, and
+  writes bounded text and DOT diagnostics. Debug, Release, and Debug-ASan pass
+  100/100; package/source consumers and structure, layer, formatting, and
+  whitespace checks pass. See the [Phase 20 report](reports/phase-20.md).
+- **Phases 21-44:** not started.
 - **Current PC:** Windows 10 Pro 22H2, Intel Core i5-6400 (4 cores), Intel HD
   Graphics 530 (1 GiB reported), Intel driver `31.0.101.2125` dated
   2023-05-24. The marker sample now submits and presents on this adapter after
@@ -108,7 +113,7 @@ this document does not replace that roadmap or change any phase checkbox.
 
 | Phase | Status | Intended outcome |
 |---|---|---|
-| 20. Render graph | Not started | Declare pass/resource dependencies; generate barriers, alias transient memory, cull unused passes, and inspect graph output. |
+| 20. Render graph | Complete | Inferred dependencies and barriers, pass culling, compatible transient aliasing, bounded text/DOT output, and a tested multi-pass frame; Debug, Release, Debug-ASan, package/source consumers, and repository checks pass. See the Phase 20 report. |
 | 21. Render thread and frame pipelining | Not started | Decouple game/render threads, command queue, frames in flight, and race-free overlap. |
 | 22. Scene, render proxies, and culling | Not started | Renderer-owned proxies, parallel frustum culling, spatial structure, and LOD. |
 | 23. Geometry pipeline | Not started | Mesh/submesh formats, tangents/bounds, LOD generation, instancing, and indirect draws. |
@@ -173,7 +178,7 @@ this document does not replace that roadmap or change any phase checkbox.
 6. **Phase 40 hardware matrix is still future work.** Introduce a small
    GPU/driver compatibility test and a fallback acceptance target well before
    advanced rendering work.
-7. **Scope and maturity differ.** Phases 1-19 are marked complete, but this
+7. **Scope and maturity differ.** Phases 1-20 are marked complete, but this
    repository is still a renderer foundation: the engine-facing public plugin
    API (Phase 25), full PBR lighting, asset pipeline, editor integration, and
    shipping workflow are not implemented.

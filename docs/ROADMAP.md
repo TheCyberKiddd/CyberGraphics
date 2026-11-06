@@ -9,9 +9,8 @@ documents are binding:
   per-phase work packages, reading list, tasks, tips, and report template.
 
 Work phases in this order. Do not tick a phase until its done-when line is
-proved with committed evidence. Phases 1-19 are complete; Phase 20 is
-implemented and locally validated, with evidence recorded in its report, but
-awaits commit before it can be checked off.
+proved with committed evidence. Phases 1-20 are complete; Phase 20's
+implementation and validation evidence are recorded in its report and commit.
 
 ## Part 1: Foundation (phases 1-5)
 
@@ -48,7 +47,7 @@ awaits commit before it can be checked off.
 
 ## Part 5: Renderer architecture (phases 20-25)
 
-- [ ] **Phase 20 — Render graph** — locally validated: Debug, Release, and Debug-ASan pass 100/100; package/source consumers and repository checks pass; the null-backend multi-pass test verifies automatic barriers, culls an unused pass, and writes a DOT dump. Check off after evidence is committed · [summary](graphics/PHASE_20.md) · [report](reports/phase-20.md) · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-20-render-graph) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-20-render-graph)
+- [x] **Phase 20 — Render graph** — Debug, Release, and Debug-ASan pass 100/100; package/source consumers and repository checks pass; the null-backend multi-pass test verifies automatic barriers, culls an unused pass, and writes a DOT dump · [summary](graphics/PHASE_20.md) · [report](reports/phase-20.md) · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-20-render-graph) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-20-render-graph)
 - [ ] **Phase 21 — Render thread and frame pipelining** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-21-render-thread-and-frame-pipelining) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-21-render-thread-and-frame-pipelining)
 - [ ] **Phase 22 — Scene, render proxies, and culling** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-22-scene-render-proxies-and-culling) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-22-scene-render-proxies-and-culling)
 - [ ] **Phase 23 — Geometry pipeline** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-23-geometry-pipeline) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-23-geometry-pipeline)
@@ -113,8 +112,10 @@ boundary, and null backend; 58/58 tests in debug.
   comparison that renders a colored triangle and a textured cube through the RHI
   and matches the software renderer's images within a recorded tolerance. The
   debug layer is enabled with GPU-based validation and its messages fail a test.
-- Next: Phase 20, render graph. Phase 19's constant streaming, descriptor
-  management, capability-gated bindless path, and measured 10,000-draw
+- Next: Phase 21, render thread and frame pipelining. Phase 20's render graph,
+  multi-pass tests, and validation evidence are recorded in its report. Phase
+  19's constant streaming, descriptor management, capability-gated bindless
+  path, and measured 10,000-draw
   acceptance result are recorded in its report. Phase 18's material system
   implementation and validation evidence are committed, and the master
   roadmap marks it complete. Phase 15's automated checks and capture evidence
