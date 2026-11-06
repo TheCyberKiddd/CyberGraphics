@@ -1,8 +1,8 @@
 # Threading model
 
-This document describes the threading model introduced by Phase 5 (jobs) and
-Phase 21 (render thread). The rules also apply to any future code that creates
-a thread.
+This document describes the threading model introduced by Phase 5 (jobs), Phase
+21 (render thread), and Phase 22 (scene proxies). The rules also apply to any
+future code that creates a thread.
 
 ## Threads
 
@@ -23,15 +23,20 @@ a thread.
    the producer's bytes before returning. The producer may reuse its source
    storage after return; the render callback sees an immutable copy valid for
    that callback only.
-4. **Renderer RHI access belongs to the render thread.** The render thread
+4. **Scene proxies follow the frame queue.** The game thread writes bounded
+   proxy commands into `SceneCommandWriter`, seals them, submits the bytes to
+   `RenderThread`, and commits only after acceptance. The render callback
+   applies commands to its exclusively owned `Scene`; workers only read stable
+   scene records during culling.
+5. **Renderer RHI access belongs to the render thread.** The render thread
    creates, queries, records, submits, resizes, and destroys renderer-owned RHI
    objects. Worker jobs prepare CPU-only data and send RHI work through the
    render queue.
-5. **Jobs declare dependencies.** A job never spins waiting for work that
+6. **Jobs declare dependencies.** A job never spins waiting for work that
    cannot run; it returns and lets the scheduler continue.
-6. **Shutdown is a sequence, not a race.** Stop accepting work, drain the
+7. **Shutdown is a sequence, not a race.** Stop accepting work, drain the
    queue, wait for fences, destroy in reverse order.
-7. **Resize and device-lost are normal paths.** They are tested, not treated as
+8. **Resize and device-lost are normal paths.** They are tested, not treated as
    exceptional.
 
 ## Frame pipeline

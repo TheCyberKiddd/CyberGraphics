@@ -21,6 +21,7 @@ install(
         cyber_platform
         cyber_perf
         cyber_jobs
+        cyber_scene
         cyber_rhi
         cyber_shaders
         cyber_renderer
@@ -74,6 +75,14 @@ install(
 
 install(
     DIRECTORY engines/cyber_jobs/include/cyber/jobs
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cyber
+    FILES_MATCHING
+        PATTERN "*.h"
+        PATTERN "*.hpp"
+)
+
+install(
+    DIRECTORY engines/cyber_scene/include/cyber/scene
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cyber
     FILES_MATCHING
         PATTERN "*.h"

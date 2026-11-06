@@ -64,6 +64,7 @@ $requiredHeaders = @(
     'include/cyber/perf/profiler.h',
     'include/cyber/jobs/jobs.h',
     'include/cyber/jobs/job_system.h',
+    'include/cyber/scene/scene.h',
     'include/cyber/shaders/reflection.h',
     'include/cyber/renderer/hot_pipeline.h',
     'include/cyber/renderer/material.h',

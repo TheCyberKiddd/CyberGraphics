@@ -272,22 +272,25 @@
       "kind": "graphics",
       "layer": 2,
       "order": 23,
-      "status": "planned",
-      "purpose": "Renderer-side scene: proxies, bounds, frustum culling, spatial index, and LOD selection.",
+      "status": "active",
+      "purpose": "Renderer-owned copied proxies, bounded render-thread update packets, world bounds, parallel frustum culling, and screen-space LOD selection.",
       "public_api": "include/cyber/scene/",
-      "depends": ["cyber_core", "cyber_math", "cyber_memory", "cyber_jobs", "cyber_assets"],
+      "depends": ["cyber_core", "cyber_math", "cyber_memory", "cyber_jobs"],
       "forbidden": ["cyber_renderer", "cyber_graphics", "cyber_ui"],
       "invariants": [
-        "Proxies are the renderer's copies; game-thread data never leaks into render-thread reads.",
-        "Culling is deterministic and matches the brute-force reference.",
-        "Bounds are tightly packed."
+        "Proxies contain copied renderer data; no game-thread pointer is retained.",
+        "Scene mutation belongs to the render owner; worker jobs read immutable scene storage during culling.",
+        "Proxy handles are generation checked and stale handles never resolve.",
+        "Culling is conservative, deterministic, and matches an independent brute-force reference.",
+        "Transform, bounds, and dirty-state data stay in bounded contiguous storage.",
+        "Scene command bytes are versioned, bounded, and applied in queue order."
       ],
       "non_goals": [
         "Gameplay scene graph.",
         "Physics and animation."
       ],
-      "tests": "Brute-force culling comparison, plane-straddling cases, and a 100,000-object benchmark.",
-      "budgets": "100,000-object cull within the budget recorded in the phase report.",
+      "tests": "Proxy command and lifecycle tests, public-header compilation, brute-force culling comparison, plane-boundary cases, LOD selection, and a 100,000-proxy benchmark.",
+      "budgets": "100,000-proxy cull within 5 ms p95 on the documented 4-core reference machine.",
       "roadmap": [22, 23]
     },
     {

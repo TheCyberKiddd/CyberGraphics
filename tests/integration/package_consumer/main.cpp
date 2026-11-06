@@ -14,6 +14,7 @@
 #include <cyber/renderer/render_thread.h>
 #include <cyber/rhi/d3d12.h>
 #include <cyber/rhi/rhi.h>
+#include <cyber/scene/scene.h>
 #include <cyber/software/raster.h>
 #include <cyber/software/software.h>
 
@@ -43,6 +44,7 @@ int main()
 {
     using namespace cyber::core;
     static_assert(!std::is_copy_constructible_v<cyber::renderer::RenderGraph>);
+    static_assert(!std::is_copy_constructible_v<cyber::scene::Scene>);
 
     const Version version = VersionNumber();
     if (version.major != kVersionMajor)

@@ -14,9 +14,9 @@ in place, and every module test runs through the project's own test runner.
 
 - Structure and module contracts: scaffolded.
 - Build system: CMake 3.28+, C++20, Debug/Release/Shipping presets.
-- Modules: 16 defined, 10 active (`cyber_core`, `cyber_math`, `cyber_memory`,
+- Modules: 16 defined, 11 active (`cyber_core`, `cyber_math`, `cyber_memory`,
   `cyber_platform`, `cyber_perf`, `cyber_jobs`, `cyber_rhi`, `cyber_shaders`,
-  `cyber_renderer`, `cyber_software_renderer`), 6 planned.
+  `cyber_scene`, `cyber_renderer`, `cyber_software_renderer`), 5 planned.
 - CI: Windows MSVC and Linux clang jobs, plus structure and dependency checks.
 - Phase 1: complete. Local builds and tests pass in every preset, structure and
   dependency checks pass, and the Windows + Linux CI jobs are green.
@@ -167,6 +167,14 @@ tests pass in debug; the design is ADR 0013.
   render-thread and hot-pipeline targets, package/source consumers, and
   repository checks pass. See the [summary](docs/graphics/PHASE_21.md) and
   [report](docs/reports/phase-21.md).
+- Phase 22's `cyber_scene` is implemented and locally validated: copied
+  mesh/light/camera proxies use the render-thread packet queue, with
+  generation-checked handles, parallel frustum culling, and screen-space LOD.
+  Debug, Release, and Debug-ASan pass 104/104; TSan, package/source consumers,
+  and repository checks pass. The 100,000-proxy benchmark matches brute force
+  at 2.881 ms p95 on a 4-core Intel Core i5-6400. The roadmap checkbox awaits
+  commit of this evidence; see the [summary](docs/graphics/PHASE_22.md) and
+  [report](docs/reports/phase-22.md).
 
 See [engines/MODULES.md](engines/MODULES.md) for the module index and
 [docs/architecture/overview.md](docs/architecture/overview.md) for the design.

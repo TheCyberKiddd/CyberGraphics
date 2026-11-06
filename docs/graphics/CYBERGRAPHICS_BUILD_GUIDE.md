@@ -474,19 +474,19 @@ Done when: the profiler shows the two threads overlapping, a ThreadSanitizer run
 ### Phase 22: Scene, render proxies, and culling
 
 Tasks
-[ ] Render proxies (mesh instance, light, camera): the renderer's own copies of the data it needs, created, updated, and destroyed through the command queue.
-[ ] Transform and bounds storage in contiguous arrays with dirty flags.
-[ ] Frustum culling of bounding boxes on the job system, producing a visibility list per view.
-[ ] Start with flat arrays and parallel culling, and add a BVH or grid only when measurements demand it.
-[ ] LOD selection by screen-space size.
-[ ] A brute-force reference culler used in tests to verify results.
+[x] Render proxies (mesh instance, light, camera): the renderer's own copies of the data it needs, created, updated, and destroyed through the command queue.
+[x] Transform and bounds storage in contiguous arrays with dirty flags.
+[x] Frustum culling of bounding boxes on the job system, producing a visibility list per view.
+[x] Start with flat arrays and parallel culling, and add a BVH or grid only when measurements demand it.
+[x] LOD selection by screen-space size.
+[x] A brute-force reference culler used in tests to verify results.
 Read first: there is no single authoritative source; search for "frustum culling AABB plane test", read two or three explanations, and list them in the design note.
 Tips
 • Culling speed is limited by memory access, so store bounds in tightly packed arrays.
 • Test objects that straddle frustum planes and objects exactly on a plane.
 • Measure with 100,000 objects on your 4-core machine and record the time.
 Write down: docs/design/phase-22-scene-culling.md.
-Done when: a 100,000-object scene is culled within a budget you set (for example 1 ms), and the results match the brute-force culler.
+Done when: a 100,000-object scene is culled within the 5 ms p95 budget, and the results match the brute-force culler. Proven locally on a 4-core Intel Core i5-6400 at 2.881 ms p95; see the [Phase 22 report](../reports/phase-22.md). The master-roadmap checkbox awaits committed evidence.
 
 ### Phase 23: Geometry pipeline
 

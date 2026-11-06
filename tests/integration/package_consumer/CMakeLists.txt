@@ -12,6 +12,7 @@ target_link_libraries(consumer PRIVATE
     cyber::platform
     cyber::perf
     cyber::jobs
+    cyber::scene
     cyber::rhi
     cyber::renderer
     cyber::software_renderer

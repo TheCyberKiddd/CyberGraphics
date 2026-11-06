@@ -8,6 +8,15 @@ semantic versioning once a public API exists.
 
 ### Added
 
+- Phase 22 implements `cyber_scene`: copied mesh, light, and camera proxies
+  sent through the existing render-thread packet queue; generation-checked
+  handles; contiguous bounds and transforms; parallel frustum culling; and
+  screen-space LOD selection. Debug, Release, and Debug-ASan pass 104/104; the
+  TSan scene tests, package/source consumers, and repository checks pass. The
+  100,000-proxy benchmark matches brute force at 2.881 ms p95 on a 4-core
+  Intel Core i5-6400. The master-roadmap checkbox awaits commit; see the
+  [Phase 22 summary](docs/graphics/PHASE_22.md) and
+  [report](docs/reports/phase-22.md).
 - Phase 21 render-thread frame pipelining: bounded SPSC command handoff,
   copied immutable packets, ordered resize and draining shutdown, profiler
   scopes, single-thread reference mode, and render-owner RHI lifetime for hot
