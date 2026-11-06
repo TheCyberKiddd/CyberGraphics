@@ -12,6 +12,7 @@ using cyber::core::Error;
 using cyber::core::ErrorCode;
 using cyber::core::Result;
 using cyber::core::Status;
+using cyber::core::usize;
 using cyber::memory::Span;
 
 [[nodiscard]] Error TableError(ErrorCode code, const char* message) noexcept
@@ -71,11 +72,13 @@ BindlessResourceTable::Create(rhi::Device& device, memory::Allocator& allocator,
         return Result<BindlessResourceTable, Error>::Err(
             TableError(ErrorCode::Unsupported, "bindless table: device lacks bindless resources"));
     }
+    const usize capacity = static_cast<usize>(desc.capacity);
+    const usize maxBindingResources =
+        std::numeric_limits<usize>::max() / sizeof(rhi::BindingResource);
     if (desc.capacity == 0 || desc.framesInFlight == 0 ||
         desc.framesInFlight > rhi::kMaxFramesInFlight || !desc.fallbackTexture.IsValid() ||
         !desc.fallbackBuffer.IsValid() || !desc.sampler.IsValid() ||
-        desc.capacity >
-            (std::numeric_limits<cyber::core::usize>::max() / sizeof(rhi::BindingResource) - 1) / 2)
+        capacity > (maxBindingResources - 1) / 2)
     {
         return Result<BindlessResourceTable, Error>::Err(
             TableError(ErrorCode::InvalidArgument, "bindless table: invalid shape or fallback"));
@@ -104,9 +107,9 @@ BindlessResourceTable::Create(rhi::Device& device, memory::Allocator& allocator,
     }
 
     table.m_textures = static_cast<rhi::TextureViewHandle*>(allocator.Allocate(
-        desc.capacity * sizeof(rhi::TextureViewHandle), alignof(rhi::TextureViewHandle)));
-    table.m_buffers = static_cast<rhi::BindingResource*>(allocator.Allocate(
-        desc.capacity * sizeof(rhi::BindingResource), alignof(rhi::BindingResource)));
+        capacity * sizeof(rhi::TextureViewHandle), alignof(rhi::TextureViewHandle)));
+    table.m_buffers = static_cast<rhi::BindingResource*>(
+        allocator.Allocate(capacity * sizeof(rhi::BindingResource), alignof(rhi::BindingResource)));
     if (table.m_textures == nullptr || table.m_buffers == nullptr)
     {
         (void)table.Destroy();
@@ -160,7 +163,7 @@ BindlessResourceTable::Create(rhi::Device& device, memory::Allocator& allocator,
     }
     table.m_layout = layout.Value();
 
-    const cyber::core::usize resourceCount = static_cast<cyber::core::usize>(desc.capacity) * 2 + 1;
+    const usize resourceCount = capacity * 2 + 1;
     auto* resources = static_cast<rhi::BindingResource*>(allocator.Allocate(
         resourceCount * sizeof(rhi::BindingResource), alignof(rhi::BindingResource)));
     if (resources == nullptr)
@@ -252,7 +255,7 @@ Result<PersistentDescriptor, Error> BindlessResourceTable::AllocateBuffer(rhi::B
         return descriptor;
     }
     m_buffers[descriptor.Value().index] = rhi::BindingResource{
-        rhi::BindingType::ReadOnlyStorageBuffer, buffer, offsetBytes, sizeBytes};
+        rhi::BindingType::ReadOnlyStorageBuffer, buffer, offsetBytes, sizeBytes, {}, {}};
     AdvanceRevision();
     return descriptor;
 }
@@ -266,8 +269,8 @@ Status<Error> BindlessResourceTable::UpdateBuffer(PersistentDescriptor descripto
         return Status<Error>::Err(
             TableError(ErrorCode::InvalidArgument, "bindless table: stale buffer or resource"));
     }
-    m_buffers[descriptor.index] = rhi::BindingResource{rhi::BindingType::ReadOnlyStorageBuffer,
-                                                       buffer, offsetBytes, sizeBytes};
+    m_buffers[descriptor.index] = rhi::BindingResource{
+        rhi::BindingType::ReadOnlyStorageBuffer, buffer, offsetBytes, sizeBytes, {}, {}};
     AdvanceRevision();
     return Status<Error>::Ok();
 }
@@ -290,7 +293,7 @@ Status<Error> BindlessResourceTable::SyncFrame(const rhi::FrameRing& ring,
         return Status<Error>::Ok();
     }
 
-    const cyber::core::usize resourceCount = static_cast<cyber::core::usize>(m_capacity) * 2 + 1;
+    const usize resourceCount = static_cast<usize>(m_capacity) * 2 + 1;
     auto* resources = static_cast<rhi::BindingResource*>(m_allocator->Allocate(
         resourceCount * sizeof(rhi::BindingResource), alignof(rhi::BindingResource)));
     if (resources == nullptr)

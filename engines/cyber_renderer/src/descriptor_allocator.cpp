@@ -59,7 +59,8 @@ Status<Error> PersistentDescriptorAllocator::Initialize(u32 capacity,
         return Status<Error>::Err(
             AllocatorError(ErrorCode::InvalidArgument, "descriptor allocator: invalid capacity"));
     }
-    if (capacity > std::numeric_limits<cyber::core::usize>::max() / sizeof(u32))
+    const cyber::core::usize allocationCapacity = static_cast<cyber::core::usize>(capacity);
+    if (sizeof(u32) > std::numeric_limits<cyber::core::usize>::max() / allocationCapacity)
     {
         return Status<Error>::Err(
             AllocatorError(ErrorCode::OutOfRange, "descriptor allocator: capacity overflow"));
