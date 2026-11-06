@@ -9,8 +9,8 @@ documents are binding:
   per-phase work packages, reading list, tasks, tips, and report template.
 
 Work phases in this order. Do not tick a phase until its done-when line is
-proved with committed evidence. Phases 1-18 are complete; Phase 18's
-implementation and validation evidence are included in this commit.
+proved with committed evidence. Phases 1-19 are complete; Phase 19's
+implementation, benchmark, and validation evidence are recorded in its report.
 
 ## Part 1: Foundation (phases 1-5)
 
@@ -43,7 +43,7 @@ implementation and validation evidence are included in this commit.
 - [x] **Phase 16 — Shader language and compiler strategy** — compiler emits HLSL used by the D3D12 cube comparison; Debug, Release, and Debug-ASan pass 88/88, package/structure/layer checks pass, and the repository-wide formatter passes. · [implementation summary](graphics/PHASE_16.md), [report](reports/phase-16.md), [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-16-shader-language-and-compiler-strategy) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-16-shader-language-and-compiler-strategy)
 - [x] **Phase 17 — Reflection, permutations, and hot reload** — complete; [implementation summary](graphics/PHASE_17.md), [report](reports/phase-17.md), [design note](design/phase-17-shader-permutations.md), [ADR 0020](adr/0020-shader-reflection-permutations-and-reload.md); 96/96 tests pass in Debug, Profile, Release, Shipping, and Debug-ASan, with package, structure, layer, formatting, and D3D12 live-reload checks passing · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-17-reflection-permutations-and-hot-reload) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-17-reflection-permutations-and-hot-reload)
 - [x] **Phase 18 — Material system** — complete; Debug, Release, and Debug-ASan pass 98/98; package/source consumers, sample, and repository checks pass · [summary](graphics/PHASE_18.md) · [report](reports/phase-18.md) · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-18-material-system) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-18-material-system)
-- [ ] **Phase 19 — Constant streaming and bindless resources** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-19-constant-streaming-and-bindless-resources) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-19-constant-streaming-and-bindless-resources)
+- [x] **Phase 19 — Constant streaming and bindless resources** — the Intel HD Graphics 530 Release bindless path submits 10,000 unique-transform draws within the 16.67 ms budget; Debug, Release, and Debug-ASan pass 99/99 · [summary](graphics/PHASE_19.md) · [report](reports/phase-19.md) · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-19-constant-streaming-and-bindless-resources) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-19-constant-streaming-and-bindless-resources)
 
 ## Part 5: Renderer architecture (phases 20-25)
 
@@ -112,9 +112,12 @@ boundary, and null backend; 58/58 tests in debug.
   comparison that renders a colored triangle and a textured cube through the RHI
   and matches the software renderer's images within a recorded tolerance. The
   debug layer is enabled with GPU-based validation and its messages fail a test.
-- Next: Phase 18, material system. Phase 17 implementation and local validation
-  are complete, but the phase remains unchecked until its evidence is committed.
-  Phase 15's automated checks and capture evidence are complete; the Intel HD
+- Next: Phase 20, render graph. Phase 19's constant streaming, descriptor
+  management, capability-gated bindless path, and measured 10,000-draw
+  acceptance result are recorded in its report. Phase 18's material system
+  implementation and validation evidence are committed, and the master
+  roadmap marks it complete. Phase 15's automated checks and capture evidence
+  are complete; the Intel HD
   Graphics 530 marker sample submits and presents, and both PIX and RenderDoc
   show the nested pass labels and blue frame. The raw native point-marker call
   is covered by RHI tests; it is not presented as a separate capture UI event.

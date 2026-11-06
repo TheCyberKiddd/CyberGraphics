@@ -58,7 +58,7 @@ using cyber::memory::kInvalidHandleIndex;
     u32 nextRegister = 0;
     for (u32 prior = 0; prior < entryIndex; ++prior)
     {
-        if (layout.entries[prior].type == entry.type)
+        if (SharesShaderRegisterClass(layout.entries[prior].type, entry.type))
         {
             nextRegister += layout.entries[prior].arrayCount;
         }
@@ -353,12 +353,25 @@ Status<Error> D3D12CreateBindGroupLayout(void* internal, const BindGroupLayoutDe
             return StatusError(ErrorCode::InvalidArgument,
                                "d3d12 backend: layout entry array count is zero");
         }
+        if (entry.dynamicOffset && ((entry.type != BindingType::UniformBuffer &&
+                                     entry.type != BindingType::StorageBuffer &&
+                                     entry.type != BindingType::ReadOnlyStorageBuffer) ||
+                                    entry.arrayCount != 1))
+        {
+            return StatusError(
+                ErrorCode::InvalidArgument,
+                "d3d12 backend: dynamic offsets require one uniform or storage buffer");
+        }
         descriptors += entry.arrayCount;
         // A sampler descriptor cannot share a heap with a resource descriptor, so
         // the layout keeps two totals: one per heap, one overall.
         if (entry.type == BindingType::Sampler)
         {
             samplers += entry.arrayCount;
+        }
+        else if (entry.dynamicOffset)
+        {
+            // Dynamic CBV/SRV bindings are root descriptors, not heap entries.
         }
         else
         {
@@ -388,9 +401,14 @@ Status<Error> D3D12CreateBindGroupLayout(void* internal, const BindGroupLayoutDe
     slot.descriptorCount = descriptors;
     slot.resourceCount = resources;
     slot.samplerCount = samplers;
+    slot.dynamicOffsetCount = 0;
     for (usize entry = 0; entry < desc.entries.Size(); ++entry)
     {
         slot.entries[entry] = desc.entries[entry];
+        if (desc.entries[entry].dynamicOffset)
+        {
+            ++slot.dynamicOffsetCount;
+        }
     }
 
     BindGroupLayoutHandle handle;
@@ -425,6 +443,204 @@ Status<Error> D3D12DestroyBindGroupLayout(void* internal, BindGroupLayoutHandle 
     return Status<Error>::Ok();
 }
 
+namespace
+{
+
+[[nodiscard]] Status<Error> ValidateD3D12BindingResource(D3D12Device& device,
+                                                         const BindGroupLayoutEntry& entry,
+                                                         const BindingResource& resource) noexcept
+{
+    if (resource.type != entry.type)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "d3d12 backend: group resource type does not match its layout");
+    }
+    if (entry.type == BindingType::UniformBuffer || entry.type == BindingType::StorageBuffer ||
+        entry.type == BindingType::ReadOnlyStorageBuffer)
+    {
+        const D3D12BufferSlot* buffer = Resolve(device, resource.buffer);
+        const BufferUsage required =
+            entry.type == BindingType::UniformBuffer ? BufferUsage::Uniform : BufferUsage::Storage;
+        if (buffer == nullptr || !HasUsage(buffer->desc.usage, required))
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "d3d12 backend: buffer binding needs a live compatible buffer");
+        }
+        if (resource.offset >= buffer->desc.sizeBytes)
+        {
+            return StatusError(ErrorCode::OutOfRange,
+                               "d3d12 backend: buffer binding starts past the buffer");
+        }
+        const u64 size =
+            resource.size == 0 ? buffer->desc.sizeBytes - resource.offset : resource.size;
+        const u32 alignment =
+            entry.type == BindingType::UniformBuffer
+                ? D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT
+                : (buffer->desc.elementStride > 4 ? buffer->desc.elementStride : 4);
+        if (resource.offset % alignment != 0 || size == 0 ||
+            size > buffer->desc.sizeBytes - resource.offset)
+        {
+            return StatusError(ErrorCode::OutOfRange,
+                               "d3d12 backend: buffer binding range or alignment is invalid");
+        }
+        if (entry.dynamicOffset && resource.size == 0)
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "d3d12 backend: dynamic bindings need a fixed non-zero range");
+        }
+        if (entry.type == BindingType::UniformBuffer &&
+            (size > 65536 || ((size + 255ULL) & ~255ULL) > 65536))
+        {
+            return StatusError(ErrorCode::OutOfRange,
+                               "d3d12 backend: uniform buffer range exceeds 64 KiB");
+        }
+        if (entry.type != BindingType::UniformBuffer && buffer->desc.elementStride != 0 &&
+            size % buffer->desc.elementStride != 0)
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "d3d12 backend: structured buffer range is not stride aligned");
+        }
+        if (entry.type != BindingType::UniformBuffer && buffer->desc.elementStride == 0 &&
+            size % 4 != 0)
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "d3d12 backend: raw buffer range is not 4-byte aligned");
+        }
+        return Status<Error>::Ok();
+    }
+
+    if (entry.type == BindingType::SampledTexture || entry.type == BindingType::StorageTexture)
+    {
+        const D3D12ViewSlot* view = Resolve(device, resource.textureView);
+        if (view == nullptr)
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "d3d12 backend: group names a stale texture view");
+        }
+        const D3D12TextureSlot* texture = Resolve(device, view->texture);
+        const TextureUsage required = entry.type == BindingType::SampledTexture
+                                          ? TextureUsage::Sampled
+                                          : TextureUsage::Storage;
+        if (texture == nullptr || !HasUsage(texture->desc.usage, required))
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "d3d12 backend: texture binding is stale or has incompatible usage");
+        }
+        return Status<Error>::Ok();
+    }
+    if (entry.type == BindingType::Sampler)
+    {
+        if (Resolve(device, resource.sampler) == nullptr)
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "d3d12 backend: group names a stale sampler");
+        }
+        return Status<Error>::Ok();
+    }
+    return StatusError(ErrorCode::InvalidArgument, "d3d12 backend: binding type is invalid");
+}
+
+void WriteD3D12BindingDescriptor(D3D12Device& device, const BindingResource& resource,
+                                 D3D12_CPU_DESCRIPTOR_HANDLE destination) noexcept
+{
+    switch (resource.type)
+    {
+    case BindingType::UniformBuffer:
+    {
+        const D3D12BufferSlot* buffer = Resolve(device, resource.buffer);
+        const u64 size =
+            resource.size == 0 ? buffer->desc.sizeBytes - resource.offset : resource.size;
+        D3D12_CONSTANT_BUFFER_VIEW_DESC view{};
+        view.BufferLocation = buffer->resource->GetGPUVirtualAddress() + resource.offset;
+        view.SizeInBytes = static_cast<UINT>((size + 255ULL) & ~255ULL);
+        device.device->CreateConstantBufferView(&view, destination);
+        break;
+    }
+    case BindingType::ReadOnlyStorageBuffer:
+    {
+        const D3D12BufferSlot* buffer = Resolve(device, resource.buffer);
+        const u64 size =
+            resource.size == 0 ? buffer->desc.sizeBytes - resource.offset : resource.size;
+        const u32 stride = buffer->desc.elementStride;
+        D3D12_SHADER_RESOURCE_VIEW_DESC view{};
+        view.Format = DXGI_FORMAT_UNKNOWN;
+        view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        view.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+        if (stride == 0)
+        {
+            view.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
+            view.Buffer.FirstElement = resource.offset / 4;
+            view.Buffer.NumElements = static_cast<UINT>(size / 4);
+        }
+        else
+        {
+            view.Buffer.StructureByteStride = stride;
+            view.Buffer.FirstElement = resource.offset / stride;
+            view.Buffer.NumElements = static_cast<UINT>(size / stride);
+        }
+        device.device->CreateShaderResourceView(buffer->resource, &view, destination);
+        break;
+    }
+    case BindingType::StorageBuffer:
+    {
+        const D3D12BufferSlot* buffer = Resolve(device, resource.buffer);
+        const u64 size =
+            resource.size == 0 ? buffer->desc.sizeBytes - resource.offset : resource.size;
+        const u32 stride = buffer->desc.elementStride;
+        D3D12_UNORDERED_ACCESS_VIEW_DESC view{};
+        view.Format = DXGI_FORMAT_UNKNOWN;
+        view.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+        if (stride == 0)
+        {
+            view.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
+            view.Buffer.FirstElement = resource.offset / 4;
+            view.Buffer.NumElements = static_cast<UINT>(size / 4);
+        }
+        else
+        {
+            view.Buffer.StructureByteStride = stride;
+            view.Buffer.FirstElement = resource.offset / stride;
+            view.Buffer.NumElements = static_cast<UINT>(size / stride);
+        }
+        device.device->CreateUnorderedAccessView(buffer->resource, nullptr, &view, destination);
+        break;
+    }
+    case BindingType::SampledTexture:
+    {
+        const D3D12ViewSlot* view = Resolve(device, resource.textureView);
+        const D3D12TextureSlot* texture = Resolve(device, view->texture);
+        D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
+        BuildSampledViewDesc(*texture, view->desc, srv);
+        device.device->CreateShaderResourceView(texture->resource, &srv, destination);
+        break;
+    }
+    case BindingType::StorageTexture:
+    {
+        const D3D12ViewSlot* view = Resolve(device, resource.textureView);
+        const D3D12TextureSlot* texture = Resolve(device, view->texture);
+        D3D12_UNORDERED_ACCESS_VIEW_DESC uav{};
+        uav.Format = ToDxgiFormat(view->desc.format);
+        uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+        uav.Texture2D.MipSlice = view->desc.range.baseMipLevel;
+        device.device->CreateUnorderedAccessView(texture->resource, nullptr, &uav, destination);
+        break;
+    }
+    case BindingType::Sampler:
+    {
+        const D3D12SamplerSlot* sampler = Resolve(device, resource.sampler);
+        D3D12_SAMPLER_DESC samplerDesc{};
+        BuildSamplerDesc(sampler->desc, samplerDesc);
+        device.device->CreateSampler(&samplerDesc, destination);
+        break;
+    }
+    case BindingType::Count:
+        CG_ASSERT(false);
+        break;
+    }
+}
+
+}  // namespace
+
 // ---------------------------------------------------------------------------
 // Bind groups
 // ---------------------------------------------------------------------------
@@ -455,6 +671,24 @@ Status<Error> D3D12CreateBindGroup(void* internal, const BindGroupDesc& desc,
         return StatusError(ErrorCode::InvalidArgument,
                            "d3d12 backend: group resource count does not match its layout");
     }
+    if (desc.resources.Data() == nullptr && layout->descriptorCount != 0)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "d3d12 backend: group resources are null");
+    }
+    usize validationIndex = 0;
+    for (u32 entryIndex = 0; entryIndex < layout->entryCount; ++entryIndex)
+    {
+        const BindGroupLayoutEntry& entry = layout->entries[entryIndex];
+        for (u32 element = 0; element < entry.arrayCount; ++element, ++validationIndex)
+        {
+            const Status<Error> valid =
+                ValidateD3D12BindingResource(device, entry, desc.resources[validationIndex]);
+            if (!valid)
+            {
+                return valid;
+            }
+        }
+    }
 
     // Two contiguous blocks, one per heap: a root descriptor table is a range, so
     // every resource of a group must sit together, and the same for its samplers.
@@ -475,12 +709,51 @@ Status<Error> D3D12CreateBindGroup(void* internal, const BindGroupDesc& desc,
     u32 resourceIndex = 0;
     u32 resourceOrdinal = 0;
     u32 samplerOrdinal = 0;
+    D3D12DynamicBinding dynamicBindings[kMaxLayoutEntries]{};
+    u32 dynamicBindingCount = 0;
     for (u32 entryIndex = 0; entryIndex < layout->entryCount; ++entryIndex)
     {
         const BindGroupLayoutEntry& entry = layout->entries[entryIndex];
         for (u32 element = 0; element < entry.arrayCount; ++element)
         {
             const BindingResource& resource = desc.resources[resourceIndex];
+            if (resource.type != entry.type)
+            {
+                return StatusError(ErrorCode::InvalidArgument,
+                                   "d3d12 backend: group resource type does not match its layout");
+            }
+            if (entry.dynamicOffset)
+            {
+                const D3D12BufferSlot* buffer = Resolve(device, resource.buffer);
+                const BufferUsage required = entry.type == BindingType::UniformBuffer
+                                                 ? BufferUsage::Uniform
+                                                 : BufferUsage::Storage;
+                const u32 alignment = entry.type == BindingType::UniformBuffer
+                                          ? D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT
+                                          : (buffer != nullptr && buffer->desc.elementStride > 4
+                                                 ? buffer->desc.elementStride
+                                                 : 4);
+                if (buffer == nullptr || !HasUsage(buffer->desc.usage, required))
+                {
+                    return StatusError(
+                        ErrorCode::InvalidArgument,
+                        "d3d12 backend: dynamic binding needs a live compatible buffer");
+                }
+                if (resource.offset % alignment != 0 || resource.offset >= buffer->desc.sizeBytes ||
+                    resource.size == 0 || resource.size > buffer->desc.sizeBytes - resource.offset)
+                {
+                    return StatusError(ErrorCode::OutOfRange,
+                                       "d3d12 backend: dynamic binding range is invalid");
+                }
+                D3D12DynamicBinding& dynamic = dynamicBindings[dynamicBindingCount++];
+                dynamic.type = entry.type;
+                dynamic.entryIndex = entryIndex;
+                dynamic.buffer = resource.buffer;
+                dynamic.baseOffset = resource.offset;
+                dynamic.rangeSize = resource.size;
+                ++resourceIndex;
+                continue;
+            }
             const D3D12_CPU_DESCRIPTOR_HANDLE destination =
                 entry.type == BindingType::Sampler
                     ? SamplerCpuAt(device, samplerFirst + samplerOrdinal)
@@ -518,31 +791,12 @@ Status<Error> D3D12CreateBindGroup(void* internal, const BindGroupDesc& desc,
             }
             case BindingType::StorageBuffer:
             {
-                const D3D12BufferSlot* buffer = Resolve(device, resource.buffer);
-                if (buffer == nullptr)
-                {
-                    return StatusError(ErrorCode::InvalidArgument,
-                                       "d3d12 backend: group names a stale buffer");
-                }
-                const u64 size =
-                    resource.size == 0 ? buffer->desc.sizeBytes - resource.offset : resource.size;
-                const u32 stride = buffer->desc.elementStride;
-                D3D12_SHADER_RESOURCE_VIEW_DESC view{};
-                view.Format = DXGI_FORMAT_UNKNOWN;
-                view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                view.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-                if (stride == 0)
-                {
-                    view.Buffer.FirstElement = resource.offset / 4;
-                    view.Buffer.NumElements = static_cast<UINT>(size / 4);
-                }
-                else
-                {
-                    view.Buffer.StructureByteStride = stride;
-                    view.Buffer.FirstElement = resource.offset / stride;
-                    view.Buffer.NumElements = static_cast<UINT>(size / stride);
-                }
-                device.device->CreateShaderResourceView(buffer->resource, &view, destination);
+                WriteD3D12BindingDescriptor(device, resource, destination);
+                break;
+            }
+            case BindingType::ReadOnlyStorageBuffer:
+            {
+                WriteD3D12BindingDescriptor(device, resource, destination);
                 break;
             }
             case BindingType::SampledTexture:
@@ -635,11 +889,100 @@ Status<Error> D3D12CreateBindGroup(void* internal, const BindGroupDesc& desc,
     slot.descriptorCount = layout->resourceCount;
     slot.samplerIndex = samplerFirst;
     slot.samplerCount = layout->samplerCount;
+    slot.entryCount = layout->entryCount;
+    slot.resourceCount = static_cast<u32>(desc.resources.Size());
+    slot.dynamicBindingCount = dynamicBindingCount;
+    for (u32 entryIndex = 0; entryIndex < layout->entryCount; ++entryIndex)
+    {
+        slot.entries[entryIndex] = layout->entries[entryIndex];
+    }
+    for (u32 dynamicIndex = 0; dynamicIndex < dynamicBindingCount; ++dynamicIndex)
+    {
+        slot.dynamicBindings[dynamicIndex] = dynamicBindings[dynamicIndex];
+    }
 
     BindGroupHandle handle;
     handle.index = index;
     handle.generation = slot.generation;
     *out = handle;
+    return Status<Error>::Ok();
+}
+
+Status<Error> D3D12UpdateBindGroup(void* internal, BindGroupHandle handle,
+                                   memory::Span<const BindingResource> resources) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "d3d12 backend: device is null");
+    }
+    auto& device = *static_cast<D3D12Device*>(internal);
+    const Status<Error> healthy = DeviceLostStatus(device);
+    if (!healthy)
+    {
+        return healthy;
+    }
+    const std::lock_guard<std::mutex> lock(device.mutex);
+    D3D12GroupSlot* group = Resolve(device, handle);
+    if (group == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "d3d12 backend: bind group handle is stale or invalid");
+    }
+    if (resources.Size() != group->resourceCount ||
+        (resources.Data() == nullptr && group->resourceCount != 0))
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "d3d12 backend: replacement resource count does not match the group");
+    }
+
+    usize resourceIndex = 0;
+    for (u32 entryIndex = 0; entryIndex < group->entryCount; ++entryIndex)
+    {
+        const BindGroupLayoutEntry& entry = group->entries[entryIndex];
+        for (u32 element = 0; element < entry.arrayCount; ++element, ++resourceIndex)
+        {
+            const Status<Error> valid =
+                ValidateD3D12BindingResource(device, entry, resources[resourceIndex]);
+            if (!valid)
+            {
+                return valid;
+            }
+        }
+    }
+
+    resourceIndex = 0;
+    u32 resourceOrdinal = 0;
+    u32 samplerOrdinal = 0;
+    D3D12DynamicBinding dynamicBindings[kMaxLayoutEntries]{};
+    u32 dynamicBindingCount = 0;
+    for (u32 entryIndex = 0; entryIndex < group->entryCount; ++entryIndex)
+    {
+        const BindGroupLayoutEntry& entry = group->entries[entryIndex];
+        for (u32 element = 0; element < entry.arrayCount; ++element, ++resourceIndex)
+        {
+            const BindingResource& resource = resources[resourceIndex];
+            if (entry.dynamicOffset)
+            {
+                D3D12DynamicBinding& dynamic = dynamicBindings[dynamicBindingCount++];
+                dynamic.type = entry.type;
+                dynamic.entryIndex = entryIndex;
+                dynamic.buffer = resource.buffer;
+                dynamic.baseOffset = resource.offset;
+                dynamic.rangeSize = resource.size;
+                continue;
+            }
+            const D3D12_CPU_DESCRIPTOR_HANDLE destination =
+                entry.type == BindingType::Sampler
+                    ? SamplerCpuAt(device, group->samplerIndex + samplerOrdinal++)
+                    : CpuHandleAt(device, group->descriptorIndex + resourceOrdinal++);
+            WriteD3D12BindingDescriptor(device, resource, destination);
+        }
+    }
+    for (u32 index = 0; index < dynamicBindingCount; ++index)
+    {
+        group->dynamicBindings[index] = dynamicBindings[index];
+    }
+    group->dynamicBindingCount = dynamicBindingCount;
     return Status<Error>::Ok();
 }
 
@@ -683,7 +1026,7 @@ BindGroupInfo D3D12BindGroupInfo(const void* internal, BindGroupHandle handle) n
     BindGroupInfo info{};
     info.valid = true;
     info.layout = slot->layout;
-    info.resourceCount = slot->descriptorCount;
+    info.resourceCount = slot->resourceCount;
     return info;
 }
 
@@ -710,9 +1053,9 @@ Status<Error> D3D12CreatePipelineLayout(void* internal, const PipelineLayoutDesc
 
     // A used slot contributes up to two descriptor tables; the RHI's four slots
     // become register spaces 0..3. Resource tables preserve each binding's
-    // register class and shader register, while sampler tables remain separate
-    // because the API forbids mixing their descriptors.
-    constexpr u32 kMaxParameters = kBindGroupSlotCount * 2 + 1;
+    // register class and shader register, while dynamic buffer bindings use
+    // root descriptors and samplers remain in their separate heap.
+    constexpr u32 kMaxParameters = kBindGroupSlotCount * (kMaxLayoutEntries + 2) + 1;
     constexpr u32 kMaxRanges = kBindGroupSlotCount * kMaxLayoutEntries;
     D3D12_ROOT_PARAMETER parameters[kMaxParameters]{};
     D3D12_DESCRIPTOR_RANGE ranges[kMaxRanges]{};
@@ -721,10 +1064,18 @@ Status<Error> D3D12CreatePipelineLayout(void* internal, const PipelineLayoutDesc
     u32 descriptorCounts[kBindGroupSlotCount]{};
     u32 resourceParameter[kBindGroupSlotCount]{};
     u32 samplerParameter[kBindGroupSlotCount]{};
+    u32 dynamicParameters[kBindGroupSlotCount][kMaxLayoutEntries]{};
+    BindGroupLayoutHandle groups[kBindGroupSlotCount]{};
+    u32 rootSignatureDwords = 0;
     for (u32 slotIndex = 0; slotIndex < kBindGroupSlotCount; ++slotIndex)
     {
         resourceParameter[slotIndex] = kNoRootParameter;
         samplerParameter[slotIndex] = kNoRootParameter;
+        groups[slotIndex] = desc.groups[slotIndex];
+        for (u32 entryIndex = 0; entryIndex < kMaxLayoutEntries; ++entryIndex)
+        {
+            dynamicParameters[slotIndex][entryIndex] = kNoRootParameter;
+        }
     }
 
     for (u32 slotIndex = 0; slotIndex < kBindGroupSlotCount; ++slotIndex)
@@ -746,6 +1097,26 @@ Status<Error> D3D12CreatePipelineLayout(void* internal, const PipelineLayoutDesc
         for (u32 entryIndex = 0; entryIndex < layout->entryCount; ++entryIndex)
         {
             const BindGroupLayoutEntry& entry = layout->entries[entryIndex];
+            if (entry.dynamicOffset)
+            {
+                if (parameterCount >= kMaxParameters)
+                {
+                    return StatusError(ErrorCode::OutOfRange,
+                                       "d3d12 backend: root parameter capacity exceeded");
+                }
+                D3D12_ROOT_PARAMETER& parameter = parameters[parameterCount];
+                parameter.ParameterType = entry.type == BindingType::UniformBuffer
+                                              ? D3D12_ROOT_PARAMETER_TYPE_CBV
+                                              : (entry.type == BindingType::StorageBuffer
+                                                     ? D3D12_ROOT_PARAMETER_TYPE_UAV
+                                                     : D3D12_ROOT_PARAMETER_TYPE_SRV);
+                parameter.Descriptor.ShaderRegister = ShaderRegisterForEntry(*layout, entryIndex);
+                parameter.Descriptor.RegisterSpace = slotIndex;
+                parameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+                dynamicParameters[slotIndex][entryIndex] = parameterCount++;
+                rootSignatureDwords += 2;
+                continue;
+            }
             if (entry.type == BindingType::Sampler)
             {
                 continue;
@@ -757,6 +1128,11 @@ Status<Error> D3D12CreatePipelineLayout(void* internal, const PipelineLayoutDesc
                 range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
                 break;
             case BindingType::StorageBuffer:
+                range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+                break;
+            case BindingType::ReadOnlyStorageBuffer:
+                range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+                break;
             case BindingType::StorageTexture:
                 range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
                 break;
@@ -783,6 +1159,7 @@ Status<Error> D3D12CreatePipelineLayout(void* internal, const PipelineLayoutDesc
                 &ranges[firstResourceRange];
             parameters[parameterCount].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
             resourceParameter[slotIndex] = parameterCount++;
+            ++rootSignatureDwords;
         }
         const u32 firstSamplerRange = rangeCount;
         u32 samplerOffset = 0;
@@ -811,6 +1188,7 @@ Status<Error> D3D12CreatePipelineLayout(void* internal, const PipelineLayoutDesc
             parameters[parameterCount].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
             samplerParameter[slotIndex] = parameterCount;
             ++parameterCount;
+            ++rootSignatureDwords;
         }
     }
 
@@ -833,7 +1211,13 @@ Status<Error> D3D12CreatePipelineLayout(void* internal, const PipelineLayoutDesc
         parameters[parameterCount].Constants.RegisterSpace = 0;
         parameters[parameterCount].Constants.Num32BitValues = (pushConstantBytes + 3) / 4;
         parameters[parameterCount].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        rootSignatureDwords += (pushConstantBytes + 3) / 4;
         ++parameterCount;
+    }
+    if (rootSignatureDwords > 64)
+    {
+        return StatusError(ErrorCode::OutOfRange,
+                           "d3d12 backend: root signature exceeds the 64-DWORD budget");
     }
 
     D3D12_ROOT_SIGNATURE_DESC signature{};
@@ -896,6 +1280,12 @@ Status<Error> D3D12CreatePipelineLayout(void* internal, const PipelineLayoutDesc
         slot.descriptorCounts[groupIndex] = descriptorCounts[groupIndex];
         slot.resourceParameter[groupIndex] = resourceParameter[groupIndex];
         slot.samplerParameter[groupIndex] = samplerParameter[groupIndex];
+        slot.groups[groupIndex] = groups[groupIndex];
+        for (u32 entryIndex = 0; entryIndex < kMaxLayoutEntries; ++entryIndex)
+        {
+            slot.dynamicParameters[groupIndex][entryIndex] =
+                dynamicParameters[groupIndex][entryIndex];
+        }
     }
 
     PipelineLayoutHandle handle;

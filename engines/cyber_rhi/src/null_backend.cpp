@@ -123,6 +123,8 @@ struct NullBindGroupLayout
 struct NullBindGroup
 {
     BindGroupLayoutHandle layout;
+    BindGroupLayoutEntry* entries = nullptr;
+    u32 entryCount = 0;
     BindingResource* resources = nullptr;
     u32 resourceCount = 0;
 };
@@ -382,6 +384,8 @@ void CopyName(char (&destination)[kAdapterNameBytes], const char* source) noexce
     limits.maxVertexAttributes = 16;
     limits.maxBindGroups = 4;
     limits.maxBindingsPerGroup = 16;
+    limits.maxBindingArrayElements = 4096;
+    limits.maxSamplerArrayElements = 4096;
     limits.maxPushConstantBytes = 128;
     limits.maxSamplerAnisotropy = 16;
     limits.minUniformBufferOffsetAlignment = 256;
@@ -1521,40 +1525,46 @@ Status<Error> NullDestroyBindGroupLayout(void* internal, BindGroupLayoutHandle h
         return StatusError(ErrorCode::OutOfRange,
                            "null backend: buffer binding range leaves the buffer");
     }
+    if (requiredUsage == BufferUsage::Storage)
+    {
+        if (buffer->desc.elementStride != 0 && (resource.offset % buffer->desc.elementStride != 0 ||
+                                                rangeSize % buffer->desc.elementStride != 0))
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: structured buffer range is not stride aligned");
+        }
+        if (buffer->desc.elementStride == 0 && rangeSize % 4 != 0)
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: raw buffer range is not 4-byte aligned");
+        }
+    }
     return Status<Error>::Ok();
 }
 
-Status<Error> NullCreateBindGroup(void* internal, const BindGroupDesc& desc,
-                                  BindGroupHandle* out) noexcept
+[[nodiscard]] Status<Error>
+ValidateBindGroupResources(const NullDevice& device,
+                           memory::Span<const BindGroupLayoutEntry> entries, u32 resourceCount,
+                           memory::Span<const BindingResource> resources) noexcept
 {
-    if (internal == nullptr || out == nullptr)
+    if (resources.Data() == nullptr && resourceCount != 0)
     {
         return StatusError(ErrorCode::InvalidArgument,
-                           "null backend: group creation needs a device and an output handle");
+                           "null backend: bind group resources are null");
     }
-
-    auto& device = *static_cast<NullDevice*>(internal);
-    const std::lock_guard<std::mutex> lock(device.mutex);
-
-    const NullBindGroupLayout* layout = device.bindGroupLayouts.Get(desc.layout);
-    if (layout == nullptr)
-    {
-        return StatusError(ErrorCode::InvalidArgument,
-                           "null backend: group layout handle is stale or invalid");
-    }
-    if (desc.resources.Size() != layout->resourceCount)
+    if (resources.Size() != resourceCount)
     {
         return StatusError(ErrorCode::InvalidArgument,
                            "null backend: group resource count does not match its layout");
     }
 
     usize resourceIndex = 0;
-    for (u32 entryIndex = 0; entryIndex < layout->entryCount; ++entryIndex)
+    for (usize entryIndex = 0; entryIndex < entries.Size(); ++entryIndex)
     {
-        const BindGroupLayoutEntry& entry = layout->entries[entryIndex];
+        const BindGroupLayoutEntry& entry = entries[entryIndex];
         for (u32 element = 0; element < entry.arrayCount; ++element, ++resourceIndex)
         {
-            const BindingResource& resource = desc.resources[resourceIndex];
+            const BindingResource& resource = resources[resourceIndex];
             if (resource.type != entry.type)
             {
                 return StatusError(ErrorCode::InvalidArgument,
@@ -1575,14 +1585,40 @@ Status<Error> NullCreateBindGroup(void* internal, const BindGroupDesc& desc,
                 break;
             }
             case BindingType::StorageBuffer:
+            case BindingType::ReadOnlyStorageBuffer:
             {
+                const NullBuffer* buffer = device.buffers.Get(resource.buffer);
+                const u32 storageAlignment =
+                    buffer != nullptr &&
+                            buffer->desc.elementStride >
+                                device.capabilities.limits.minStorageBufferOffsetAlignment
+                        ? buffer->desc.elementStride
+                        : device.capabilities.limits.minStorageBufferOffsetAlignment;
                 const Status<Error> checked = ValidateBufferBinding(
-                    device, resource, BufferUsage::Storage,
-                    device.capabilities.limits.minStorageBufferOffsetAlignment,
+                    device, resource, BufferUsage::Storage, storageAlignment,
                     "null backend: a storage binding needs a buffer with storage usage");
                 if (!checked)
                 {
                     return checked;
+                }
+                if (entry.dynamicOffset && resource.size == 0)
+                {
+                    return StatusError(
+                        ErrorCode::InvalidArgument,
+                        "null backend: dynamic bindings need a fixed non-zero range");
+                }
+                if (buffer != nullptr)
+                {
+                    const u64 rangeSize = resource.size == 0
+                                              ? buffer->desc.sizeBytes - resource.offset
+                                              : resource.size;
+                    const u32 stride = buffer->desc.elementStride;
+                    if ((stride == 0 && rangeSize % 4 != 0) ||
+                        (stride != 0 && rangeSize % stride != 0))
+                    {
+                        return StatusError(ErrorCode::InvalidArgument,
+                                           "null backend: storage range is not element aligned");
+                    }
                 }
                 break;
             }
@@ -1624,12 +1660,49 @@ Status<Error> NullCreateBindGroup(void* internal, const BindGroupDesc& desc,
             }
         }
     }
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullCreateBindGroup(void* internal, const BindGroupDesc& desc,
+                                  BindGroupHandle* out) noexcept
+{
+    if (internal == nullptr || out == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: group creation needs a device and an output handle");
+    }
+
+    auto& device = *static_cast<NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+
+    const NullBindGroupLayout* layout = device.bindGroupLayouts.Get(desc.layout);
+    if (layout == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: group layout handle is stale or invalid");
+    }
+    const Status<Error> validated = ValidateBindGroupResources(
+        device, memory::Span<const BindGroupLayoutEntry>(layout->entries, layout->entryCount),
+        layout->resourceCount, desc.resources);
+    if (!validated)
+    {
+        return validated;
+    }
 
     NullBindGroup record;
     record.layout = desc.layout;
+    record.entries = CopyArray(
+        device, memory::Span<const BindGroupLayoutEntry>(layout->entries, layout->entryCount));
+    if (record.entries == nullptr)
+    {
+        return StatusError(ErrorCode::Internal,
+                           "null backend: group layout entry allocation failed");
+    }
+    record.entryCount = layout->entryCount;
     record.resources = CopyArray(device, desc.resources);
     if (record.resources == nullptr)
     {
+        ReleaseAllocation(device, record.entries);
         return StatusError(ErrorCode::Internal, "null backend: group resource allocation failed");
     }
     record.resourceCount = static_cast<u32>(desc.resources.Size());
@@ -1638,9 +1711,44 @@ Status<Error> NullCreateBindGroup(void* internal, const BindGroupDesc& desc,
     if (!handle.IsValid())
     {
         ReleaseAllocation(device, record.resources);
+        ReleaseAllocation(device, record.entries);
         return StatusError(ErrorCode::Internal, "null backend: group table growth failed");
     }
     *out = handle;
+    return Status<Error>::Ok();
+}
+
+Status<Error> NullUpdateBindGroup(void* internal, BindGroupHandle handle,
+                                  memory::Span<const BindingResource> resources) noexcept
+{
+    if (internal == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "null backend: device is null");
+    }
+    auto& device = *static_cast<NullDevice*>(internal);
+    const std::lock_guard<std::mutex> lock(device.mutex);
+    NullBindGroup* group = device.bindGroups.Get(handle);
+    if (group == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: bind group handle is stale or invalid");
+    }
+    const Status<Error> validated = ValidateBindGroupResources(
+        device, memory::Span<const BindGroupLayoutEntry>(group->entries, group->entryCount),
+        group->resourceCount, resources);
+    if (!validated)
+    {
+        return validated;
+    }
+    BindingResource* replacement = CopyArray(device, resources);
+    if (replacement == nullptr)
+    {
+        return StatusError(ErrorCode::Internal,
+                           "null backend: replacement group resources allocation failed");
+    }
+    BindingResource* previous = group->resources;
+    group->resources = replacement;
+    ReleaseAllocation(device, previous);
     return Status<Error>::Ok();
 }
 
@@ -1659,8 +1767,10 @@ Status<Error> NullDestroyBindGroup(void* internal, BindGroupHandle handle) noexc
                            "null backend: group handle is stale or invalid");
     }
     BindingResource* resources = group->resources;
+    BindGroupLayoutEntry* entries = group->entries;
     (void)device.bindGroups.Remove(handle);
     ReleaseAllocation(device, resources);
+    ReleaseAllocation(device, entries);
     return Status<Error>::Ok();
 }
 
@@ -2442,6 +2552,18 @@ void ClearRecording(NullCommandList& list) noexcept
                     }
                     break;
                 }
+                case BindingType::ReadOnlyStorageBuffer:
+                {
+                    const Status<Error> checked = RequireBufferState(
+                        device, list, resource.buffer, ResourceState::ShaderRead,
+                        "null backend: missing barrier: a read-only storage buffer bound to the "
+                        "draw is not in shader_read state");
+                    if (!checked)
+                    {
+                        return checked;
+                    }
+                    break;
+                }
                 case BindingType::SampledTexture:
                 {
                     const Status<Error> checked = RequireViewState(
@@ -2908,8 +3030,8 @@ Status<Error> NullCmdSetPipeline(void* internal, PipelineHandle handle) noexcept
     return Status<Error>::Ok();
 }
 
-Status<Error> NullCmdSetBindGroup(void* internal, BindGroupSlot slot,
-                                  BindGroupHandle group) noexcept
+Status<Error> NullCmdSetBindGroup(void* internal, BindGroupSlot slot, BindGroupHandle group,
+                                  memory::Span<const u64> dynamicOffsets) noexcept
 {
     if (internal == nullptr)
     {
@@ -2935,6 +3057,11 @@ Status<Error> NullCmdSetBindGroup(void* internal, BindGroupSlot slot,
     // fail with the message that names the slot.
     if (!group.IsValid())
     {
+        if (!dynamicOffsets.Empty())
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "null backend: unbinding a group cannot take dynamic offsets");
+        }
         list.groups[slotIndex] = BindGroupHandle{};
         return Status<Error>::Ok();
     }
@@ -2968,6 +3095,57 @@ Status<Error> NullCmdSetBindGroup(void* internal, BindGroupSlot slot,
             ErrorCode::InvalidArgument,
             "null backend: the bind group's layout is not the one the pipeline layout "
             "declares for that slot");
+    }
+
+    u32 dynamicCount = 0;
+    for (u32 entryIndex = 0; entryIndex < record->entryCount; ++entryIndex)
+    {
+        if (record->entries[entryIndex].dynamicOffset)
+        {
+            ++dynamicCount;
+        }
+    }
+    if (dynamicOffsets.Size() != dynamicCount ||
+        (dynamicOffsets.Data() == nullptr && dynamicCount != 0))
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "null backend: dynamic offset count does not match the layout");
+    }
+    usize resourceIndex = 0;
+    u32 dynamicIndex = 0;
+    for (u32 entryIndex = 0; entryIndex < record->entryCount; ++entryIndex)
+    {
+        const BindGroupLayoutEntry& entry = record->entries[entryIndex];
+        const BindingResource& resource = record->resources[resourceIndex];
+        if (entry.dynamicOffset)
+        {
+            const u64 alignment = entry.type == BindingType::UniformBuffer
+                                      ? device.capabilities.limits.minUniformBufferOffsetAlignment
+                                      : device.capabilities.limits.minStorageBufferOffsetAlignment;
+            const u64 offset = dynamicOffsets[dynamicIndex++];
+            const NullBuffer* buffer = device.buffers.Get(resource.buffer);
+            if (buffer == nullptr)
+            {
+                return StatusError(ErrorCode::InvalidArgument,
+                                   "null backend: dynamic binding names a stale buffer");
+            }
+            if (alignment == 0 || offset % alignment != 0 ||
+                (entry.type != BindingType::UniformBuffer && buffer->desc.elementStride != 0 &&
+                 offset % buffer->desc.elementStride != 0))
+            {
+                return StatusError(ErrorCode::InvalidArgument,
+                                   "null backend: dynamic buffer offset is not aligned");
+            }
+            const u64 rangeSize =
+                resource.size == 0 ? buffer->desc.sizeBytes - resource.offset : resource.size;
+            if (offset > buffer->desc.sizeBytes - resource.offset ||
+                rangeSize > buffer->desc.sizeBytes - resource.offset - offset)
+            {
+                return StatusError(ErrorCode::OutOfRange,
+                                   "null backend: dynamic buffer range leaves the buffer");
+            }
+        }
+        resourceIndex += entry.arrayCount;
     }
 
     list.groups[slotIndex] = group;
@@ -4868,6 +5046,7 @@ void NullDestroyDevice(void* internal) noexcept
         interface.createBindGroupLayout = &NullCreateBindGroupLayout;
         interface.destroyBindGroupLayout = &NullDestroyBindGroupLayout;
         interface.createBindGroup = &NullCreateBindGroup;
+        interface.updateBindGroup = &NullUpdateBindGroup;
         interface.destroyBindGroup = &NullDestroyBindGroup;
         interface.bindGroupInfo = &NullBindGroupInfo;
         interface.createPipelineLayout = &NullCreatePipelineLayout;

@@ -199,6 +199,22 @@ CG_TEST(rhi_binding_layout_invalid_descriptors)
     // The largest legal layout is accepted.
     desc.entries = Span<const BindGroupLayoutEntry>(entries, limits.maxBindingsPerGroup);
     CG_EXPECT_TRUE(static_cast<bool>(device.CreateBindGroupLayout(desc)));
+
+    CG_REQUIRE(limits.maxBindingArrayElements > limits.maxBindingsPerGroup);
+    entry = Entry(0, BindingType::SampledTexture, ShaderStageBit(ShaderStage::Pixel));
+    entry.arrayCount = limits.maxBindingsPerGroup + 1;
+    desc.entries = Span<const BindGroupLayoutEntry>(&entry, 1);
+    created = device.CreateBindGroupLayout(desc);
+    CG_EXPECT_TRUE(static_cast<bool>(created));
+    if (created)
+    {
+        CG_EXPECT_TRUE(device.DestroyBindGroupLayout(created.Value()).IsOk());
+    }
+
+    entry.arrayCount = limits.maxBindingArrayElements + 1;
+    created = device.CreateBindGroupLayout(desc);
+    CG_EXPECT_FALSE(created);
+    CG_EXPECT_EQ(created.Error().code, ErrorCode::OutOfRange);
 }
 
 CG_TEST(rhi_binding_layout_shader_register_classes)
@@ -227,10 +243,22 @@ CG_TEST(rhi_binding_layout_shader_register_classes)
     CG_EXPECT_EQ(created.Error().code, ErrorCode::InvalidArgument);
 
     entries[1].type = BindingType::SampledTexture;
-    entries[1].shaderRegister = device.Capabilities().limits.maxBindingsPerGroup;
+    entries[1].shaderRegister = device.Capabilities().limits.maxBindingArrayElements;
     created = device.CreateBindGroupLayout(desc);
     CG_EXPECT_FALSE(created);
     CG_EXPECT_EQ(created.Error().code, ErrorCode::OutOfRange);
+
+    entries[0].type = BindingType::SampledTexture;
+    entries[1].type = BindingType::ReadOnlyStorageBuffer;
+    entries[1].shaderRegister = 1;
+    created = device.CreateBindGroupLayout(desc);
+    CG_EXPECT_FALSE(created);
+    CG_EXPECT_EQ(created.Error().code, ErrorCode::InvalidArgument);
+
+    entries[0].type = BindingType::StorageBuffer;
+    entries[1].type = BindingType::SampledTexture;
+    created = device.CreateBindGroupLayout(desc);
+    CG_EXPECT_TRUE(static_cast<bool>(created));
 }
 
 CG_TEST(rhi_binding_group_create_and_info)
@@ -263,6 +291,15 @@ CG_TEST(rhi_binding_group_create_and_info)
     CG_EXPECT_EQ(info.layout, resources.layout);
     CG_EXPECT_EQ(info.resourceCount, u32{3});
 
+    CG_EXPECT_TRUE(device.UpdateBindGroup(group, Span<const BindingResource>(bindings, 3)).IsOk());
+    bindings[1].type = BindingType::StorageTexture;
+    const auto rejectedUpdate =
+        device.UpdateBindGroup(group, Span<const BindingResource>(bindings, 3));
+    CG_EXPECT_FALSE(rejectedUpdate);
+    CG_EXPECT_EQ(rejectedUpdate.Error().code, ErrorCode::InvalidArgument);
+    bindings[1].type = BindingType::SampledTexture;
+    CG_EXPECT_TRUE(device.UpdateBindGroup(group, Span<const BindingResource>(bindings, 3)).IsOk());
+
     // A zero size means "the rest of the buffer", and is legal.
     bindings[0].size = 0;
     CG_EXPECT_TRUE(static_cast<bool>(device.CreateBindGroup(desc)));
@@ -274,6 +311,73 @@ CG_TEST(rhi_binding_group_create_and_info)
     CG_EXPECT_TRUE(device.DestroyBindGroup(group));
     CG_EXPECT_FALSE(device.BindGroupInfoOf(group).valid);
     CG_EXPECT_FALSE(device.DestroyBindGroup(group));
+}
+
+CG_TEST(rhi_binding_dynamic_offset_layout_rules)
+{
+    HeapAllocator heap;
+    Device device;
+    CG_REQUIRE(OpenDevice(device, heap));
+
+    BindGroupLayoutEntry entry{};
+    entry.binding = 0;
+    entry.type = BindingType::StorageBuffer;
+    entry.visibility = ShaderStageBit(ShaderStage::Compute);
+    entry.arrayCount = 1;
+    entry.dynamicOffset = true;
+    BindGroupLayoutDesc desc{};
+    desc.entries = Span<const BindGroupLayoutEntry>(&entry, 1);
+    CG_EXPECT_TRUE(static_cast<bool>(device.CreateBindGroupLayout(desc)));
+
+    entry.type = BindingType::SampledTexture;
+    CG_EXPECT_FALSE(static_cast<bool>(device.CreateBindGroupLayout(desc)));
+    entry.type = BindingType::StorageBuffer;
+    CG_EXPECT_TRUE(static_cast<bool>(device.CreateBindGroupLayout(desc)));
+    entry.type = BindingType::ReadOnlyStorageBuffer;
+    CG_EXPECT_TRUE(static_cast<bool>(device.CreateBindGroupLayout(desc)));
+    entry.arrayCount = 2;
+    CG_EXPECT_FALSE(static_cast<bool>(device.CreateBindGroupLayout(desc)));
+}
+
+CG_TEST(rhi_binding_read_only_storage_group)
+{
+    HeapAllocator heap;
+    Device device;
+    CG_REQUIRE(OpenDevice(device, heap));
+
+    BufferDesc bufferDesc{};
+    bufferDesc.usage = BufferUsage::Storage;
+    bufferDesc.sizeBytes = 256;
+    bufferDesc.elementStride = 16;
+    auto buffer = device.CreateBuffer(bufferDesc);
+    CG_REQUIRE(static_cast<bool>(buffer));
+
+    BindGroupLayoutEntry entry =
+        Entry(0, BindingType::ReadOnlyStorageBuffer, ShaderStageBit(ShaderStage::Compute));
+    BindGroupLayoutDesc layoutDesc{};
+    layoutDesc.entries = Span<const BindGroupLayoutEntry>(&entry, 1);
+    auto layout = device.CreateBindGroupLayout(layoutDesc);
+    CG_REQUIRE(static_cast<bool>(layout));
+
+    BindingResource resource{};
+    resource.type = BindingType::ReadOnlyStorageBuffer;
+    resource.buffer = buffer.Value();
+    resource.size = 256;
+    BindGroupDesc groupDesc{};
+    groupDesc.layout = layout.Value();
+    groupDesc.resources = Span<const BindingResource>(&resource, 1);
+    resource.size = 255;
+    auto invalidGroup = device.CreateBindGroup(groupDesc);
+    CG_EXPECT_FALSE(invalidGroup);
+    resource.size = 256;
+    auto group = device.CreateBindGroup(groupDesc);
+    CG_REQUIRE(static_cast<bool>(group));
+    CG_EXPECT_TRUE(
+        device.UpdateBindGroup(group.Value(), Span<const BindingResource>(&resource, 1)).IsOk());
+
+    CG_EXPECT_TRUE(device.DestroyBindGroup(group.Value()));
+    CG_EXPECT_TRUE(device.DestroyBindGroupLayout(layout.Value()));
+    CG_EXPECT_TRUE(device.DestroyBuffer(buffer.Value()));
 }
 
 CG_TEST(rhi_binding_group_invalid_resources)

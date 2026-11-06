@@ -8,6 +8,13 @@ semantic versioning once a public API exists.
 
 ### Added
 
+- Phase 19 RHI dynamic buffer offsets, mutable bind groups, read-only storage
+  bindings and descriptor-array limits; renderer frame-slot streaming,
+  descriptor allocators, and capability-gated bindless tables; and a
+  10,000-draw D3D12 sample. Debug, Release, and Debug-ASan pass 99/99, with
+  package/source consumers and repository checks passing. On Intel HD Graphics
+  530, the Release bindless path completes the 10,000-draw frame in 11.6 ms p95,
+  within the 16.67 ms budget. See the Phase 19 summary and report.
 - Phase 18 material system: immutable reflected definitions, mutable
   per-instance parameter blocks and texture bindings, explicit GPU uploads,
   deterministic material draw sorting, bounded `.cybermat` serialization, and

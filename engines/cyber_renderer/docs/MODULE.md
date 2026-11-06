@@ -8,13 +8,15 @@
 
 ## Purpose
 
-Phase 17's renderer-side shader integration and Phase 18's material system:
+Phase 17's renderer-side shader integration, Phase 18's material system, and
+Phase 19's frame data streaming and descriptor allocation:
 compiler-reflected RHI layouts, vertex input layouts, asynchronous
 graphics-pipeline creation, frame-boundary publication, fallback pipelines,
 deferred retirement, immutable material definitions, mutable instances,
-reflected parameter blocks, texture slots, text serialization, and sorted draw
-records. Later phases add streaming, render graphs, lighting, and GPU-driven
-rendering.
+reflected parameter blocks, texture slots, text serialization, sorted draw
+records, fence-safe per-frame upload streams, generation-counted persistent
+descriptor indices, per-frame transient indices, and capability-gated bindless
+tables. Later phases add render graphs, lighting, and GPU-driven rendering.
 
 ## Public API
 
@@ -30,6 +32,10 @@ their pipeline; instances borrow their definition, device, and allocator, and
 never own resolved texture views. Only headers under this path are public.
 Everything under `src/` is private. Public headers must compile on their own
 and must not include another module's private headers.
+Phase 19 adds a frame-slot-bound upload stream with checked aligned allocation,
+persistent and transient descriptor allocators, and finite bindless resource
+tables with a conventional fallback when `Feature::BindlessResources` is
+absent.
 
 ## Dependencies
 
@@ -49,6 +55,12 @@ Dependencies are one-way. A module may depend only on modules with a lower
   material buffers are b1/space2, while b0/space0 remains push constants.
 - Material uploads are explicitly recorded on a graphics-capable command list;
   the caller orders submission, in-flight updates, and resource destruction.
+- Stream slots are writable only after their frame fence completes; descriptor
+  indices are generation checked and transient indices reset only on a safe
+  frame-slot reuse.
+- Bindless access is enabled only when the device reports the feature; table
+  mutations are restricted to safe frame slots and unused entries hold caller
+  supplied fallback resources.
 - Pipeline changes publish only at frame boundaries; replaced GPU objects are
   retained through the configured frames-in-flight interval.
 - The owning thread calls public renderer methods; background jobs own their

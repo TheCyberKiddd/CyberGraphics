@@ -29,11 +29,11 @@ private headers.
 | `texture.h` | `TextureDimension`, `TextureUsage`, `TextureAspect`, `SubresourceRange`, `TextureDesc`, `TextureViewDesc`, `TextureInfo`, `TextureViewInfo`, `MaxMipLevels`, `TextureByteSize`. |
 | `sampler.h` | `FilterMode`, `AddressMode`, `BorderColor`, `CompareFunction`, `SamplerDesc`. |
 | `shader.h` | `ShaderStage`, `ShaderStageMask`, `ShaderBytecodeFormat`, `ShaderDesc`, `ShaderInfo`. |
-| `binding.h` | `BindGroupSlot`, `BindingType`, group layout and group descriptors (including optional explicit shader-register indices), `PipelineLayoutDesc`, `PushConstantRange`. |
+| `binding.h` | `BindGroupSlot`, `BindingType`, group layout and group descriptors (including optional explicit shader-register indices and dynamic buffer offsets), `PipelineLayoutDesc`, `PushConstantRange`. |
 | `pipeline.h` | Vertex layout, topology, rasterizer, blend, multisample, depth-stencil state, `GraphicsPipelineDesc`, `ComputePipelineDesc`, `PipelineCacheDesc`, and the stable description hashes. |
 | `resource_state.h` | `ResourceState` and its set rules, `BufferBarrier`, `TextureBarrier`, `ResolveSubresourceRange`. |
 | `render_pass.h` | `LoadOp`, `StoreOp`, clear values, color and depth attachments, `RenderPassDesc`, `RenderPassInfo`, and the structural validator. |
-| `command_list.h` | Draw, dispatch, copy, timestamp, debug-label, and point-marker commands, index formats, viewport and scissor, `CommandListDesc`, the recording state machine, `CommandListStats`, `CommandListInterface`, and `CommandList`. |
+| `command_list.h` | Draw, dispatch, copy, timestamp, debug-label, and point-marker commands, index formats, viewport and scissor, dynamic-offset bind-group commands, `CommandListDesc`, the recording state machine, `CommandListStats`, `CommandListInterface`, and `CommandList`. |
 | `submission.h` | `FenceSignal`, `GpuWait`, `SubmitDesc`, `SubmissionInfo`, and the submission validator. |
 | `timestamp.h` | `TimestampQueryHeapDesc` for per-frame GPU timestamp slots. |
 | `swapchain.h` | `PresentMode`, `SwapChainDesc`, `SwapChainFrame`, `SwapChainInfo`, `SwapChainInterface`, and `SwapChain`. |
@@ -59,6 +59,14 @@ Dependencies are one-way. A module may depend only on modules with a lower
 - Synchronization is explicit; there are no hidden barriers.
 - Bind-group slots map to shader register spaces; backends preserve each
   binding's register class and explicit register index when one is provided.
+- `StorageBuffer` is writable storage (UAV); `ReadOnlyStorageBuffer` is
+  read-only storage (SRV). They occupy distinct shader-register classes.
+- Dynamic offsets are explicit per bind operation, aligned to the relevant
+  device limit, and validated against the bound buffer range before recording.
+- Descriptor-array capacity is bounded independently from binding-slot count,
+  with separate resource and sampler array limits. Bindless feature reporting
+  reflects queried backend capability; unsupported devices retain the
+  conventional binding path.
 - Resources use generation-counted handles and deferred destruction.
 - The null backend validates every public operation.
 
@@ -89,6 +97,11 @@ Phase 13 adds `rhi_render_pass`, `rhi_command_list`, `rhi_submit`,
 the recording state machine, every command's rules, batch submission, present and
 resize, retirements that wait for a fence, and the two tests the done-when line
 names.
+
+Phase 19 extends binding validation and command recording with aligned dynamic
+buffer offsets, mutable bind-group descriptor arrays, and capability-gated
+bindless indexing. Tests cover invalid offsets, array updates, adapter feature
+reporting, and the unsupported-feature fallback.
 
 Phase 14 adds `rhi_d3d12_adapters` — DXGI adapter enumeration with Microsoft's
 WARP software adapter last, the short-span contract, and a complete per-device

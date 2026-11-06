@@ -393,14 +393,15 @@ Status<Error> CommandList::SetPipeline(PipelineHandle pipeline) noexcept
     return m_interface->setPipeline(m_internal, pipeline);
 }
 
-Status<Error> CommandList::SetBindGroup(BindGroupSlot slot, BindGroupHandle group) noexcept
+Status<Error> CommandList::SetBindGroup(BindGroupSlot slot, BindGroupHandle group,
+                                        memory::Span<const u64> dynamicOffsets) noexcept
 {
     if (!IsRecording())
     {
         return Fail(ErrorCode::InvalidArgument,
                     "the command list is not recording; call Begin() first");
     }
-    return m_interface->setBindGroup(m_internal, slot, group);
+    return m_interface->setBindGroup(m_internal, slot, group, dynamicOffsets);
 }
 
 Status<Error> CommandList::SetVertexBuffer(u32 binding, BufferHandle buffer,

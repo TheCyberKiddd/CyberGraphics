@@ -121,6 +121,8 @@ CG_TEST(rhi_capabilities_limits_are_consistent)
     CG_EXPECT_TRUE(limits.maxColorAttachments > 0);
     CG_EXPECT_TRUE(limits.maxBindGroups > 0);
     CG_EXPECT_TRUE(limits.maxBindingsPerGroup > 0);
+    CG_EXPECT_TRUE(limits.maxBindingArrayElements > 0);
+    CG_EXPECT_TRUE(limits.maxSamplerArrayElements > 0);
     CG_EXPECT_TRUE(limits.maxBufferBytes > 0);
 
     // 1D may exceed 2D; 2D is the ceiling for 3D and for a cube face.

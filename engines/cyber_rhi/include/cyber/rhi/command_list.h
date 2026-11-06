@@ -285,8 +285,8 @@ struct CommandListInterface
     // and a compute pipeline outside one.
     Status<Error> (*setPipeline)(void* internal, PipelineHandle pipeline) noexcept;
     // Binds a group at `slot`, which the pipeline layout must use.
-    Status<Error> (*setBindGroup)(void* internal, BindGroupSlot slot,
-                                  BindGroupHandle group) noexcept;
+    Status<Error> (*setBindGroup)(void* internal, BindGroupSlot slot, BindGroupHandle group,
+                                  memory::Span<const u64> dynamicOffsets) noexcept;
     // Binds a vertex buffer at a binding index the pipeline declares.
     Status<Error> (*setVertexBuffer)(void* internal, u32 binding, BufferHandle buffer,
                                      u64 offsetBytes) noexcept;
@@ -440,10 +440,12 @@ public:
     // match the open pass.
     [[nodiscard]] Status<Error> SetPipeline(PipelineHandle pipeline) noexcept;
 
-    // Binds a group. Returns `ErrorCode::InvalidArgument` when no pipeline is
-    // bound, when the pipeline layout does not use `slot`, or when the group's
-    // layout is not the one the pipeline layout declares for the slot.
-    [[nodiscard]] Status<Error> SetBindGroup(BindGroupSlot slot, BindGroupHandle group) noexcept;
+    // Binds a group, supplying one offset for each dynamic buffer binding in
+    // layout order. Returns `ErrorCode::InvalidArgument` when no pipeline is
+    // bound, when the slot or layout is incompatible, or when the offset count,
+    // alignment, or effective range is invalid.
+    [[nodiscard]] Status<Error> SetBindGroup(BindGroupSlot slot, BindGroupHandle group,
+                                             memory::Span<const u64> dynamicOffsets = {}) noexcept;
 
     // Binds a vertex buffer at a binding the pipeline declares. Returns
     // `ErrorCode::InvalidArgument` when no graphics pipeline is bound, when the

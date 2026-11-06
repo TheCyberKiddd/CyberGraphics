@@ -1161,7 +1161,8 @@ Status<Error> WrCreateBindGroup(void* internal, const BindGroupDesc& desc,
     {
         const BindingResource& resource = desc.resources[index];
         if (resource.type == BindingType::UniformBuffer ||
-            resource.type == BindingType::StorageBuffer)
+            resource.type == BindingType::StorageBuffer ||
+            resource.type == BindingType::ReadOnlyStorageBuffer)
         {
             AddTouch(tracked.touches, tracked.touchCount, TouchOfBuffer(resource.buffer));
             continue;
@@ -1183,6 +1184,51 @@ Status<Error> WrCreateBindGroup(void* internal, const BindGroupDesc& desc,
             Error{ErrorCode::Internal, "validating device could not track the bind group"});
     }
     return created;
+}
+
+Status<Error> WrUpdateBindGroup(void* internal, BindGroupHandle group,
+                                Span<const BindingResource> resources) noexcept
+{
+    auto* device = static_cast<ValidatingDevice*>(internal);
+    CG_ASSERT(device != nullptr && device->real != nullptr);
+    std::lock_guard<std::mutex> lock(device->mutex);
+
+    TrackedGroup* tracked = device->groups.Get(group);
+    if (tracked == nullptr)
+    {
+        return Status<Error>::Err(
+            Error{ErrorCode::InvalidArgument,
+                  "validating device: bind group handle is stale or invalid"});
+    }
+    const Status<Error> updated =
+        device->real->updateBindGroup(device->realInternal, group, resources);
+    if (!updated)
+    {
+        return updated;
+    }
+
+    tracked->touchCount = 0;
+    for (usize index = 0; index < resources.Size(); ++index)
+    {
+        const BindingResource& resource = resources[index];
+        if (resource.type == BindingType::UniformBuffer ||
+            resource.type == BindingType::StorageBuffer ||
+            resource.type == BindingType::ReadOnlyStorageBuffer)
+        {
+            AddTouch(tracked->touches, tracked->touchCount, TouchOfBuffer(resource.buffer));
+        }
+        else if (resource.type == BindingType::SampledTexture ||
+                 resource.type == BindingType::StorageTexture)
+        {
+            const TrackedView* viewRecord = device->views.Get(resource.textureView);
+            if (viewRecord != nullptr)
+            {
+                AddTouch(tracked->touches, tracked->touchCount,
+                         TouchOfTexture(viewRecord->texture));
+            }
+        }
+    }
+    return updated;
 }
 
 Status<Error> WrDestroyBindGroup(void* internal, BindGroupHandle group) noexcept
@@ -1622,6 +1668,7 @@ const DeviceInterface kValidatingDeviceInterface = {
     &WrCreateBindGroupLayout,
     &WrDestroyBindGroupLayout,
     &WrCreateBindGroup,
+    &WrUpdateBindGroup,
     &WrDestroyBindGroup,
     &WrBindGroupInfo,
     &WrCreatePipelineLayout,
@@ -1718,14 +1765,16 @@ Status<Error> WrListSetPipeline(void* internal, PipelineHandle pipeline) noexcep
     return list->real->setPipeline(list->realInternal, pipeline);
 }
 
-Status<Error> WrListSetBindGroup(void* internal, BindGroupSlot slot, BindGroupHandle group) noexcept
+Status<Error> WrListSetBindGroup(void* internal, BindGroupSlot slot, BindGroupHandle group,
+                                 Span<const u64> dynamicOffsets) noexcept
 {
     auto* list = static_cast<TrackedList*>(internal);
     CG_ASSERT(list != nullptr && list->real != nullptr && list->device != nullptr);
     ValidatingDevice* device = list->device;
     std::lock_guard<std::mutex> lock(device->mutex);
 
-    const Status<Error> set = list->real->setBindGroup(list->realInternal, slot, group);
+    const Status<Error> set =
+        list->real->setBindGroup(list->realInternal, slot, group, dynamicOffsets);
     if (!set)
     {
         return set;

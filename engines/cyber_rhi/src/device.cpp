@@ -44,8 +44,8 @@ namespace
            interface.destroyShader != nullptr && interface.shaderInfo != nullptr &&
            interface.createBindGroupLayout != nullptr &&
            interface.destroyBindGroupLayout != nullptr && interface.createBindGroup != nullptr &&
-           interface.destroyBindGroup != nullptr && interface.bindGroupInfo != nullptr &&
-           interface.createPipelineLayout != nullptr &&
+           interface.updateBindGroup != nullptr && interface.destroyBindGroup != nullptr &&
+           interface.bindGroupInfo != nullptr && interface.createPipelineLayout != nullptr &&
            interface.destroyPipelineLayout != nullptr &&
            interface.createGraphicsPipeline != nullptr &&
            interface.destroyGraphicsPipeline != nullptr &&
@@ -647,6 +647,16 @@ Result<BindGroupHandle, Error> Device::CreateBindGroup(const BindGroupDesc& desc
             Error{core::ErrorCode::Internal, "backend returned an invalid group handle"});
     }
     return Result<BindGroupHandle, Error>::Ok(group);
+}
+
+Status<Error> Device::UpdateBindGroup(BindGroupHandle group,
+                                      memory::Span<const BindingResource> resources) noexcept
+{
+    if (!IsValid() || m_interface->updateBindGroup == nullptr)
+    {
+        return StatusError(core::ErrorCode::InvalidArgument, "device is empty");
+    }
+    return m_interface->updateBindGroup(m_internal, group, resources);
 }
 
 Status<Error> Device::DestroyBindGroup(BindGroupHandle group) noexcept

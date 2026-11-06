@@ -1,3 +1,6 @@
+#include <cyber/renderer/bindless_table.h>
+#include <cyber/renderer/descriptor_allocator.h>
+#include <cyber/renderer/frame_stream.h>
 #include <cyber/renderer/hot_pipeline.h>
 #include <cyber/renderer/material.h>
 #include <cyber/renderer/reflected_layout.h>
@@ -16,9 +19,19 @@ CG_TEST(renderer_public_headers)
     static_assert(std::is_move_constructible_v<MaterialInstance>);
     static_assert(!std::is_copy_constructible_v<HotGraphicsPipeline>);
     static_assert(std::is_move_constructible_v<HotGraphicsPipeline>);
+    static_assert(!std::is_copy_constructible_v<FrameBufferStream>);
+    static_assert(std::is_move_constructible_v<FrameBufferStream>);
+    static_assert(!std::is_copy_constructible_v<PersistentDescriptorAllocator>);
+    static_assert(std::is_move_constructible_v<PersistentDescriptorAllocator>);
+    static_assert(!std::is_copy_constructible_v<TransientDescriptorAllocator>);
+    static_assert(std::is_move_constructible_v<TransientDescriptorAllocator>);
+    static_assert(!std::is_copy_constructible_v<BindlessResourceTable>);
+    static_assert(std::is_move_constructible_v<BindlessResourceTable>);
 
     CG_EXPECT_EQ(kMaxReflectedPushConstantBytes, u32{128});
     CG_EXPECT_EQ(kMaxMaterialParameters, u32{64});
+    CG_EXPECT_EQ(SelectResourceBindingPath(cyber::rhi::Device{}),
+                 ResourceBindingPath::Conventional);
     CG_EXPECT_EQ(ToRhiStage(cyber::shaders::Stage::Pixel), cyber::rhi::ShaderStage::Pixel);
 
     HotGraphicsPipeline empty;

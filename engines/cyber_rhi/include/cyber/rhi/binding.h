@@ -63,9 +63,28 @@ enum class BindingType : u8
     StorageTexture,
     // A filter and address state object.
     Sampler,
+    // A read-only structured or raw buffer exposed through a shader resource
+    // view.
+    ReadOnlyStorageBuffer,
     // Count of enumerators, for table tests. Not a type.
     Count
 };
+
+// Whether two binding types share the same shader register namespace.
+[[nodiscard]] constexpr bool SharesShaderRegisterClass(BindingType lhs, BindingType rhs) noexcept
+{
+    if (lhs == rhs)
+    {
+        return lhs < BindingType::Count;
+    }
+    const bool lhsSrv =
+        lhs == BindingType::ReadOnlyStorageBuffer || lhs == BindingType::SampledTexture;
+    const bool rhsSrv =
+        rhs == BindingType::ReadOnlyStorageBuffer || rhs == BindingType::SampledTexture;
+    const bool lhsUav = lhs == BindingType::StorageBuffer || lhs == BindingType::StorageTexture;
+    const bool rhsUav = rhs == BindingType::StorageBuffer || rhs == BindingType::StorageTexture;
+    return (lhsSrv && rhsSrv) || (lhsUav && rhsUav);
+}
 
 // Number of real binding types, not counting `Count`.
 inline constexpr u32 kBindingTypeCount = static_cast<u32>(BindingType::Count);
@@ -85,6 +104,8 @@ inline constexpr u32 kBindingTypeCount = static_cast<u32>(BindingType::Count);
         return "storage_texture";
     case BindingType::Sampler:
         return "sampler";
+    case BindingType::ReadOnlyStorageBuffer:
+        return "read_only_storage_buffer";
     case BindingType::Count:
         break;
     }
@@ -112,6 +133,9 @@ struct BindGroupLayoutEntry
     // registers in entry order within this descriptor type; the bind-group slot
     // selects the register space.
     u32 shaderRegister = kNoShaderRegister;
+    // When true, this single buffer resource accepts one per-bind dynamic
+    // offset. Arrays and non-buffer types cannot be dynamic.
+    bool dynamicOffset = false;
 };
 
 // Description of a bind group layout.
@@ -129,7 +153,7 @@ struct BindingResource
 {
     // Must match the type the layout declares for this position.
     BindingType type = BindingType::UniformBuffer;
-    // Buffer for `UniformBuffer` or `StorageBuffer`.
+    // Buffer for `UniformBuffer`, `StorageBuffer`, or `ReadOnlyStorageBuffer`.
     BufferHandle buffer;
     // Byte offset of the range inside the buffer.
     u64 offset = 0;

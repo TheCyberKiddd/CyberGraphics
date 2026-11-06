@@ -147,6 +147,13 @@ tests pass in debug; the design is ADR 0013.
   change at frame 20; Debug, Release, and Debug-ASan pass 98/98, and package,
   source-consumer, structure, layer, formatting, and whitespace checks pass.
   Phase 18 is complete. See the [Phase 18 report](docs/reports/phase-18.md).
+- Phase 19's RHI dynamic offsets and bindless support, renderer frame streaming
+  and descriptor allocators, and 10,000-draw benchmark are implemented. Debug,
+  Release, and Debug-ASan pass 99/99, and package/source consumers and
+  repository checks pass. On the Intel HD Graphics 530, the Release bindless
+  path completes the 10,000-draw frame in 11.6 ms p95, within the 16.67 ms
+  budget. Phase 19 is complete; see the [summary](docs/graphics/PHASE_19.md)
+  and [report](docs/reports/phase-19.md).
 
 See [engines/MODULES.md](engines/MODULES.md) for the module index and
 [docs/architecture/overview.md](docs/architecture/overview.md) for the design.

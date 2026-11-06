@@ -260,6 +260,62 @@ CG_TEST(d3d12_binding_layouts_and_groups)
     CG_EXPECT_TRUE(device.BindGroupInfoOf(group.Value()).valid);
 }
 
+CG_TEST(d3d12_binding_storage_views_and_dynamic_root_descriptors)
+{
+    HeapAllocator heap;
+    Device device;
+    CG_REQUIRE(OpenSoftwareDevice(device, heap));
+
+    BufferDesc bufferDesc{};
+    bufferDesc.usage = BufferUsage::Storage;
+    bufferDesc.sizeBytes = 256;
+    bufferDesc.elementStride = 16;
+    auto buffer = device.CreateBuffer(bufferDesc);
+    CG_REQUIRE(static_cast<bool>(buffer));
+
+    BindGroupLayoutEntry entries[2]{};
+    entries[0].binding = 0;
+    entries[0].type = BindingType::StorageBuffer;
+    entries[0].visibility = ShaderStageBit(ShaderStage::Compute);
+    entries[1].binding = 1;
+    entries[1].type = BindingType::ReadOnlyStorageBuffer;
+    entries[1].visibility = ShaderStageBit(ShaderStage::Compute);
+    BindGroupLayoutDesc layoutDesc{};
+    layoutDesc.entries = Span<const BindGroupLayoutEntry>(entries, 2);
+    auto layout = device.CreateBindGroupLayout(layoutDesc);
+    CG_REQUIRE(static_cast<bool>(layout));
+
+    BindingResource resources[2]{};
+    resources[0].type = BindingType::StorageBuffer;
+    resources[0].buffer = buffer.Value();
+    resources[0].size = 256;
+    resources[1].type = BindingType::ReadOnlyStorageBuffer;
+    resources[1].buffer = buffer.Value();
+    resources[1].size = 256;
+    BindGroupDesc groupDesc{};
+    groupDesc.layout = layout.Value();
+    groupDesc.resources = Span<const BindingResource>(resources, 2);
+    auto group = device.CreateBindGroup(groupDesc);
+    CG_REQUIRE(static_cast<bool>(group));
+    CG_EXPECT_TRUE(
+        device.UpdateBindGroup(group.Value(), Span<const BindingResource>(resources, 2)).IsOk());
+    CG_EXPECT_TRUE(device.DestroyBindGroup(group.Value()).IsOk());
+    CG_EXPECT_TRUE(device.DestroyBindGroupLayout(layout.Value()).IsOk());
+
+    entries[0].dynamicOffset = true;
+    entries[1].dynamicOffset = true;
+    layout = device.CreateBindGroupLayout(layoutDesc);
+    CG_REQUIRE(static_cast<bool>(layout));
+    PipelineLayoutDesc pipelineLayoutDesc{};
+    pipelineLayoutDesc.groups[static_cast<u32>(BindGroupSlot::PerDraw)] = layout.Value();
+    auto pipelineLayout = device.CreatePipelineLayout(pipelineLayoutDesc);
+    CG_REQUIRE(static_cast<bool>(pipelineLayout));
+
+    CG_EXPECT_TRUE(device.DestroyPipelineLayout(pipelineLayout.Value()).IsOk());
+    CG_EXPECT_TRUE(device.DestroyBindGroupLayout(layout.Value()).IsOk());
+    CG_EXPECT_TRUE(device.DestroyBuffer(buffer.Value()).IsOk());
+}
+
 CG_TEST(d3d12_binding_pipeline_layout_builds_a_root_signature)
 {
     HeapAllocator heap;

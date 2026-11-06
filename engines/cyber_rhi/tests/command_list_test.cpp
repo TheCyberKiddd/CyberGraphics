@@ -302,6 +302,75 @@ CG_TEST(rhi_command_list_binding_rules)
     CG_EXPECT_TRUE(list.SetBindGroup(BindGroupSlot::PerMaterial, BindGroupHandle{}).IsOk());
 }
 
+CG_TEST(rhi_command_list_dynamic_buffer_offsets)
+{
+    Fixture fixture;
+    CG_REQUIRE(fixture.Build());
+
+    const auto storage = [&fixture]() noexcept
+    {
+        BufferDesc desc{};
+        desc.usage = BufferUsage::Storage;
+        desc.sizeBytes = 1008;
+        desc.elementStride = 12;
+        return fixture.device.CreateBuffer(desc);
+    }();
+    CG_REQUIRE(static_cast<bool>(storage));
+
+    BindGroupLayoutEntry entry{};
+    entry.binding = 0;
+    entry.type = BindingType::StorageBuffer;
+    entry.visibility = ShaderStageBit(ShaderStage::Compute);
+    entry.dynamicOffset = true;
+    BindGroupLayoutDesc groupLayoutDesc{};
+    groupLayoutDesc.entries = Span<const BindGroupLayoutEntry>(&entry, 1);
+    auto groupLayout = fixture.device.CreateBindGroupLayout(groupLayoutDesc);
+    CG_REQUIRE(static_cast<bool>(groupLayout));
+
+    BindingResource resource{};
+    resource.type = BindingType::StorageBuffer;
+    resource.buffer = storage.Value();
+    resource.size = 60;
+    BindGroupDesc groupDesc{};
+    groupDesc.layout = groupLayout.Value();
+    groupDesc.resources = Span<const BindingResource>(&resource, 1);
+    auto group = fixture.device.CreateBindGroup(groupDesc);
+    CG_REQUIRE(static_cast<bool>(group));
+
+    PipelineLayoutDesc layoutDesc{};
+    layoutDesc.groups[static_cast<u32>(BindGroupSlot::PerDraw)] = groupLayout.Value();
+    auto pipelineLayout = fixture.device.CreatePipelineLayout(layoutDesc);
+    CG_REQUIRE(static_cast<bool>(pipelineLayout));
+    ComputePipelineDesc pipelineDesc{};
+    pipelineDesc.layout = pipelineLayout.Value();
+    pipelineDesc.computeShader = fixture.computeShader;
+    auto pipeline = fixture.device.CreateComputePipeline(pipelineDesc);
+    CG_REQUIRE(static_cast<bool>(pipeline));
+
+    CommandList list;
+    CG_REQUIRE(MakeList(fixture, &list, QueueKind::Graphics));
+    CG_REQUIRE(list.Begin().IsOk());
+    CG_REQUIRE(list.SetPipeline(pipeline.Value()).IsOk());
+
+    const u64 goodOffset = 48;
+    const u64 badAlignment = 1;
+    const u64 badStride = 16;
+    const u64 badRange = 960;
+    CG_EXPECT_FALSE(list.SetBindGroup(BindGroupSlot::PerDraw, group.Value()));
+    CG_EXPECT_FALSE(list.SetBindGroup(BindGroupSlot::PerDraw, group.Value(),
+                                      Span<const u64>(&badAlignment, 1)));
+    CG_EXPECT_FALSE(
+        list.SetBindGroup(BindGroupSlot::PerDraw, group.Value(), Span<const u64>(&badStride, 1)));
+    const auto outside =
+        list.SetBindGroup(BindGroupSlot::PerDraw, group.Value(), Span<const u64>(&badRange, 1));
+    CG_EXPECT_FALSE(outside);
+    CG_EXPECT_EQ(outside.Error().code, ErrorCode::OutOfRange);
+    CG_EXPECT_TRUE(
+        list.SetBindGroup(BindGroupSlot::PerDraw, group.Value(), Span<const u64>(&goodOffset, 1))
+            .IsOk());
+    CG_EXPECT_TRUE(list.End().IsOk());
+}
+
 CG_TEST(rhi_command_list_vertex_and_index_rules)
 {
     Fixture fixture;

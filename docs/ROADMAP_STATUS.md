@@ -1,6 +1,6 @@
 # CyberGraphics roadmap status
 
-Snapshot: 2026-11-05
+Snapshot: 2026-11-06
 
 This is a factual project-state snapshot to help prepare a revised product
 roadmap. The phase names and intended outcomes follow
@@ -33,7 +33,13 @@ this document does not replace that roadmap or change any phase checkbox.
   whitespace checks pass. Implementation and evidence are included in this
   commit, and the master roadmap marks the phase complete. See the
   [Phase 18 report](reports/phase-18.md).
-- **Phases 19-44:** not started.
+- **Phase 19:** complete. On the Intel HD Graphics 530, the Release bindless
+  path submits 10,000 unique-transform draws with p95 completion of 11.6 ms,
+  under the 16.67 ms budget. Debug, Release, and Debug-ASan pass 99/99;
+  package/source consumers and structure, layer, formatting, and whitespace
+  checks pass. The slower dynamic-offset comparison and explicit WARP results
+  are retained in the [Phase 19 report](reports/phase-19.md).
+- **Phases 20-44:** not started.
 - **Current PC:** Windows 10 Pro 22H2, Intel Core i5-6400 (4 cores), Intel HD
   Graphics 530 (1 GiB reported), Intel driver `31.0.101.2125` dated
   2023-05-24. The marker sample now submits and presents on this adapter after
@@ -96,7 +102,7 @@ this document does not replace that roadmap or change any phase checkbox.
 | 16. Shader language and compiler strategy | Complete | ADR 0019, the language design, compiler, source diagnostics, tests, and generated-HLSL cube integration are complete; Phase 16 evidence is recorded in its report. |
 | 17. Reflection, permutations, and hot reload | Complete | Compiler-owned reflection, bounded/stable permutations, checksummed cache, job-system compilation, reflected renderer layouts, async frame-boundary swaps, and D3D12 live reload. All five Windows presets pass 96/96; the valid edit, syntax rejection, and restore pass in 48/49/84 ms on the Intel HD 530. |
 | 18. Material system | Complete | Immutable material definitions, mutable reflected instances, texture slots, explicit uploads, sorted queues, `.cybermat` serialization, and a 100-instance D3D12 sample; evidence is in the Phase 18 report. |
-| 19. Constant streaming and bindless resources | Not started | Per-frame constants, dynamic offsets, descriptors, bindless resources, and measured high draw-count submission. |
+| 19. Constant streaming and bindless resources | Complete | Fence-safe frame streaming, dynamic offsets, descriptor allocators, capability-gated bindless/fallback paths, and a 10,000-draw Intel HD 530 benchmark meeting the 16.67 ms frame budget; Debug, Release, Debug-ASan, package/source, and repository checks pass. See the Phase 19 report. |
 
 ### Part 5 — Renderer architecture
 
@@ -167,9 +173,9 @@ this document does not replace that roadmap or change any phase checkbox.
 6. **Phase 40 hardware matrix is still future work.** Introduce a small
    GPU/driver compatibility test and a fallback acceptance target well before
    advanced rendering work.
-7. **Scope and maturity differ.** Phases 1-14 are marked complete, but this
+7. **Scope and maturity differ.** Phases 1-19 are marked complete, but this
    repository is still a renderer foundation: the engine-facing public plugin
-   API (Phase 25), materials/PBR, asset pipeline, editor integration, and
+   API (Phase 25), full PBR lighting, asset pipeline, editor integration, and
    shipping workflow are not implemented.
 
 ## Verified validation and worktree notes
@@ -182,11 +188,13 @@ this document does not replace that roadmap or change any phase checkbox.
   change at frame 20.
 - Structure, layer, formatting, and `git diff --check` passed.
 - Phase 18 code, documentation, package rules, and validation evidence are
-  **uncommitted**. Preserve them when committing the phase.
+  committed in `679a64c` (`renderer: add Phase 18 material system`).
 - `diagnosing-low-phase-6-sample-frame-rate.json` is unrelated and untracked;
   leave it alone.
 
 ## Immediate next step
 
-Read Phase 19's work package and write its design note before implementing
-constant streaming or bindless resources.
+Phase 19 is complete; Phase 20 (render graph) is next in roadmap order. Do not
+begin it until the owner requests the next phase. See the
+[Phase 19 report](reports/phase-19.md) for benchmark methodology and the
+dynamic-offset path's known performance limitation.

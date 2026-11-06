@@ -52,12 +52,14 @@ using cyber::memory::kInvalidHandleIndex;
     limits.maxVertexAttributes = D3D12_IA_VERTEX_INPUT_STRUCTURE_ELEMENT_COUNT;
     limits.maxBindGroups = kBindGroupSlotCount;
     limits.maxBindingsPerGroup = 64;
+    limits.maxBindingArrayElements = 64;
+    limits.maxSamplerArrayElements = D3D12_MAX_SHADER_VISIBLE_SAMPLER_HEAP_SIZE;
     // D3D12 root constants reach 256 DWORDs, but the RHI keeps the 128-byte floor
     // Vulkan guarantees so a layout stays portable.
     limits.maxPushConstantBytes = 128;
     limits.maxSamplerAnisotropy = D3D12_MAX_MAXANISOTROPY;
     limits.minUniformBufferOffsetAlignment = D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT;
-    limits.minStorageBufferOffsetAlignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+    limits.minStorageBufferOffsetAlignment = 4;
     limits.maxBufferBytes = (u64{1} << 32) - D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
     return limits;
 }
@@ -93,6 +95,7 @@ using cyber::memory::kInvalidHandleIndex;
         if (options.ResourceBindingTier >= D3D12_RESOURCE_BINDING_TIER_3)
         {
             features.Add(Feature::StorageTextures);
+            features.Add(Feature::BindlessResources);
         }
     }
     return features;
@@ -104,6 +107,11 @@ using cyber::memory::kInvalidHandleIndex;
     capabilities.adapter = device.adapterInfo;
     capabilities.limits = D3D12Limits();
     capabilities.features = D3D12Features(device);
+    if (capabilities.features.Has(Feature::BindlessResources))
+    {
+        capabilities.limits.maxBindingArrayElements =
+            D3D12_MAX_SHADER_VISIBLE_DESCRIPTOR_HEAP_SIZE_TIER_1;
+    }
     return capabilities;
 }
 
@@ -595,6 +603,7 @@ Status<Error> D3D12WaitIdle(void* internal) noexcept
         value.createBindGroupLayout = &D3D12CreateBindGroupLayout;
         value.destroyBindGroupLayout = &D3D12DestroyBindGroupLayout;
         value.createBindGroup = &D3D12CreateBindGroup;
+        value.updateBindGroup = &D3D12UpdateBindGroup;
         value.destroyBindGroup = &D3D12DestroyBindGroup;
         value.bindGroupInfo = &D3D12BindGroupInfo;
         value.createPipelineLayout = &D3D12CreatePipelineLayout;

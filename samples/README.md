@@ -13,6 +13,7 @@ the relevant phase exists. A sample that is not tested will break.
 | `01_triangle/` | First RHI triangle. | 14 |
 | `02_cube/` | Textured, rotating cube through the RHI. | 14 |
 | `07_materials/` | Reflected material definitions and instances rendered through D3D12. | 18 |
+| `08_frame_streaming/` | 10,000 unique-transform draws comparing dynamic offsets and bindless indices. | 19 |
 | `04_lighting/` | PBR sphere grid and light types. | 26 |
 | `host_app/` | Stub Cyber Engine host that loads renderer plugins. | 25 |
 

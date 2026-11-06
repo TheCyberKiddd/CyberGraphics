@@ -170,15 +170,24 @@ struct D3D12LayoutSlot
 {
     BindGroupLayoutEntry entries[kMaxLayoutEntries]{};
     u32 entryCount = 0;
-    // Descriptors this layout occupies: the sum of every array count.
+    // Resources supplied by a group, including dynamic buffer bindings.
     u32 descriptorCount = 0;
-    // The same total split by heap. A sampler descriptor cannot live in the
-    // CBV/SRV/UAV heap, so a group is two blocks rather than one, and each block
-    // is a separate table in the root signature.
+    // Static descriptors split by heap. Dynamic buffers use root descriptors
+    // and therefore do not consume heap entries.
     u32 resourceCount = 0;
     u32 samplerCount = 0;
+    u32 dynamicOffsetCount = 0;
     bool alive = false;
     u32 generation = 0;
+};
+
+struct D3D12DynamicBinding
+{
+    BindingType type = BindingType::UniformBuffer;
+    u32 entryIndex = 0;
+    BufferHandle buffer{};
+    u64 baseOffset = 0;
+    u64 rangeSize = 0;
 };
 
 struct D3D12GroupSlot
@@ -191,6 +200,11 @@ struct D3D12GroupSlot
     // First descriptor of its sampler block in the sampler heap, and how many.
     u32 samplerIndex = 0;
     u32 samplerCount = 0;
+    BindGroupLayoutEntry entries[kMaxLayoutEntries]{};
+    u32 entryCount = 0;
+    u32 resourceCount = 0;
+    D3D12DynamicBinding dynamicBindings[kMaxLayoutEntries]{};
+    u32 dynamicBindingCount = 0;
     bool alive = false;
     u32 generation = 0;
 };
@@ -239,6 +253,8 @@ struct D3D12PipelineLayoutSlot
     // signature, not of the slot number, so it is recorded rather than derived.
     u32 resourceParameter[kBindGroupSlotCount]{};
     u32 samplerParameter[kBindGroupSlotCount]{};
+    u32 dynamicParameters[kBindGroupSlotCount][kMaxLayoutEntries]{};
+    BindGroupLayoutHandle groups[kBindGroupSlotCount]{};
     // Descriptor count per slot, so a bind group can be checked against the
     // layout it will be bound through.
     u32 descriptorCounts[kBindGroupSlotCount]{};
@@ -556,6 +572,9 @@ void ReleaseTimestampQueryHeaps(D3D12Device& device) noexcept;
                                                         BindGroupLayoutHandle layout) noexcept;
 [[nodiscard]] Status<Error> D3D12CreateBindGroup(void* internal, const BindGroupDesc& desc,
                                                  BindGroupHandle* out) noexcept;
+[[nodiscard]] Status<Error>
+D3D12UpdateBindGroup(void* internal, BindGroupHandle group,
+                     memory::Span<const BindingResource> resources) noexcept;
 [[nodiscard]] Status<Error> D3D12DestroyBindGroup(void* internal, BindGroupHandle group) noexcept;
 [[nodiscard]] BindGroupInfo D3D12BindGroupInfo(const void* internal,
                                                BindGroupHandle group) noexcept;

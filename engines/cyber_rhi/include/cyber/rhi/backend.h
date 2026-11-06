@@ -221,6 +221,10 @@ struct DeviceInterface
     // Creates a bind group from a live layout and matching resources.
     Status<Error> (*createBindGroup)(void* internal, const BindGroupDesc& desc,
                                      BindGroupHandle* out) noexcept;
+    // Replaces every resource in a live group. The backend validates the full
+    // replacement before changing the group.
+    Status<Error> (*updateBindGroup)(void* internal, BindGroupHandle group,
+                                     memory::Span<const BindingResource> resources) noexcept;
     // Releases a bind group.
     Status<Error> (*destroyBindGroup)(void* internal, BindGroupHandle group) noexcept;
     // Reports a group's layout and resource count, or a zeroed value for a stale

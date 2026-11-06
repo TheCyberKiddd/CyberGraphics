@@ -100,6 +100,10 @@ struct Limits
     // bindings inside one group.
     u32 maxBindGroups = 0;
     u32 maxBindingsPerGroup = 0;
+    // Largest number of array elements in one binding or shader-register range.
+    u32 maxBindingArrayElements = 0;
+    // Largest number of sampler descriptors or sampler registers in one range.
+    u32 maxSamplerArrayElements = 0;
     // Largest push-constant block in bytes.
     u32 maxPushConstantBytes = 0;
     // Largest sampler anisotropy ratio. 1 means isotropic filtering only.

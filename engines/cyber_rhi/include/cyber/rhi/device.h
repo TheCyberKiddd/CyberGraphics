@@ -277,6 +277,12 @@ public:
     [[nodiscard]] Result<BindGroupHandle, Error>
     CreateBindGroup(const BindGroupDesc& desc) noexcept;
 
+    // Replaces all resources in a bind group. The replacement is validated in
+    // full before any descriptor changes. The caller must not update a group
+    // referenced by in-flight work.
+    [[nodiscard]] Status<Error>
+    UpdateBindGroup(BindGroupHandle group, memory::Span<const BindingResource> resources) noexcept;
+
     // Destroys a bind group.
     [[nodiscard]] Status<Error> DestroyBindGroup(BindGroupHandle group) noexcept;
 

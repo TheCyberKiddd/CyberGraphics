@@ -444,7 +444,7 @@ bool ValidateBindGroupLayout(const Limits& limits, const BindGroupLayoutDesc& de
         u32 nextRegister = 0;
         for (usize prior = 0; prior < entryIndex; ++prior)
         {
-            if (desc.entries[prior].type == entry.type)
+            if (SharesShaderRegisterClass(desc.entries[prior].type, entry.type))
             {
                 nextRegister += desc.entries[prior].arrayCount;
             }
@@ -469,17 +469,26 @@ bool ValidateBindGroupLayout(const Limits& limits, const BindGroupLayoutDesc& de
         {
             return Fail(out, ErrorCode::InvalidArgument, "binding array count is zero");
         }
+        if (entry.dynamicOffset && ((entry.type != BindingType::UniformBuffer &&
+                                     entry.type != BindingType::StorageBuffer &&
+                                     entry.type != BindingType::ReadOnlyStorageBuffer) ||
+                                    entry.arrayCount != 1))
+        {
+            return Fail(out, ErrorCode::InvalidArgument,
+                        "dynamic offsets require one uniform or storage buffer");
+        }
         if (entry.binding >= limits.maxBindingsPerGroup)
         {
             return Fail(out, ErrorCode::OutOfRange, "binding number exceeds the device limit");
         }
-        if (entry.arrayCount > limits.maxBindingsPerGroup)
+        const u32 arrayLimit = entry.type == BindingType::Sampler ? limits.maxSamplerArrayElements
+                                                                  : limits.maxBindingArrayElements;
+        if (entry.arrayCount > arrayLimit)
         {
             return Fail(out, ErrorCode::OutOfRange, "binding array count exceeds the device limit");
         }
         const u32 shaderRegister = ShaderRegister(index);
-        if (shaderRegister >= limits.maxBindingsPerGroup ||
-            entry.arrayCount > limits.maxBindingsPerGroup - shaderRegister)
+        if (shaderRegister >= arrayLimit || entry.arrayCount > arrayLimit - shaderRegister)
         {
             return Fail(out, ErrorCode::OutOfRange,
                         "shader register range exceeds the device binding limit");
@@ -493,7 +502,7 @@ bool ValidateBindGroupLayout(const Limits& limits, const BindGroupLayoutDesc& de
             }
             const BindGroupLayoutEntry& previous = desc.entries[other];
             const u32 previousRegister = ShaderRegister(other);
-            if (previous.type == entry.type &&
+            if (SharesShaderRegisterClass(previous.type, entry.type) &&
                 shaderRegister < previousRegister + previous.arrayCount &&
                 previousRegister < shaderRegister + entry.arrayCount)
             {

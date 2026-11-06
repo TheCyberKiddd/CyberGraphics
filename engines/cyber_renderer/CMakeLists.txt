@@ -2,11 +2,17 @@ cyber_add_module(
     NAME renderer
     LAYER 3
     SOURCES
+        src/bindless_table.cpp
+        src/descriptor_allocator.cpp
+        src/frame_stream.cpp
         src/hot_pipeline.cpp
         src/material.cpp
         src/material_file.cpp
         src/reflected_layout.cpp
     PUBLIC_HEADERS
+        include/cyber/renderer/bindless_table.h
+        include/cyber/renderer/descriptor_allocator.h
+        include/cyber/renderer/frame_stream.h
         include/cyber/renderer/hot_pipeline.h
         include/cyber/renderer/material.h
         include/cyber/renderer/reflected_layout.h
@@ -46,4 +52,11 @@ cyber_add_test(
     SOURCES
         tests/material_file_test.cpp
     DEPENDS renderer
+)
+
+cyber_add_test(
+    NAME renderer_phase19
+    SOURCES
+        tests/phase19_test.cpp
+    DEPENDS renderer rhi memory
 )

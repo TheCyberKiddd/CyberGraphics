@@ -11,6 +11,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <limits>
 
 namespace cyber::rhi::detail
 {
@@ -719,7 +720,8 @@ Status<Error> SetPipeline(void* internal, PipelineHandle pipeline) noexcept
     return Status<Error>::Ok();
 }
 
-Status<Error> SetBindGroup(void* internal, BindGroupSlot groupSlot, BindGroupHandle group) noexcept
+Status<Error> SetBindGroup(void* internal, BindGroupSlot groupSlot, BindGroupHandle group,
+                           memory::Span<const u64> dynamicOffsets) noexcept
 {
     Error error{};
     D3D12CommandListSlot* list = Recording(internal, &error);
@@ -739,21 +741,68 @@ Status<Error> SetBindGroup(void* internal, BindGroupSlot groupSlot, BindGroupHan
     auto& device = *list->device;
     const std::lock_guard<std::mutex> lock(device.mutex);
 
-    D3D12GroupSlot* slot = Resolve(device, group);
-    if (slot == nullptr)
-    {
-        return StatusError(ErrorCode::InvalidArgument, "d3d12 backend: bind group is stale");
-    }
     D3D12PipelineLayoutSlot* layout = Resolve(device, list->layout);
     if (layout == nullptr)
     {
         return StatusError(ErrorCode::InvalidArgument, "d3d12 backend: pipeline layout is stale");
     }
     const u32 index = static_cast<u32>(groupSlot);
+    if (!group.IsValid())
+    {
+        if (!dynamicOffsets.Empty())
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "d3d12 backend: unbinding a group cannot take dynamic offsets");
+        }
+        list->groups[index] = BindGroupHandle{};
+        return Status<Error>::Ok();
+    }
+    D3D12GroupSlot* slot = Resolve(device, group);
+    if (slot == nullptr)
+    {
+        return StatusError(ErrorCode::InvalidArgument, "d3d12 backend: bind group is stale");
+    }
     if (layout->descriptorCounts[index] == 0)
     {
         return StatusError(ErrorCode::InvalidArgument,
                            "d3d12 backend: pipeline layout does not use this bind group slot");
+    }
+    if (slot->layout != layout->groups[index])
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "d3d12 backend: bind group layout does not match the pipeline slot");
+    }
+    if (dynamicOffsets.Size() != slot->dynamicBindingCount ||
+        (dynamicOffsets.Data() == nullptr && slot->dynamicBindingCount != 0))
+    {
+        return StatusError(ErrorCode::InvalidArgument,
+                           "d3d12 backend: dynamic offset count does not match the group");
+    }
+    D3D12_GPU_VIRTUAL_ADDRESS dynamicAddresses[kMaxLayoutEntries]{};
+    for (u32 dynamicIndex = 0; dynamicIndex < slot->dynamicBindingCount; ++dynamicIndex)
+    {
+        const D3D12DynamicBinding& binding = slot->dynamicBindings[dynamicIndex];
+        const D3D12BufferSlot* buffer = Resolve(device, binding.buffer);
+        const u64 dynamicOffset = dynamicOffsets[dynamicIndex];
+        const u32 parameter = layout->dynamicParameters[index][binding.entryIndex];
+        if (buffer == nullptr || parameter == kNoRootParameter ||
+            dynamicOffset > std::numeric_limits<u64>::max() - binding.baseOffset)
+        {
+            return StatusError(ErrorCode::InvalidArgument,
+                               "d3d12 backend: dynamic binding or offset is invalid");
+        }
+        const u64 effectiveOffset = binding.baseOffset + dynamicOffset;
+        const u32 alignment =
+            binding.type == BindingType::UniformBuffer
+                ? D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT
+                : (buffer->desc.elementStride > 4 ? buffer->desc.elementStride : 4);
+        if (dynamicOffset % alignment != 0 || effectiveOffset > buffer->desc.sizeBytes ||
+            binding.rangeSize > buffer->desc.sizeBytes - effectiveOffset)
+        {
+            return StatusError(ErrorCode::OutOfRange,
+                               "d3d12 backend: dynamic binding range leaves its buffer");
+        }
+        dynamicAddresses[dynamicIndex] = buffer->resource->GetGPUVirtualAddress() + effectiveOffset;
     }
     if (layout->resourceParameter[index] != kNoRootParameter && slot->descriptorCount > 0)
     {
@@ -777,6 +826,39 @@ Status<Error> SetBindGroup(void* internal, BindGroupSlot groupSlot, BindGroupHan
         else
         {
             list->list->SetComputeRootDescriptorTable(layout->samplerParameter[index], table);
+        }
+    }
+    for (u32 dynamicIndex = 0; dynamicIndex < slot->dynamicBindingCount; ++dynamicIndex)
+    {
+        const D3D12DynamicBinding& binding = slot->dynamicBindings[dynamicIndex];
+        const u32 parameter = layout->dynamicParameters[index][binding.entryIndex];
+        const D3D12_GPU_VIRTUAL_ADDRESS address = dynamicAddresses[dynamicIndex];
+        if (list->pipelineKind == PipelineKind::Graphics)
+        {
+            if (binding.type == BindingType::UniformBuffer)
+            {
+                list->list->SetGraphicsRootConstantBufferView(parameter, address);
+            }
+            else if (binding.type == BindingType::StorageBuffer)
+            {
+                list->list->SetGraphicsRootUnorderedAccessView(parameter, address);
+            }
+            else
+            {
+                list->list->SetGraphicsRootShaderResourceView(parameter, address);
+            }
+        }
+        else if (binding.type == BindingType::UniformBuffer)
+        {
+            list->list->SetComputeRootConstantBufferView(parameter, address);
+        }
+        else if (binding.type == BindingType::StorageBuffer)
+        {
+            list->list->SetComputeRootUnorderedAccessView(parameter, address);
+        }
+        else
+        {
+            list->list->SetComputeRootShaderResourceView(parameter, address);
         }
     }
 
