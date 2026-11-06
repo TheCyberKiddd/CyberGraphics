@@ -14,9 +14,18 @@ semantic versioning once a public API exists.
   screen-space LOD selection. Debug, Release, and Debug-ASan pass 104/104; the
   TSan scene tests, package/source consumers, and repository checks pass. The
   100,000-proxy benchmark matches brute force at 2.881 ms p95 on a 4-core
-  Intel Core i5-6400. The master-roadmap checkbox awaits commit; see the
+  Intel Core i5-6400. The master-roadmap checkbox is checked; see the
   [Phase 22 summary](docs/graphics/PHASE_22.md) and
   [report](docs/reports/phase-22.md).
+- Phase 23 geometry pipeline: validated allocator-backed indexed meshes,
+  submeshes and bounds; tangent generation; checked packed vertex/index
+  conversion; deterministic edge-collapse LOD generation; and instanced
+  indirect batches. The RHI integration submits batch arguments, and the
+  software reference renderer produces a visible LOD transition with over one
+  million triangles. Debug, Release, and Debug-ASan pass 106/106, with package
+  consumer and repository checks passing. See the
+  [Phase 23 summary](docs/graphics/PHASE_23.md) and
+  [report](docs/reports/phase-23.md).
 - Phase 21 render-thread frame pipelining: bounded SPSC command handoff,
   copied immutable packets, ordered resize and draining shutdown, profiler
   scopes, single-thread reference mode, and render-owner RHI lifetime for hot

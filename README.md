@@ -172,9 +172,16 @@ tests pass in debug; the design is ADR 0013.
   generation-checked handles, parallel frustum culling, and screen-space LOD.
   Debug, Release, and Debug-ASan pass 104/104; TSan, package/source consumers,
   and repository checks pass. The 100,000-proxy benchmark matches brute force
-  at 2.881 ms p95 on a 4-core Intel Core i5-6400. The roadmap checkbox awaits
-  commit of this evidence; see the [summary](docs/graphics/PHASE_22.md) and
-  [report](docs/reports/phase-22.md).
+  at 2.881 ms p95 on a 4-core Intel Core i5-6400; see the
+  [summary](docs/graphics/PHASE_22.md) and [report](docs/reports/phase-22.md).
+- Phase 23 is complete. `cyber_scene` provides allocator-backed indexed meshes,
+  submeshes and bounds, tangent generation, checked packed vertex/index
+  conversion, edge-collapse LODs, and deterministic instanced indirect batches.
+  Debug, Release, and Debug-ASan pass 106/106; the integration test submits RHI
+  indirect batches and renders a visible million-triangle LOD scene. See the
+  [summary](docs/graphics/PHASE_23.md) and [report](docs/reports/phase-23.md).
+  See the [summary](docs/graphics/PHASE_23.md) and
+  [report](docs/reports/phase-23.md).
 
 See [engines/MODULES.md](engines/MODULES.md) for the module index and
 [docs/architecture/overview.md](docs/architecture/overview.md) for the design.

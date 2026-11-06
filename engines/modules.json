@@ -273,7 +273,7 @@
       "layer": 2,
       "order": 23,
       "status": "active",
-      "purpose": "Renderer-owned copied proxies, bounded render-thread update packets, world bounds, parallel frustum culling, and screen-space LOD selection.",
+      "purpose": "Renderer-owned copied proxies, bounded render-thread updates, CPU mesh storage and geometry processing, bounds, parallel frustum culling, screen-space LOD selection, and backend-neutral instance draw data.",
       "public_api": "include/cyber/scene/",
       "depends": ["cyber_core", "cyber_math", "cyber_memory", "cyber_jobs"],
       "forbidden": ["cyber_renderer", "cyber_graphics", "cyber_ui"],
@@ -283,13 +283,16 @@
         "Proxy handles are generation checked and stale handles never resolve.",
         "Culling is conservative, deterministic, and matches an independent brute-force reference.",
         "Transform, bounds, and dirty-state data stay in bounded contiguous storage.",
-        "Scene command bytes are versioned, bounded, and applied in queue order."
+        "Scene command bytes are versioned, bounded, and applied in queue order.",
+        "Mesh data is validated and copied into allocator-owned storage; packed data is an explicit checked conversion.",
+        "Geometry processing preserves submesh/material boundaries and reports measured simplification error.",
+        "Instance batch generation is deterministic and does not own GPU resources or issue backend commands."
       ],
       "non_goals": [
         "Gameplay scene graph.",
         "Physics and animation."
       ],
-      "tests": "Proxy command and lifecycle tests, public-header compilation, brute-force culling comparison, plane-boundary cases, LOD selection, and a 100,000-proxy benchmark.",
+      "tests": "Proxy command and lifecycle tests, mesh validation, tangent/bounds/packing/simplification tests, deterministic instance-batch tests, public-header compilation, brute-force culling comparison, and large-scene geometry coverage.",
       "budgets": "100,000-proxy cull within 5 ms p95 on the documented 4-core reference machine.",
       "roadmap": [22, 23]
     },

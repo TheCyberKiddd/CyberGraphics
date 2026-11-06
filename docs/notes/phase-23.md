@@ -1,0 +1,6 @@
+# Phase 23 reading notes
+
+- Khronos, [glTF 2.0 specification — meshes and accessors](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#meshes): the format associates vertex attributes and indices with primitives, and tangent attributes are four components so the fourth component carries handedness. CyberGraphics keeps its own canonical CPU representation and applies its own coordinate/math contracts.
+- Khronos, [glTF 2.0 specification — tangent space](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#geometry): normal-map tangent frames need a consistently oriented tangent basis; the repository stores handedness as `w = ±1` and derives the bitangent from its math convention.
+- Microsoft, [Direct3D 12 indirect drawing](https://learn.microsoft.com/en-us/windows/win32/direct3d12/indirect-drawing): indirect commands are described by explicit argument layouts, while resource binding and inherited command state remain part of the command-list contract. CyberGraphics keeps its own backend-neutral indexed argument structure and leaves capability checks and submission to `cyber_rhi`.
+- No external source code or runtime dependency is used. These references inform data semantics and API boundaries only.

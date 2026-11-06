@@ -67,10 +67,16 @@ add_subdirectory(engines/cyber_scene)
 add_subdirectory(engines/cyber_software_renderer)
 
 if(CYBER_BUILD_TESTS AND CYBER_RHI_ENABLE_D3D12)
-    # The Phase 14 image comparison is the one test that may link both
-    # renderers: no module may depend on both the RHI and the software
-    # renderer, so the cross-module test is built from tests/ instead.
+    # Cross-renderer tests live under tests/ so no runtime module needs to depend
+    # on both the RHI and the software renderer. This image comparison also
+    # requires a working D3D12 adapter.
     add_subdirectory(tests/integration/backend_compare)
+endif()
+
+if(CYBER_BUILD_TESTS)
+    # Phase 23 exercises scene geometry through the reference software renderer
+    # without introducing a scene-to-renderer module dependency.
+    add_subdirectory(tests/integration/phase23_geometry)
 endif()
 
 if(CYBER_BUILD_SAMPLES)

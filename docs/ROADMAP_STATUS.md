@@ -119,8 +119,8 @@ this document does not replace that roadmap or change any phase checkbox.
 |---|---|---|
 | 20. Render graph | Complete | Inferred dependencies and barriers, pass culling, compatible transient aliasing, bounded text/DOT output, and a tested multi-pass frame; Debug, Release, Debug-ASan, package/source consumers, and repository checks pass. See the Phase 20 report. |
 | 21. Render thread and frame pipelining | Complete | Bounded frame handoff, render-owner RHI access, profiler-proven overlap, and sanitizer/stress evidence. See the Phase 21 report. |
-| 22. Scene, render proxies, and culling | Not started | Renderer-owned proxies, parallel frustum culling, spatial structure, and LOD. |
-| 23. Geometry pipeline | Not started | Mesh/submesh formats, tangents/bounds, LOD generation, instancing, and indirect draws. |
+| 22. Scene, render proxies, and culling | Complete | Copied proxies, parallel culling, screen-space LOD selection, and committed Debug/Release/ASan, sanitizer, package/source, benchmark, and repository-check evidence. See the Phase 22 report. |
+| 23. Geometry pipeline | Complete | Mesh processing, packed formats, LODs, and indirect batches; Debug/Release/ASan pass 106/106, the million-triangle LOD render and RHI indirect submission pass, and package/repository checks pass. See the Phase 23 report. |
 | 24. Asset import and cooked render assets | Not started | Owned parsers/importers, cooked formats, asset database/cooker, and hot reload. |
 | 25. Engine-facing renderer interface | Not started | Stable versioned C plugin boundary, capabilities, scene/view/light/material API, and software-renderer implementation. |
 

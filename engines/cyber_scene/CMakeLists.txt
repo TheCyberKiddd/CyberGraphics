@@ -2,10 +2,19 @@ cyber_add_module(
     NAME scene
     LAYER 2
     SOURCES
+        src/mesh.cpp
         src/scene.cpp
     PUBLIC_HEADERS
+        include/cyber/scene/mesh.h
         include/cyber/scene/scene.h
     DEPENDS core math memory jobs
+)
+
+cyber_add_test(
+    NAME scene_geometry
+    SOURCES
+        tests/mesh_test.cpp
+    DEPENDS scene
 )
 
 cyber_add_test(
