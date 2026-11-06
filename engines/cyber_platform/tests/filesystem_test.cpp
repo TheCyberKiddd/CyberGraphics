@@ -139,16 +139,13 @@ CG_TEST(platform_file_watcher)
     CG_EXPECT_EQ(change.watchId, watch);
     CG_EXPECT_TRUE(change.kind == FileChangeKind::Created);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(30));
-    const Byte changed[] = {Byte{'b'}, Byte{'y'}, Byte{'e'}};
-    CG_REQUIRE(static_cast<bool>(WriteFile(fileText.c_str(), Span<const Byte>(changed))));
-    const u32 modified = watcher.Poll();
-    CG_EXPECT_TRUE(modified <= 1);
-    if (modified == 1)
-    {
-        CG_EXPECT_TRUE(watcher.PollChange(change));
-        CG_EXPECT_TRUE(change.kind == FileChangeKind::Modified);
-    }
+    const auto previousTime = std::filesystem::last_write_time(file, error);
+    CG_REQUIRE(!error);
+    std::filesystem::last_write_time(file, previousTime + std::chrono::seconds(2), error);
+    CG_REQUIRE(!error);
+    CG_EXPECT_EQ(watcher.Poll(), u32{1});
+    CG_EXPECT_TRUE(watcher.PollChange(change));
+    CG_EXPECT_TRUE(change.kind == FileChangeKind::Modified);
 
     CG_REQUIRE(static_cast<bool>(DeleteFile(fileText.c_str())));
     CG_EXPECT_EQ(watcher.Poll(), u32{1});

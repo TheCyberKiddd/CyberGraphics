@@ -34,7 +34,7 @@ u64 Timestamp(const std::filesystem::path& path, bool& exists) noexcept
         return 0;
     }
     const auto count = time.time_since_epoch().count();
-    return count < 0 ? 0 : static_cast<u64>(count);
+    return static_cast<u64>(count);
 }
 
 struct WatchedFile
