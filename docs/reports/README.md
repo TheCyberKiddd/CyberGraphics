@@ -4,6 +4,8 @@ One report per phase: `phase-NN.md`. The report is the evidence that the
 phase's "done when" line is true. A phase is not done because the code compiles;
 it is done when the proof is written down.
 
+Phase 20: [render graph report](phase-20.md).
+
 ## Template
 
 ```markdown

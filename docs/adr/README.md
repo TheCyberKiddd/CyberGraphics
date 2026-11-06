@@ -27,6 +27,11 @@ to it, and the consequences. Use one when a future reader would otherwise ask
 | [0016](0016-command-lists-and-synchronization.md) | Recorded command lists, explicit barriers, and timeline submission | accepted |
 | [0017](0017-d3d12-backend.md) | The Direct3D 12 backend: adapter discovery, WARP, and the increment plan | accepted |
 | [0018](0018-gpu-heap-suballocation-and-rhi-validation.md) | GPU heap sub-allocation and one RHI-level validation layer | proposed |
+| [0019](0019-shader-strategy.md) | A typed Cyber shader language that emits HLSL | accepted |
+| [0020](0020-shader-reflection-permutations-and-reload.md) | Compiler-owned reflection, keyword permutations, and renderer-side hot pipelines | accepted |
+| [0021](0021-material-definitions-and-parameter-blocks.md) | Material definitions, instances, and upload ownership | accepted for Phase 18 |
+| [0022](0022-frame-streaming-and-bindless-resources.md) | Frame streaming, dynamic offsets, and bindless tables | accepted for Phase 19 |
+| [0023](0023-render-graph-lifetimes-and-aliasing.md) | Render graph pass liveness and transient aliasing | proposed (owner review pending) |
 
 Add new records as `NNNN-title.md`, starting at `0001`. Never delete an ADR;
 supersede it with a new one and update the old record's status.

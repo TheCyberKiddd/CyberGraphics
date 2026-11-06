@@ -440,19 +440,19 @@ This part turns a working RHI into a renderer that scales to large scenes, runs 
 ### Phase 20: Render graph
 
 Tasks
-[ ] A pass declaration API with two stages: a setup stage that declares which resources a pass reads and writes, and an execute stage that records commands.
-[ ] Resource handles for imported resources (like the swapchain) and transient resources, with lifetime analysis.
-[ ] Automatic barrier insertion from the declared usage.
-[ ] Transient resource allocation with memory aliasing, using the Phase 15 allocator.
-[ ] Removal of passes whose outputs are never used.
-[ ] A text dump and a Graphviz DOT export of each frame's graph for debugging.
+[x] A pass declaration API with two stages: a setup stage that declares which resources a pass reads and writes, and an execute stage that records commands.
+[x] Resource handles for imported resources (like the swapchain) and transient resources, with lifetime analysis.
+[x] Automatic barrier insertion from the declared usage.
+[x] Transient resource allocation with memory aliasing, using the Phase 15 allocator.
+[x] Removal of passes whose outputs are never used.
+[x] A text dump and a Graphviz DOT export of each frame's graph for debugging.
 Read first: FrameGraph: Extensible Rendering Architecture in Frostbite (GDC 2017) · the talk's slides
 Tips
 • A setup and execute split is what makes culling and aliasing possible, because the whole frame is known before any command is recorded.
 • Test a graph with an unused branch and a diamond-shaped dependency.
 • Passes should not touch the RHI outside their execute stage.
-Write down: docs/design/phase-20-render-graph.md.
-Done when: a depth prepass, main pass, and post-processing pass are built through the graph with automatic barriers, an unused pass is culled, and a graph dump file is produced.
+Write down: [docs/design/phase-20-render-graph.md](../design/phase-20-render-graph.md), [docs/notes/phase-20.md](../notes/phase-20.md), and [ADR 0023](../adr/0023-render-graph-lifetimes-and-aliasing.md).
+Done when: a depth prepass, main pass, and post-processing pass are built through the graph with automatic barriers, an unused pass is culled, and a graph dump file is produced. Evidence: [Phase 20 report](../reports/phase-20.md).
 
 ### Phase 21: Render thread and frame pipelining
 

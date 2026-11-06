@@ -8,6 +8,13 @@ semantic versioning once a public API exists.
 
 ### Added
 
+- Phase 20 render graph: setup/execute pass declarations, inferred resource
+  hazards and culling, graph-owned transient buffer/texture lifetimes,
+  descriptor-safe alias slots, automatic RHI barriers, and bounded text/DOT
+  diagnostics. Debug, Release, and Debug-ASan pass 100/100; installed-package
+  and source-tree consumers, structure, layer, formatting, and whitespace
+  checks pass. The null-backend multi-pass proof generates a graph DOT file.
+  See the Phase 20 summary and report.
 - Phase 19 RHI dynamic buffer offsets, mutable bind groups, read-only storage
   bindings and descriptor-array limits; renderer frame-slot streaming,
   descriptor allocators, and capability-gated bindless tables; and a

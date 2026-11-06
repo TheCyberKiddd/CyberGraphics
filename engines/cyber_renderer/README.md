@@ -4,7 +4,9 @@
 
 Phase 17 adds compiler-reflected binding layouts and asynchronous graphics
 pipelines with fallback selection, frame-boundary swaps, and deferred retirement.
-Later phases add render graphs, materials, lighting, and GPU-driven rendering.
+Phase 20 provides a setup/execute render graph with dependency analysis,
+culling, transient aliasing, automatic barriers, and bounded text/DOT
+diagnostics. Lighting and GPU-driven rendering remain in later roadmap phases.
 
 The binding contract for this module lives in [docs/MODULE.md](docs/MODULE.md).
 Read it before adding code or changing a public header.

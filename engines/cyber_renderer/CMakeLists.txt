@@ -9,6 +9,7 @@ cyber_add_module(
         src/material.cpp
         src/material_file.cpp
         src/reflected_layout.cpp
+        src/render_graph.cpp
     PUBLIC_HEADERS
         include/cyber/renderer/bindless_table.h
         include/cyber/renderer/descriptor_allocator.h
@@ -16,6 +17,7 @@ cyber_add_module(
         include/cyber/renderer/hot_pipeline.h
         include/cyber/renderer/material.h
         include/cyber/renderer/reflected_layout.h
+        include/cyber/renderer/render_graph.h
     DEPENDS core memory jobs rhi shaders
 )
 
@@ -58,5 +60,12 @@ cyber_add_test(
     NAME renderer_phase19
     SOURCES
         tests/phase19_test.cpp
+    DEPENDS renderer rhi memory
+)
+
+cyber_add_test(
+    NAME renderer_render_graph
+    SOURCES
+        tests/render_graph_test.cpp
     DEPENDS renderer rhi memory
 )

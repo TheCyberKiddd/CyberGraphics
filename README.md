@@ -154,6 +154,12 @@ tests pass in debug; the design is ADR 0013.
   path completes the 10,000-draw frame in 11.6 ms p95, within the 16.67 ms
   budget. Phase 19 is complete; see the [summary](docs/graphics/PHASE_19.md)
   and [report](docs/reports/phase-19.md).
+- Phase 20's render graph is implemented and validated: setup/execute pass
+  declarations, inferred hazards, dead-pass culling, transient aliasing,
+  automatic RHI barriers, and text/DOT diagnostics. Debug, Release, and
+  Debug-ASan pass 100/100; package/source consumers and repository checks pass.
+  See the [summary](docs/graphics/PHASE_20.md) and
+  [report](docs/reports/phase-20.md).
 
 See [engines/MODULES.md](engines/MODULES.md) for the module index and
 [docs/architecture/overview.md](docs/architecture/overview.md) for the design.

@@ -36,6 +36,18 @@ Phase 19 adds a frame-slot-bound upload stream with checked aligned allocation,
 persistent and transient descriptor allocators, and finite bindless resource
 tables with a conventional fallback when `Feature::BindlessResources` is
 absent.
+Phase 20 adds a setup/execute render graph with generation-checked logical
+resources, imported and transient buffers/textures, inferred pass hazards,
+export- and side-effect-rooted pass culling, descriptor-compatible transient
+aliasing, automatic RHI barriers, and bounded text/Graphviz diagnostics.
+Imported resources remain caller-owned; the graph owns only transient physical
+resources it creates. Passes execute in deterministic declaration order on a
+caller-owned recording command list; submission and cross-queue synchronization
+remain the caller's responsibility. The caller acknowledges successful
+submission before reusing a graph; a recorded command list that is discarded
+instead invalidates that graph instance for reuse. Before destroying the graph,
+the caller discards any unsubmitted recording and waits until submitted work no
+longer references graph-owned transients.
 
 ## Dependencies
 
@@ -61,6 +73,12 @@ Dependencies are one-way. A module may depend only on modules with a lower
 - Bindless access is enabled only when the device reports the feature; table
   mutations are restricted to safe frame slots and unused entries hold caller
   supplied fallback resources.
+- Graph setup callbacks declare all resource reads and writes before execution;
+  pass callbacks cannot submit commands or access resources outside their
+  declared context.
+- Transient aliases require identical RHI descriptions and non-overlapping
+  live-pass intervals; all graph-generated transitions are recorded before the
+  corresponding pass executes.
 - Pipeline changes publish only at frame boundaries; replaced GPU objects are
   retained through the configured frames-in-flight interval.
 - The owning thread calls public renderer methods; background jobs own their
@@ -76,8 +94,8 @@ Dependencies are one-way. A module may depend only on modules with a lower
 ## Tests
 
 Null-backend reflected-layout, hot-pipeline, material-instance, material-file,
-and public-header tests; later phases add graph culling and aliasing tests,
-golden images, per-pass GPU timings, and scene benchmarks.
+render-graph dependency/culling/aliasing/barrier tests, and public-header tests;
+later phases add golden images, per-pass GPU timings, and scene benchmarks.
 
 ## Budgets
 

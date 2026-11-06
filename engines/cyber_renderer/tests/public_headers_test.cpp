@@ -4,6 +4,7 @@
 #include <cyber/renderer/hot_pipeline.h>
 #include <cyber/renderer/material.h>
 #include <cyber/renderer/reflected_layout.h>
+#include <cyber/renderer/render_graph.h>
 #include <cyber/test/test.h>
 
 #include <type_traits>
@@ -27,6 +28,8 @@ CG_TEST(renderer_public_headers)
     static_assert(std::is_move_constructible_v<TransientDescriptorAllocator>);
     static_assert(!std::is_copy_constructible_v<BindlessResourceTable>);
     static_assert(std::is_move_constructible_v<BindlessResourceTable>);
+    static_assert(!std::is_copy_constructible_v<RenderGraph>);
+    static_assert(!std::is_move_constructible_v<RenderGraph>);
 
     CG_EXPECT_EQ(kMaxReflectedPushConstantBytes, u32{128});
     CG_EXPECT_EQ(kMaxMaterialParameters, u32{64});

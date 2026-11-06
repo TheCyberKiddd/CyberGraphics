@@ -3,6 +3,8 @@
 One note per roadmap phase: `phase-NN.md`. These are the raw notes taken while
 reading the phase's "Read first" sources, not polished design documents.
 
+Phase 20: [render graph reading notes](phase-20.md).
+
 ## Template
 
 ```markdown

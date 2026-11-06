@@ -10,6 +10,7 @@
 #include <cyber/perf/perf.h>
 #include <cyber/platform/platform.h>
 #include <cyber/renderer/material.h>
+#include <cyber/renderer/render_graph.h>
 #include <cyber/rhi/d3d12.h>
 #include <cyber/rhi/rhi.h>
 #include <cyber/software/raster.h>
@@ -19,6 +20,7 @@
 #include <cmath>
 #include <cstring>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
 namespace
@@ -39,6 +41,7 @@ void ConsumerIncrement(void* userData) noexcept
 int main()
 {
     using namespace cyber::core;
+    static_assert(!std::is_copy_constructible_v<cyber::renderer::RenderGraph>);
 
     const Version version = VersionNumber();
     if (version.major != kVersionMajor)
