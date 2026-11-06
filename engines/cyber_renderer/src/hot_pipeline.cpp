@@ -27,7 +27,7 @@ using cyber::memory::String;
 constexpr u32 kMaximumColorAttachments = 8;
 
 // Objects one successful build owns. The layout objects are owned only when
-// `ownsLayout` is set; otherwise they belong to the build that created them.
+// `ownsLayout` is set; otherwise they are shared with the current pipeline.
 struct BuiltObjects
 {
     rhi::ShaderHandle vertex{};
@@ -67,7 +67,6 @@ struct BuildJob
     }
 
     // Inputs.
-    rhi::Device* device = nullptr;
     rhi::GraphicsPipelineDesc state{};
     std::array<rhi::ColorAttachmentState, kMaximumColorAttachments> attachments{};
     u32 attachmentCount = 0;
@@ -81,7 +80,10 @@ struct BuildJob
     ReflectedLayout currentLayout{};
     ReflectedLayoutObjects currentObjects{};
 
-    // Outputs.
+    // CPU-only worker outputs. RHI handles are created later by the owner.
+    ReflectedLayout layout{};
+    ReflectedVertexLayout vertexLayout{};
+    bool reuseLayout = false;
     BuiltObjects result{};
     bool ok = false;
     Error error{};
@@ -96,14 +98,42 @@ struct BuildJob
 void RunBuild(void* userData) noexcept
 {
     BuildJob& job = *static_cast<BuildJob*>(userData);
-    rhi::Device& device = *job.device;
+    const auto fail = [&](const Error& error) noexcept
+    {
+        job.ok = false;
+        job.error = error;
+        job.done.store(true, std::memory_order_release);
+    };
+
+    const shaders::Reflection* stages[] = {&job.vertexReflection, &job.pixelReflection};
+    auto layout = BuildReflectedLayout(Span<const shaders::Reflection* const>(stages, 2));
+    if (!layout)
+    {
+        fail(layout.Error());
+        return;
+    }
+    auto vertexLayout = BuildVertexLayout(job.vertexReflection);
+    if (!vertexLayout)
+    {
+        fail(vertexLayout.Error());
+        return;
+    }
+
+    job.layout = layout.Value();
+    job.vertexLayout = vertexLayout.Value();
+    job.reuseLayout = job.hasCurrentLayout && job.layout == job.currentLayout;
+    job.ok = true;
+    job.done.store(true, std::memory_order_release);
+}
+
+void FinalizeBuild(BuildJob& job, rhi::Device& device) noexcept
+{
     BuiltObjects built{};
     const auto fail = [&](const Error& error) noexcept
     {
         DestroyBuilt(device, built, built.ownsLayout);
         job.ok = false;
         job.error = error;
-        job.done.store(true, std::memory_order_release);
     };
 
     rhi::ShaderDesc vertexDesc{};
@@ -130,16 +160,9 @@ void RunBuild(void* userData) noexcept
         return;
     }
     built.pixel = pixel.Value();
+    built.layout = job.layout;
 
-    const shaders::Reflection* stages[] = {&job.vertexReflection, &job.pixelReflection};
-    auto layout = BuildReflectedLayout(Span<const shaders::Reflection* const>(stages, 2));
-    if (!layout)
-    {
-        fail(layout.Error());
-        return;
-    }
-    built.layout = layout.Value();
-    if (job.hasCurrentLayout && built.layout == job.currentLayout)
+    if (job.reuseLayout)
     {
         built.layoutObjects = job.currentObjects;
         built.ownsLayout = false;
@@ -156,18 +179,11 @@ void RunBuild(void* userData) noexcept
         built.ownsLayout = true;
     }
 
-    auto vertexLayout = BuildVertexLayout(job.vertexReflection);
-    if (!vertexLayout)
-    {
-        fail(vertexLayout.Error());
-        return;
-    }
-
     rhi::GraphicsPipelineDesc desc = job.state;
     desc.layout = built.layoutObjects.pipelineLayout;
     desc.vertexShader = built.vertex;
     desc.pixelShader = built.pixel;
-    desc.vertexLayout = vertexLayout.Value().View();
+    desc.vertexLayout = job.vertexLayout.View();
     desc.colorAttachments =
         Span<const rhi::ColorAttachmentState>(job.attachments.data(), job.attachmentCount);
     desc.label = job.label;
@@ -178,10 +194,7 @@ void RunBuild(void* userData) noexcept
         return;
     }
     built.pipeline = pipeline.Value();
-
     job.result = built;
-    job.ok = true;
-    job.done.store(true, std::memory_order_release);
 }
 
 struct Retired
@@ -281,6 +294,10 @@ struct HotGraphicsPipeline::Impl
     void Publish(u64 frame) noexcept
     {
         WaitForBuild();
+        if (job->ok)
+        {
+            FinalizeBuild(*job, *desc.device);
+        }
         if (job->ok)
         {
             if (hasCurrent)
@@ -414,7 +431,6 @@ Status<Error> HotGraphicsPipeline::Rebuild(const shaders::CompiledShader& vertex
         return Status<Error>::Err(Error{ErrorCode::Internal, "hot pipeline: allocation failed"});
     }
     BuildJob* next = std::construct_at(static_cast<BuildJob*>(memory), *m_impl->allocator);
-    next->device = m_impl->desc.device;
     next->state = m_impl->desc.state;
     next->attachments = m_impl->attachments;
     next->attachmentCount = m_impl->attachmentCount;

@@ -19,6 +19,7 @@ enum class ErrorCode : u32
     Overflow,
     Internal,
     DeviceLost,
+    Busy,
 };
 
 constexpr const char* ErrorCodeName(ErrorCode code) noexcept
@@ -45,6 +46,8 @@ constexpr const char* ErrorCodeName(ErrorCode code) noexcept
         return "internal";
     case ErrorCode::DeviceLost:
         return "device_lost";
+    case ErrorCode::Busy:
+        return "busy";
     }
     return "unknown";
 }

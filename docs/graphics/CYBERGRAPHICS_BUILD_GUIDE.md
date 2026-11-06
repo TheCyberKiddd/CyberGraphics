@@ -457,19 +457,19 @@ Done when: a depth prepass, main pass, and post-processing pass are built throug
 ### Phase 21: Render thread and frame pipelining
 
 Tasks
-[ ] Define the thread model: the game thread produces frame data, the render thread consumes it, with 2 frames in flight.
-[ ] A command queue between the threads (a single-producer, single-consumer ring) and buffered render state.
-[ ] Ownership rules: only the render thread touches RHI objects.
-[ ] Resize and shutdown sequences that cannot deadlock.
-[ ] Profiler markers that show both threads overlapping.
-[ ] A single-threaded mode switch for debugging.
+[x] Define the thread model: the game thread produces frame data, the render thread consumes it, with 2 frames in flight.
+[x] A command queue between the threads (a single-producer, single-consumer ring) and buffered render state.
+[x] Ownership rules: only the render thread touches RHI objects.
+[x] Resize and shutdown sequences that cannot deadlock.
+[x] Profiler markers that show both threads overlapping.
+[x] A single-threaded mode switch for debugging.
 Read first: Parallelizing the Naughty Dog Engine Using Fibers (frame-centric design) · Direct3D 12 programming guide (Work submission)
 Tips
 • Keep the single-threaded mode permanently; it makes bugs far easier to reproduce.
 • Run the null backend under ThreadSanitizer on Linux, since the D3D12 backend only runs on Windows.
 • Stress-test resize and shutdown while frames are in flight.
-Write down: docs/design/phase-21-render-thread.md.
-Done when: the profiler shows the two threads overlapping, a ThreadSanitizer run on the null backend finds no races, and the resize and shutdown stress test passes.
+Write down: [design note](../design/phase-21-render-thread.md), [reading notes](../notes/phase-21.md), and [ADR 0024](../adr/0024-render-thread-frame-pipeline.md).
+Done when: the profiler shows the two threads overlapping, a ThreadSanitizer run on the null backend finds no races, and the resize and shutdown stress test passes. Evidence: [Phase 21 summary](PHASE_21.md) and [report](../reports/phase-21.md).
 
 ### Phase 22: Scene, render proxies, and culling
 

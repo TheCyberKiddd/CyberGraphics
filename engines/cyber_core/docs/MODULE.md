@@ -22,7 +22,7 @@ private headers.
 |---|---|
 | `types.h` | Fixed-width aliases, `usize`, `isize`, `Byte`, `kInvalidIndex`. |
 | `build_config.h` | Build kind, platform, sanitizer flags, version view. |
-| `error.h` | `ErrorCode`, `Error`, name helpers. |
+| `error.h` | `ErrorCode`, `Error`, name helpers, including `Busy` for bounded-resource backpressure. |
 | `result.h` | `Result<T, E>`, `Result<void, E>`, `Status<E>`. |
 | `assert.h` | `CG_ASSERT`, `CG_ASSERT_MSG`, `CG_VERIFY`, failure formatting. |
 | `log.h` | Levels, channels, `LogRecord`, `LogSink`, `Logger`, `CG_LOG`. |
@@ -46,6 +46,7 @@ Dependencies are one-way. A module may depend only on modules with a lower
 - Public headers are self-contained and compile on their own.
 - `Result` is never valueless; exactly one of the value or the error is engaged.
 - `Result` values and errors must be nothrow move constructible.
+- `ErrorCode` values are additive; new codes are appended to preserve existing numeric values.
 - Logger messages are capped at 512 bytes and the logger holds at most 8 sinks.
 - Sinks are non-owning and must not re-enter the same logger.
 

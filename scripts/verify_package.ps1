@@ -69,6 +69,7 @@ $requiredHeaders = @(
     'include/cyber/renderer/material.h',
     'include/cyber/renderer/reflected_layout.h',
     'include/cyber/renderer/render_graph.h',
+    'include/cyber/renderer/render_thread.h',
     'include/cyber/software/software.h',
     'include/cyber/software/framebuffer.h',
     'include/cyber/software/present_target.h',

@@ -11,6 +11,7 @@
 #include <cyber/platform/platform.h>
 #include <cyber/renderer/material.h>
 #include <cyber/renderer/render_graph.h>
+#include <cyber/renderer/render_thread.h>
 #include <cyber/rhi/d3d12.h>
 #include <cyber/rhi/rhi.h>
 #include <cyber/software/raster.h>

@@ -160,6 +160,13 @@ tests pass in debug; the design is ADR 0013.
   Debug-ASan pass 100/100; package/source consumers and repository checks pass.
   See the [summary](docs/graphics/PHASE_20.md) and
   [report](docs/reports/phase-20.md).
+- Phase 21's bounded render-thread frame handoff is implemented and locally
+  validated: copied immutable packets, ordered resize/shutdown, render-owner
+  RHI ownership, profiler-proven overlap, and a single-thread reference mode.
+  Debug, Release, and Debug-ASan pass 101/101; the Linux ThreadSanitizer
+  render-thread and hot-pipeline targets, package/source consumers, and
+  repository checks pass. See the [summary](docs/graphics/PHASE_21.md) and
+  [report](docs/reports/phase-21.md).
 
 See [engines/MODULES.md](engines/MODULES.md) for the module index and
 [docs/architecture/overview.md](docs/architecture/overview.md) for the design.
@@ -219,7 +226,8 @@ package. Both modes expose the same targets:
   and half floats.
 - `cyber::memory` - allocators, containers, strings, and generation handles.
 - `cyber::shaders` and `cyber::renderer` - shader reflection, pipeline
-  integration, and material definitions and instances.
+  integration, material definitions and instances, and bounded render-thread
+  frame handoff.
 
 Source mode:
 

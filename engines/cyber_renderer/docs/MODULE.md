@@ -8,20 +8,25 @@
 
 ## Purpose
 
-Phase 17's renderer-side shader integration, Phase 18's material system, and
-Phase 19's frame data streaming and descriptor allocation:
+Phase 17's renderer-side shader integration, Phase 18's material system, Phase
+19's frame data streaming and descriptor allocation, Phase 20's render graph,
+and Phase 21's bounded render-thread frame handoff:
 compiler-reflected RHI layouts, vertex input layouts, asynchronous
 graphics-pipeline creation, frame-boundary publication, fallback pipelines,
 deferred retirement, immutable material definitions, mutable instances,
 reflected parameter blocks, texture slots, text serialization, sorted draw
 records, fence-safe per-frame upload streams, generation-counted persistent
 descriptor indices, per-frame transient indices, and capability-gated bindless
-tables. Later phases add render graphs, lighting, and GPU-driven rendering.
+tables. Later phases add lighting and GPU-driven rendering.
 
 ## Public API
 
 `include/cyber/renderer/`
 
+`render_thread.h` provides a single-producer/single-consumer command queue with
+copied immutable frame packets, ordered resize requests, render-owner
+callbacks, configurable in-flight CPU packets, and a permanent
+single-threaded reference mode.
 `reflected_layout.h` derives RHI layouts from `cyber_shaders::Reflection`,
 including the material parameter buffer at `b1, space2`.
 `hot_pipeline.h` builds graphics pipelines asynchronously and publishes them
@@ -48,10 +53,14 @@ submission before reusing a graph; a recorded command list that is discarded
 instead invalidates that graph instance for reuse. Before destroying the graph,
 the caller discards any unsubmitted recording and waits until submitted work no
 longer references graph-owned transients.
+Phase 21 adds a bounded producer-to-render-owner frame handoff with copied
+immutable packets, ordered resize and shutdown, and a single-threaded reference
+mode. GPU-visible resource reuse remains guarded by RHI frame fences.
 
 ## Dependencies
 
-Allowed: cyber_core, cyber_memory, cyber_jobs, cyber_rhi, cyber_shaders
+Allowed: cyber_core, cyber_memory, cyber_jobs, cyber_platform, cyber_perf,
+cyber_rhi, cyber_shaders
 
 Forbidden: cyber_graphics, cyber_ui, tools
 
@@ -81,8 +90,20 @@ Dependencies are one-way. A module may depend only on modules with a lower
   corresponding pass executes.
 - Pipeline changes publish only at frame boundaries; replaced GPU objects are
   retained through the configured frames-in-flight interval.
-- The owning thread calls public renderer methods; background jobs own their
-  build data and use the thread-safe RHI device.
+- The game thread is the render queue's only producer and lifecycle owner; its
+  published frame bytes are copied into bounded storage before enqueue.
+- Render-thread initialization, frame, resize, and shutdown callbacks are the
+  renderer-side owners of callback-managed RHI objects; no producer-side RHI
+  access is part of the render-thread contract.
+- CPU packet completion is distinct from GPU completion; per-frame GPU
+  resources still require `rhi::FrameRing` fences.
+- Queue saturation returns `ErrorCode::Busy`, payloads exceeding configured
+  storage return `ErrorCode::OutOfRange`, and asynchronous callback failures
+  remain observable through `WaitIdle` and `Shutdown`.
+- The render owner calls public renderer methods and all renderer RHI methods;
+  background jobs process owned CPU data only. Hot-pipeline worker jobs prepare
+  reflection/layout data, while RHI shader, layout, and pipeline objects are
+  created and destroyed by the render owner.
 - Passes declare reads and writes; barriers are graph-generated.
 - No game logic, only render proxies.
 
@@ -93,9 +114,11 @@ Dependencies are one-way. A module may depend only on modules with a lower
 
 ## Tests
 
-Null-backend reflected-layout, hot-pipeline, material-instance, material-file,
-render-graph dependency/culling/aliasing/barrier tests, and public-header tests;
-later phases add golden images, per-pass GPU timings, and scene benchmarks.
+Null-backend render-thread ordering, overlap, backpressure, resize/shutdown,
+callback-error, single-thread parity, reflected-layout, hot-pipeline,
+material-instance, material-file, render-graph dependency/culling/aliasing/
+barrier, and public-header tests. Run render-thread tests under ThreadSanitizer
+on Linux.
 
 ## Budgets
 

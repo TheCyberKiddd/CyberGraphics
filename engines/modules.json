@@ -297,21 +297,23 @@
       "layer": 3,
       "order": 30,
       "status": "active",
-      "purpose": "Phase 17 renderer-side shader integration: compiler-reflected RHI layouts, asynchronous graphics pipelines, frame-boundary publication, fallbacks, and deferred retirement; later phases add render graphs, materials, and lighting.",
+      "purpose": "Renderer-side shader and material systems, frame streaming, render graphs, and bounded render-thread frame pipelining.",
       "public_api": "include/cyber/renderer/",
-      "depends": ["cyber_core", "cyber_memory", "cyber_jobs", "cyber_rhi", "cyber_shaders"],
+      "depends": ["cyber_core", "cyber_memory", "cyber_jobs", "cyber_platform", "cyber_perf", "cyber_rhi", "cyber_shaders"],
       "forbidden": ["cyber_graphics", "cyber_ui", "tools"],
       "invariants": [
         "All GPU work goes through cyber_rhi; no backend headers.",
         "Passes declare reads and writes; barriers are graph-generated.",
         "Pipeline changes publish only at frame boundaries and retired GPU objects survive the frames-in-flight interval.",
+        "Render-thread callbacks own renderer-side RHI access; immutable frame packets are copied into bounded slots before publication.",
+        "CPU packet slots and GPU frame slots have distinct completion rules.",
         "No game logic, only render proxies."
       ],
       "non_goals": [
         "Product plugin ABI (cyber_graphics).",
         "Editor integration."
       ],
-      "tests": "Null-backend reflected-layout and hot-pipeline tests; later phases add graph culling, golden images, GPU timings, and scene benchmarks.",
+      "tests": "Null-backend render-thread ordering, overlap, backpressure, resize/shutdown, callback-error, single-thread parity, graph, material, and public-header tests.",
       "budgets": "Per-pass GPU budgets live in docs/perf. Frame-time percentiles are tracked.",
       "roadmap": [17, 18, 19, 20, 21, 22, 23, 26, 27, 28, 29, 30, 31, 32, 33, 37]
     },

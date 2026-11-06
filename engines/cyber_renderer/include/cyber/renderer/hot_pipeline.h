@@ -42,10 +42,10 @@ struct HotGraphicsPipelineDesc
 
 /// A graphics pipeline that can be rebuilt from new shaders while it is used.
 ///
-/// Rebuild copies the shaders and starts building on the job system: HLSL to
-/// backend bytecode, the reflected layout, and the pipeline state object.
-/// BeginFrame is the only place the pipeline changes, so every command list
-/// recorded between two BeginFrame calls sees one version.
+/// Rebuild copies the shaders and starts CPU-only reflection and vertex-layout
+/// preparation on the job system. BeginFrame creates the RHI shader, layout,
+/// and pipeline objects and is the only place the pipeline changes, so every
+/// command list recorded between two BeginFrame calls sees one version.
 ///
 /// Bind-group layouts are reused when a rebuild's reflected layout equals the
 /// current one, so the caller's bind groups stay valid; LayoutGeneration
@@ -53,8 +53,8 @@ struct HotGraphicsPipelineDesc
 /// against BindGroupLayout(slot).
 ///
 /// Threading: every member function is called from the owning (render)
-/// thread. Builds run on job workers and touch only their own state and the
-/// device, which is thread-safe.
+/// thread. Job workers prepare reflection and vertex-layout data only; shader,
+/// layout, and pipeline RHI objects are created and destroyed by the owner.
 class HotGraphicsPipeline
 {
 public:

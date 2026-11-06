@@ -32,6 +32,7 @@ to it, and the consequences. Use one when a future reader would otherwise ask
 | [0021](0021-material-definitions-and-parameter-blocks.md) | Material definitions, instances, and upload ownership | accepted for Phase 18 |
 | [0022](0022-frame-streaming-and-bindless-resources.md) | Frame streaming, dynamic offsets, and bindless tables | accepted for Phase 19 |
 | [0023](0023-render-graph-lifetimes-and-aliasing.md) | Render graph pass liveness and transient aliasing | proposed (owner review pending) |
+| [0024](0024-render-thread-frame-pipeline.md) | Render-thread ownership and bounded frame handoff | proposed (owner review pending) |
 
 Add new records as `NNNN-title.md`, starting at `0001`. Never delete an ADR;
 supersede it with a new one and update the old record's status.

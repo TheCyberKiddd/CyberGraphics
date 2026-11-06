@@ -44,7 +44,11 @@ this document does not replace that roadmap or change any phase checkbox.
   writes bounded text and DOT diagnostics. Debug, Release, and Debug-ASan pass
   100/100; package/source consumers and structure, layer, formatting, and
   whitespace checks pass. See the [Phase 20 report](reports/phase-20.md).
-- **Phases 21-44:** not started.
+- **Phase 21:** complete. Debug, Release, and Debug-ASan pass 101/101; the Linux
+  ThreadSanitizer render-thread and hot-pipeline targets pass; package/source
+  consumers and repository checks pass. See the
+  [Phase 21 report](reports/phase-21.md).
+- **Phases 22-44:** not started.
 - **Current PC:** Windows 10 Pro 22H2, Intel Core i5-6400 (4 cores), Intel HD
   Graphics 530 (1 GiB reported), Intel driver `31.0.101.2125` dated
   2023-05-24. The marker sample now submits and presents on this adapter after
@@ -114,7 +118,7 @@ this document does not replace that roadmap or change any phase checkbox.
 | Phase | Status | Intended outcome |
 |---|---|---|
 | 20. Render graph | Complete | Inferred dependencies and barriers, pass culling, compatible transient aliasing, bounded text/DOT output, and a tested multi-pass frame; Debug, Release, Debug-ASan, package/source consumers, and repository checks pass. See the Phase 20 report. |
-| 21. Render thread and frame pipelining | Not started | Decouple game/render threads, command queue, frames in flight, and race-free overlap. |
+| 21. Render thread and frame pipelining | Complete | Bounded frame handoff, render-owner RHI access, profiler-proven overlap, and sanitizer/stress evidence. See the Phase 21 report. |
 | 22. Scene, render proxies, and culling | Not started | Renderer-owned proxies, parallel frustum culling, spatial structure, and LOD. |
 | 23. Geometry pipeline | Not started | Mesh/submesh formats, tangents/bounds, LOD generation, instancing, and indirect draws. |
 | 24. Asset import and cooked render assets | Not started | Owned parsers/importers, cooked formats, asset database/cooker, and hot reload. |
@@ -194,12 +198,14 @@ this document does not replace that roadmap or change any phase checkbox.
 - Structure, layer, formatting, and `git diff --check` passed.
 - Phase 18 code, documentation, package rules, and validation evidence are
   committed in `679a64c` (`renderer: add Phase 18 material system`).
+- Phase 21 implementation and validation evidence are recorded in the
+  [Phase 21 report](reports/phase-21.md). The Linux TSan preset's Clang 21
+  warning-policy exception is documented there.
 - `diagnosing-low-phase-6-sample-frame-rate.json` is unrelated and untracked;
   leave it alone.
 
 ## Immediate next step
 
-Phase 19 is complete; Phase 20 (render graph) is next in roadmap order. Do not
-begin it until the owner requests the next phase. See the
-[Phase 19 report](reports/phase-19.md) for benchmark methodology and the
-dynamic-offset path's known performance limitation.
+Phase 21 is complete. Phase 22 (scene, render proxies, and culling) is next in
+roadmap order; wait for the owner to request it before starting. See the
+[Phase 21 report](reports/phase-21.md) for exact validation and known gaps.

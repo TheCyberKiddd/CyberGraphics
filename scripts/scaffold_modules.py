@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Create engine module folders and contract stubs from engines/modules.json.
 
-This script is intentionally idempotent. It will not overwrite an existing
-README.md or docs/MODULE.md unless --force is passed.
+This script is intentionally idempotent. It always refreshes the generated
+engines/MODULES.md index, and will not overwrite an existing README.md or
+docs/MODULE.md unless --force is passed.
 """
 
 from __future__ import annotations
@@ -195,7 +196,7 @@ def main() -> int:
         write_file(base / "README.md", module_readme(module), args.force)
         write_file(base / "docs" / "MODULE.md", module_contract(module), args.force)
 
-    write_file(ROOT / "engines" / "MODULES.md", modules_index(manifest), args.force)
+    write_file(ROOT / "engines" / "MODULES.md", modules_index(manifest), force=True)
     print(f"Scaffolded {len(manifest['modules'])} module folders.")
     return 0
 

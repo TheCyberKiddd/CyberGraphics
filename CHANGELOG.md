@@ -8,6 +8,13 @@ semantic versioning once a public API exists.
 
 ### Added
 
+- Phase 21 render-thread frame pipelining: bounded SPSC command handoff,
+  copied immutable packets, ordered resize and draining shutdown, profiler
+  scopes, single-thread reference mode, and render-owner RHI lifetime for hot
+  pipelines. Debug, Release, and Debug-ASan pass 101/101; the Linux
+  ThreadSanitizer render-thread and hot-pipeline targets pass; installed and
+  source consumers and structure, layer, formatting, and whitespace checks
+  pass. See the Phase 21 summary and report.
 - Phase 20 render graph: setup/execute pass declarations, inferred resource
   hazards and culling, graph-owned transient buffer/texture lifetimes,
   descriptor-safe alias slots, automatic RHI barriers, and bounded text/DOT

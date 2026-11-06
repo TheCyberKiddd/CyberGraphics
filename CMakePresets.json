@@ -83,6 +83,16 @@
         "CMAKE_CXX_COMPILER": "clang++",
         "CYBER_ENABLE_ASAN": "ON"
       }
+    },
+    {
+      "name": "ci-linux-tsan",
+      "displayName": "CI Linux (clang + ThreadSanitizer)",
+      "inherits": "debug",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CYBER_ENABLE_TSAN": "ON",
+        "CYBER_WARNINGS_AS_ERRORS": "OFF"
+      }
     }
   ],
   "buildPresets": [
@@ -117,6 +127,10 @@
     {
       "name": "ci-linux-asan",
       "configurePreset": "ci-linux-asan"
+    },
+    {
+      "name": "ci-linux-tsan",
+      "configurePreset": "ci-linux-tsan"
     }
   ],
   "testPresets": [
@@ -172,6 +186,13 @@
     {
       "name": "ci-linux-asan",
       "configurePreset": "ci-linux-asan",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "ci-linux-tsan",
+      "configurePreset": "ci-linux-tsan",
       "output": {
         "outputOnFailure": true
       }

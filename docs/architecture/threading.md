@@ -1,8 +1,8 @@
 # Threading model
 
-This document describes the target model. It becomes real in Phase 5 (jobs)
-and Phase 21 (render thread). Until then, the rules still apply to any code
-that creates a thread.
+This document describes the threading model introduced by Phase 5 (jobs) and
+Phase 21 (render thread). The rules also apply to any future code that creates
+a thread.
 
 ## Threads
 
@@ -19,11 +19,14 @@ that creates a thread.
    snapshots or send commands through a queue.
 2. **No hidden globals.** Contexts are explicit: `Device`, `Frame`,
    `Allocator`, `JobSystem`, `Renderer`.
-3. **Frame data is immutable once published.** The game thread builds a frame
-   packet, publishes it, and does not mutate it until the render thread signals
-   completion.
-4. **RHI objects belong to the render thread.** Creation may be deferred, but
-   only the render thread records commands against them.
+3. **Published frame data is immutable.** `RenderThread::SubmitFrame` copies
+   the producer's bytes before returning. The producer may reuse its source
+   storage after return; the render callback sees an immutable copy valid for
+   that callback only.
+4. **Renderer RHI access belongs to the render thread.** The render thread
+   creates, queries, records, submits, resizes, and destroys renderer-owned RHI
+   objects. Worker jobs prepare CPU-only data and send RHI work through the
+   render queue.
 5. **Jobs declare dependencies.** A job never spins waiting for work that
    cannot run; it returns and lets the scheduler continue.
 6. **Shutdown is a sequence, not a race.** Stop accepting work, drain the
