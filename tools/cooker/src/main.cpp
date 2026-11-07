@@ -192,18 +192,6 @@ void Report(const ImportError& error, const std::string& path) noexcept
             target = fs::path(argv[++index]);
             return true;
         };
-        auto readText = [&](std::string& target) noexcept -> bool
-        {
-            if (index + 1 >= argc)
-            {
-                error = "missing value for ";
-                error.append(argument);
-                return false;
-            }
-            target = argv[++index];
-            return true;
-        };
-
         if (argument == "--source")
         {
             if (!readValue(options.sourceRoot))
