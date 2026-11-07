@@ -1,0 +1,5 @@
+newmtl checker
+Kd 1.0 1.0 1.0
+map_Kd png_rgba.png
+newmtl flat
+Kd 0.8 0.2 0.2

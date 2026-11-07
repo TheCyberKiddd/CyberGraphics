@@ -14,9 +14,10 @@ in place, and every module test runs through the project's own test runner.
 
 - Structure and module contracts: scaffolded.
 - Build system: CMake 3.28+, C++20, Debug/Release/Shipping presets.
-- Modules: 16 defined, 11 active (`cyber_core`, `cyber_math`, `cyber_memory`,
+- Modules: 16 defined, 12 active (`cyber_core`, `cyber_math`, `cyber_memory`,
   `cyber_platform`, `cyber_perf`, `cyber_jobs`, `cyber_rhi`, `cyber_shaders`,
-  `cyber_scene`, `cyber_renderer`, `cyber_software_renderer`), 5 planned.
+  `cyber_assets`, `cyber_scene`, `cyber_renderer`, `cyber_software_renderer`),
+  4 planned.
 - CI: Windows MSVC and Linux clang jobs, plus structure and dependency checks.
 - Phase 1: complete. Local builds and tests pass in every preset, structure and
   dependency checks pass, and the Windows + Linux CI jobs are green.
@@ -180,8 +181,13 @@ tests pass in debug; the design is ADR 0013.
   Debug, Release, and Debug-ASan pass 106/106; the integration test submits RHI
   indirect batches and renders a visible million-triangle LOD scene. See the
   [summary](docs/graphics/PHASE_23.md) and [report](docs/reports/phase-23.md).
-  See the [summary](docs/graphics/PHASE_23.md) and
-  [report](docs/reports/phase-23.md).
+- Phase 24 is complete. `cyber_assets` imports glTF/GLB, OBJ, PNG, baseline
+  JPEG, DDS, and KTX2 without third-party decoders; it writes checked,
+  memory-mappable cooked mesh, texture, material, and scene assets, tracks
+  dependencies and verified cache entries, and supports safe hot reload.
+  `cyber_cooker` cooks source content offline. Debug passes 122/122, including
+  parser mutation and cooker/cache acceptance tests. See the
+  [summary](docs/graphics/PHASE_24.md) and [report](docs/reports/phase-24.md).
 
 See [engines/MODULES.md](engines/MODULES.md) for the module index and
 [docs/architecture/overview.md](docs/architecture/overview.md) for the design.

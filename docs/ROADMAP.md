@@ -9,8 +9,8 @@ documents are binding:
   per-phase work packages, reading list, tasks, tips, and report template.
 
 Work phases in this order. Do not tick a phase until its done-when line is
-proved with committed evidence. Phases 1-22 are complete; Phase 22's
-implementation and local validation are recorded in its report.
+proved with committed evidence. Phases 1-24 are complete; implementation and
+local validation are recorded in their phase reports.
 
 ## Part 1: Foundation (phases 1-5)
 
@@ -51,7 +51,7 @@ implementation and local validation are recorded in its report.
 - [x] **Phase 21 — Render thread and frame pipelining** — profiler proves producer/render overlap; Linux ThreadSanitizer passes the null-backend render-thread and hot-pipeline targets; resize/shutdown stress passes; Debug, Release, Debug-ASan, package/source consumers, and repository checks pass · [summary](graphics/PHASE_21.md) · [report](reports/phase-21.md) · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-21-render-thread-and-frame-pipelining) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-21-render-thread-and-frame-pipelining)
 - [x] **Phase 22 — Scene, render proxies, and culling** — Debug, Release, and Debug-ASan pass 104/104; scene ThreadSanitizer passes 2/2; package/source consumers and repository checks pass; 100,000-proxy benchmark matches all 1,681 visible handles at 2.881 ms p95 · [summary](graphics/PHASE_22.md) · [report](reports/phase-22.md) · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-22-scene-render-proxies-and-culling) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-22-scene-render-proxies-and-culling)
 - [x] **Phase 23 — Geometry pipeline** — Debug, Release, and Debug-ASan pass 106/106; the 10,000-instance scene renders over one million triangles with visible LOD regions, and the RHI indirect batches are submitted and fence-verified; package consumer and repository checks pass · [summary](graphics/PHASE_23.md) · [report](reports/phase-23.md) · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-23-geometry-pipeline) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-23-geometry-pipeline)
-- [ ] **Phase 24 — Asset import and cooked render assets** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-24-asset-import-and-cooked-render-assets) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-24-asset-import-and-cooked-render-assets)
+- [x] **Phase 24 — Asset import and cooked render assets** — Debug passes 122/122, including cooker integration and bounded fuzzing; Release, Debug-ASan, package, repository, and benchmark evidence is recorded in the report · [summary](graphics/PHASE_24.md) · [report](reports/phase-24.md) · [design](design/phase-24-assets.md) · [format](formats-cooked.md) · [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-24-asset-import-and-cooked-render-assets) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-24-asset-import-and-cooked-render-assets)
 - [ ] **Phase 25 — Engine-facing renderer interface** — [roadmap](graphics/CYBERGRAPHICS_ROADMAP.md#phase-25-engine-facing-renderer-interface) · [build guide](graphics/CYBERGRAPHICS_BUILD_GUIDE.md#phase-25-engine-facing-renderer-interface)
 
 ## Part 6: Lighting and visual quality (phases 26-31)

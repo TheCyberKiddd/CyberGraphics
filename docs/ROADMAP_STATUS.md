@@ -1,6 +1,6 @@
 # CyberGraphics roadmap status
 
-Snapshot: 2026-11-06
+Snapshot: 2026-11-07
 
 This is a factual project-state snapshot to help prepare a revised product
 roadmap. The phase names and intended outcomes follow
@@ -48,7 +48,14 @@ this document does not replace that roadmap or change any phase checkbox.
   ThreadSanitizer render-thread and hot-pipeline targets pass; package/source
   consumers and repository checks pass. See the
   [Phase 21 report](reports/phase-21.md).
-- **Phases 22-44:** not started.
+- **Phase 22:** complete; scene proxies and culling are documented in the
+  Phase 22 report.
+- **Phase 23:** complete; geometry processing and indirect batches are
+  documented in the Phase 23 report.
+- **Phase 24:** implementation and local validation complete. The Phase 24
+  report records parser/cooker tests, fuzz mutations, benchmark, and known
+  limits.
+- **Phases 25-44:** not started.
 - **Current PC:** Windows 10 Pro 22H2, Intel Core i5-6400 (4 cores), Intel HD
   Graphics 530 (1 GiB reported), Intel driver `31.0.101.2125` dated
   2023-05-24. The marker sample now submits and presents on this adapter after
@@ -121,7 +128,7 @@ this document does not replace that roadmap or change any phase checkbox.
 | 21. Render thread and frame pipelining | Complete | Bounded frame handoff, render-owner RHI access, profiler-proven overlap, and sanitizer/stress evidence. See the Phase 21 report. |
 | 22. Scene, render proxies, and culling | Complete | Copied proxies, parallel culling, screen-space LOD selection, and committed Debug/Release/ASan, sanitizer, package/source, benchmark, and repository-check evidence. See the Phase 22 report. |
 | 23. Geometry pipeline | Complete | Mesh processing, packed formats, LODs, and indirect batches; Debug/Release/ASan pass 106/106, the million-triangle LOD render and RHI indirect submission pass, and package/repository checks pass. See the Phase 23 report. |
-| 24. Asset import and cooked render assets | Not started | Owned parsers/importers, cooked formats, asset database/cooker, and hot reload. |
+| 24. Asset import and cooked render assets | Complete | In-house importers/decoders, versioned cooked formats, asset database/cooker, hot reload, and bounded parser mutation tests. See the Phase 24 report for benchmark and local validation evidence. |
 | 25. Engine-facing renderer interface | Not started | Stable versioned C plugin boundary, capabilities, scene/view/light/material API, and software-renderer implementation. |
 
 ### Part 6 — Lighting and visual quality
@@ -182,9 +189,9 @@ this document does not replace that roadmap or change any phase checkbox.
 6. **Phase 40 hardware matrix is still future work.** Introduce a small
    GPU/driver compatibility test and a fallback acceptance target well before
    advanced rendering work.
-7. **Scope and maturity differ.** Phases 1-20 are marked complete, but this
+7. **Scope and maturity differ.** Phases 1-24 are marked complete, but this
    repository is still a renderer foundation: the engine-facing public plugin
-   API (Phase 25), full PBR lighting, asset pipeline, editor integration, and
+   API (Phase 25), full PBR lighting, editor integration, and
    shipping workflow are not implemented.
 
 ## Verified validation and worktree notes
@@ -206,6 +213,6 @@ this document does not replace that roadmap or change any phase checkbox.
 
 ## Immediate next step
 
-Phase 21 is complete. Phase 22 (scene, render proxies, and culling) is next in
-roadmap order; wait for the owner to request it before starting. See the
-[Phase 21 report](reports/phase-21.md) for exact validation and known gaps.
+Phase 24 is complete. Phase 25 (engine-facing renderer interface) is next in
+roadmap order. See the [Phase 24 report](reports/phase-24.md) for exact
+validation and known gaps.

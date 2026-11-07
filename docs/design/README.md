@@ -4,6 +4,7 @@ One note per roadmap phase, written **before** implementation:
 `phase-NN-name.md`.
 
 Phase 20: [render graph design](phase-20-render-graph.md).
+Phase 24: [asset pipeline design](phase-24-assets.md).
 
 ## Template
 

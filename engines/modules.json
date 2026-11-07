@@ -248,10 +248,10 @@
       "kind": "graphics",
       "layer": 2,
       "order": 22,
-      "status": "planned",
+      "status": "active",
       "purpose": "Importers and decoders for glTF, OBJ, PNG, JPEG, DDS and KTX; cooked formats, asset database, and cooking.",
       "public_api": "include/cyber/assets/",
-      "depends": ["cyber_core", "cyber_math", "cyber_memory", "cyber_platform", "cyber_jobs", "cyber_rhi"],
+      "depends": ["cyber_core", "cyber_math", "cyber_memory", "cyber_platform"],
       "forbidden": ["cyber_renderer", "cyber_graphics"],
       "invariants": [
         "Every parser treats input as hostile and bounds-checks before use.",

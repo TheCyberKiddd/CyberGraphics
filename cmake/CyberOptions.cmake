@@ -21,6 +21,7 @@ else()
 endif()
 
 option(CYBER_BUILD_TESTS "Build the test suite" ON)
+option(CYBER_BUILD_TOOLS "Build developer tools" ON)
 option(CYBER_BUILD_SAMPLES "Build samples" ON)
 option(CYBER_BUILD_PLUGINS "Build renderer plugin products" OFF)
 option(CYBER_INSTALL "Generate install and CMake package rules" ON)

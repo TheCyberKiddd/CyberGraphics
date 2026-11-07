@@ -63,6 +63,7 @@ add_subdirectory(engines/cyber_jobs)
 add_subdirectory(engines/cyber_rhi)
 add_subdirectory(engines/cyber_shaders)
 add_subdirectory(engines/cyber_renderer)
+add_subdirectory(engines/cyber_assets)
 add_subdirectory(engines/cyber_scene)
 add_subdirectory(engines/cyber_software_renderer)
 
@@ -77,6 +78,10 @@ if(CYBER_BUILD_TESTS)
     # Phase 23 exercises scene geometry through the reference software renderer
     # without introducing a scene-to-renderer module dependency.
     add_subdirectory(tests/integration/phase23_geometry)
+endif()
+
+if(CYBER_BUILD_TOOLS)
+    add_subdirectory(tools/cooker)
 endif()
 
 if(CYBER_BUILD_SAMPLES)

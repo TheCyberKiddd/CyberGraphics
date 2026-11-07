@@ -37,6 +37,8 @@ a phase actually works.
 | [graphics/PHASE_20.md](graphics/PHASE_20.md) | Phase 20 render-graph implementation summary and validation status. |
 | [reports/phase-20.md](reports/phase-20.md) | Phase 20 report and local validation evidence. |
 | [graphics/PHASE_21.md](graphics/PHASE_21.md) | Phase 21 render-thread implementation summary and validation status. |
+| [graphics/PHASE_24.md](graphics/PHASE_24.md) | Phase 24 asset-pipeline implementation summary and validation status. |
+| [reports/phase-24.md](reports/phase-24.md) | Phase 24 report and local validation evidence. |
 | [reports/phase-21.md](reports/phase-21.md) | Phase 21 report and local validation evidence. |
 | [graphics/PHASE_15.md](graphics/PHASE_15.md) | Phase 15 implementation summary and capture status. |
 | [specs/](specs/) | RHI, shader language, and asset format specifications. |

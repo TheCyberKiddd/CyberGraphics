@@ -13,7 +13,7 @@ Planned documents:
 | `material-format.md` | 18 | Material definitions, parameters, instances, serialization. |
 | `render-graph.md` | 20 | Pass declaration, lifetime, aliasing, barriers, culling. |
 | `plugin-abi.md` | 25 | The versioned C ABI, structs, function table, capabilities. |
-| `asset-formats.md` | 24 | Cooked mesh, texture, and material containers. |
+| `../formats-cooked.md` | 24 | Cooked mesh, texture, material, and scene containers plus the database manifest. |
 | `capture-format.md` | 39 | Frame capture container and replay semantics. |
 
 ## Rules
