@@ -92,7 +92,7 @@ public:
     AssetDatabase(const AssetDatabase&) = delete;
     AssetDatabase& operator=(const AssetDatabase&) = delete;
     AssetDatabase(AssetDatabase&&) noexcept = default;
-    AssetDatabase& operator=(AssetDatabase&&) noexcept = default;
+    AssetDatabase& operator=(AssetDatabase&&) noexcept = delete;
     ~AssetDatabase() = default;
 
     /// Registers an asset under a virtual path. The path is normalized: '\\'

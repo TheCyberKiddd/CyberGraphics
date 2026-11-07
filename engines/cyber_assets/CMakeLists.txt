@@ -32,102 +32,104 @@ cyber_add_module(
     DEPENDS core math memory platform
 )
 
-cyber_add_test(
-    NAME assets_json
-    SOURCES
-        tests/json_test.cpp
-    DEPENDS assets
-)
+if(CYBER_BUILD_TESTS)
+    cyber_add_test(
+        NAME assets_json
+        SOURCES
+            tests/json_test.cpp
+        DEPENDS assets
+    )
 
-cyber_add_test(
-    NAME assets_public_headers
-    SOURCES
-        tests/public_headers_test.cpp
-    DEPENDS assets
-)
+    cyber_add_test(
+        NAME assets_public_headers
+        SOURCES
+            tests/public_headers_test.cpp
+        DEPENDS assets
+    )
 
-# Fixtures live with the repository, not the build tree, so decoders are tested
-# against real committed bytes instead of generated data.
-file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/fixtures" CYBER_ASSET_FIXTURES)
+    # Fixtures live with the repository, not the build tree, so decoders are tested
+    # against real committed bytes instead of generated data.
+    file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/fixtures" CYBER_ASSET_FIXTURES)
 
-cyber_add_test(
-    NAME assets_png
-    SOURCES
-        tests/png_test.cpp
-    DEPENDS assets
-)
-target_compile_definitions(cyber_test_assets_png PRIVATE
-    CYBER_ASSET_FIXTURES="${CYBER_ASSET_FIXTURES}")
+    cyber_add_test(
+        NAME assets_png
+        SOURCES
+            tests/png_test.cpp
+        DEPENDS assets
+    )
+    target_compile_definitions(cyber_test_assets_png PRIVATE
+        CYBER_ASSET_FIXTURES="${CYBER_ASSET_FIXTURES}")
 
-cyber_add_test(
-    NAME assets_jpeg
-    SOURCES
-        tests/jpeg_test.cpp
-    DEPENDS assets
-)
-target_compile_definitions(cyber_test_assets_jpeg PRIVATE
-    CYBER_ASSET_FIXTURES="${CYBER_ASSET_FIXTURES}")
+    cyber_add_test(
+        NAME assets_jpeg
+        SOURCES
+            tests/jpeg_test.cpp
+        DEPENDS assets
+    )
+    target_compile_definitions(cyber_test_assets_jpeg PRIVATE
+        CYBER_ASSET_FIXTURES="${CYBER_ASSET_FIXTURES}")
 
-cyber_add_test(
-    NAME assets_texture
-    SOURCES
-        tests/texture_test.cpp
-    DEPENDS assets
-)
-target_compile_definitions(cyber_test_assets_texture PRIVATE
-    CYBER_ASSET_FIXTURES="${CYBER_ASSET_FIXTURES}")
+    cyber_add_test(
+        NAME assets_texture
+        SOURCES
+            tests/texture_test.cpp
+        DEPENDS assets
+    )
+    target_compile_definitions(cyber_test_assets_texture PRIVATE
+        CYBER_ASSET_FIXTURES="${CYBER_ASSET_FIXTURES}")
 
-cyber_add_test(
-    NAME assets_cooked
-    SOURCES
-        tests/cooked_test.cpp
-    DEPENDS assets
-)
-target_compile_definitions(cyber_test_assets_cooked PRIVATE
-    CYBER_ASSET_FIXTURES="${CYBER_ASSET_FIXTURES}")
-set_tests_properties(assets_cooked PROPERTIES TIMEOUT 20)
+    cyber_add_test(
+        NAME assets_cooked
+        SOURCES
+            tests/cooked_test.cpp
+        DEPENDS assets
+    )
+    target_compile_definitions(cyber_test_assets_cooked PRIVATE
+        CYBER_ASSET_FIXTURES="${CYBER_ASSET_FIXTURES}")
+    set_tests_properties(assets_cooked PROPERTIES TIMEOUT 20)
 
-cyber_add_test(
-    NAME assets_obj
-    SOURCES
-        tests/obj_test.cpp
-    DEPENDS assets
-)
+    cyber_add_test(
+        NAME assets_obj
+        SOURCES
+            tests/obj_test.cpp
+        DEPENDS assets
+    )
 
-cyber_add_test(
-    NAME assets_gltf
-    SOURCES
-        tests/gltf_test.cpp
-    DEPENDS assets
-)
-target_compile_definitions(cyber_test_assets_gltf PRIVATE
-    CYBER_ASSET_FIXTURES="${CYBER_ASSET_FIXTURES}")
+    cyber_add_test(
+        NAME assets_gltf
+        SOURCES
+            tests/gltf_test.cpp
+        DEPENDS assets
+    )
+    target_compile_definitions(cyber_test_assets_gltf PRIVATE
+        CYBER_ASSET_FIXTURES="${CYBER_ASSET_FIXTURES}")
 
-cyber_add_test(
-    NAME assets_database
-    SOURCES
-        tests/asset_database_test.cpp
-    DEPENDS assets
-)
+    cyber_add_test(
+        NAME assets_database
+        SOURCES
+            tests/asset_database_test.cpp
+        DEPENDS assets
+    )
 
-cyber_add_test(
-    NAME assets_library
-    SOURCES
-        tests/asset_library_test.cpp
-    DEPENDS assets
-)
-target_compile_definitions(cyber_test_assets_library PRIVATE
-    CYBER_ASSET_FIXTURES="${CYBER_ASSET_FIXTURES}")
+    cyber_add_test(
+        NAME assets_library
+        SOURCES
+            tests/asset_library_test.cpp
+        DEPENDS assets
+    )
+    target_compile_definitions(cyber_test_assets_library PRIVATE
+        CYBER_ASSET_FIXTURES="${CYBER_ASSET_FIXTURES}")
 
-cyber_add_test(
-    NAME assets_fuzz
-    SOURCES
-        tests/fuzz_test.cpp
-    DEPENDS assets
-)
-target_compile_definitions(cyber_test_assets_fuzz PRIVATE
-    CYBER_ASSET_FIXTURES="${CYBER_ASSET_FIXTURES}")
-set_tests_properties(assets_fuzz PROPERTIES TIMEOUT 20)
+    cyber_add_test(
+        NAME assets_fuzz
+        SOURCES
+            tests/fuzz_test.cpp
+        DEPENDS assets
+    )
+    target_compile_definitions(cyber_test_assets_fuzz PRIVATE
+        CYBER_ASSET_FIXTURES="${CYBER_ASSET_FIXTURES}")
+    set_tests_properties(assets_fuzz PROPERTIES TIMEOUT 20)
+endif()
 
 # Not registered with CTest: the phase criterion needs measured evidence, and a
 # shared CI machine cannot promise a stable ratio. Run it in the release profile.
