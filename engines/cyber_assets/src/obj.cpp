@@ -378,7 +378,6 @@ ImportResult<ObjImport> ImportObj(cyber::memory::Span<const Byte> text, Allocato
     DynamicArray<Vec3> normals(allocator);
     DynamicArray<u32> faceCorners(allocator);
     CornerMap corners(allocator);
-    StringView pendingMaterialName;
 
     u32 currentMaterial = 0;
     u32 submeshStart = 0;
